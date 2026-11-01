@@ -1,7 +1,9 @@
 name: iOS and inspection tools
 on:
   push:
+    paths-ignore: ['**/*.md', 'LICENSE']
   pull_request:
+    paths-ignore: ['**/*.md', 'LICENSE']
   workflow_dispatch:
 permissions:
   contents: read

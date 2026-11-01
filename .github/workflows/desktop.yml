@@ -1,7 +1,9 @@
 name: Native macOS app and DMG
 on:
   push:
+    paths-ignore: ['**/*.md', 'LICENSE']
   pull_request:
+    paths-ignore: ['**/*.md', 'LICENSE']
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,19 +31,35 @@ jobs:
           xcodebuild -project GrokBot.xcodeproj -scheme GrokBotMac
           -configuration Debug -destination 'platform=macOS'
           -resultBundlePath artifacts/macos-tests.xcresult
+          -only-testing:GrokBotMacTests
           CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
-      - name: Export native view screenshots
-        run: xcrun xcresulttool export attachments --path artifacts/macos-tests.xcresult --output-path artifacts/visuals
       - name: Build universal app and DMG
         run: ./scripts/build-macos.sh
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: OpenGrokBot-macOS
           path: |
             artifacts/macos/*.dmg
             artifacts/macos/*.sha256
+          if-no-files-found: error
+      - name: Capture and verify real application windows
+        timeout-minutes: 8
+        run: >-
+          xcodebuild -project GrokBot.xcodeproj -scheme GrokBotMac
+          -configuration Debug -destination 'platform=macOS'
+          -resultBundlePath artifacts/macos-ui-tests.xcresult
+          -only-testing:GrokBotMacUITests
+          CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
+      - name: Export native view screenshots
+        if: always()
+        run: xcrun xcresulttool export attachments --path artifacts/macos-ui-tests.xcresult --output-path artifacts/visuals
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: OpenGrokBot-macOS-visuals
+          path: |
             artifacts/macos-tests.xcresult
+            artifacts/macos-ui-tests.xcresult
             artifacts/visuals
           if-no-files-found: warn
 
