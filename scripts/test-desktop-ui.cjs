@@ -55,8 +55,27 @@ const assert = require('node:assert/strict');
     await page.emulateMedia({reducedMotion:'reduce'});
     await page.getByRole('button',{name:'Settings',exact:true}).click();
     assert.equal(await page.locator('#panel').evaluate(el=>getComputedStyle(el).animationName),'none');
+    const vaultPage = await browser.newPage();
+    const { previewWorkspace } = require('../desktop-windows/app/workspace.cjs');
+    await vaultPage.addInitScript(value => {
+      window.desktop = {
+        load: async () => ({ok:true,value}),
+        vaultList: async () => ({ok:true,value:[{id:'test-secret',title:'Test secure note'}]}),
+        vaultRead: () => new Promise(resolve => { window.finishSecretRead = () => resolve({ok:true,value:'private-test-value'}); })
+      };
+    }, previewWorkspace());
+    await vaultPage.goto('http://127.0.0.1:4174');
+    await vaultPage.bringToFront();
+    await vaultPage.getByRole('button',{name:'Settings',exact:true}).click();
+    await vaultPage.getByRole('button',{name:'Vault',exact:false}).click();
+    await vaultPage.getByRole('button',{name:'Reveal',exact:true}).click();
+    await vaultPage.evaluate(()=>{ window.dispatchEvent(new Event('blur')); window.finishSecretRead(); });
+    await vaultPage.waitForTimeout(50);
+    assert.equal(await vaultPage.locator('.revealed-secret').isVisible(),false,'A delayed secret read must not reveal after loss of focus');
+    assert.equal(await vaultPage.locator('.revealed-secret').textContent(),'');
+    await vaultPage.close();
     assert.deepEqual(errors,[],'No uncaught JavaScript errors');
-    console.log('PASS: desktop local persistence, Bot creation, text escaping, failed-save recovery, catalog filtering, honest connection status, themes, reduced motion, and screenshots.');
+    console.log('PASS: desktop local persistence, Bot creation, text escaping, failed-save recovery, catalog filtering, honest connection status, themes, reduced motion, delayed vault reveal protection, and screenshots.');
   } finally {
     if (browser) await browser.close();
     server.kill();

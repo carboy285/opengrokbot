@@ -18,6 +18,7 @@ let workspace = structuredClone(preview);
 let selected = workspace.bots[0]?.id;
 let search = '';
 let toastTimer;
+let focusGeneration = 0;
 const drafts = new Map();
 const dialog = $('#panel');
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 5000); }
@@ -165,7 +166,7 @@ async function renderVault(page) {
   try { items = await result(bridge.vaultList()); } catch(error) { page.append(node('div','unavailable',error.message)); return; }
   for (const item of items) {
     const row=node('div','secret-row'); const revealed=node('div','revealed-secret'); revealed.hidden=true;
-    const reveal=button('Reveal',async()=>{ if (!revealed.hidden) { revealed.textContent=''; revealed.hidden=true; reveal.textContent='Reveal'; return; } try { revealed.textContent=await result(bridge.vaultRead(item.id)); revealed.hidden=false; reveal.textContent='Hide'; } catch(error) { toast(error.message); } });
+    const reveal=button('Reveal',async()=>{ if (!revealed.hidden) { revealed.textContent=''; revealed.hidden=true; reveal.textContent='Reveal'; return; } try { const generation=focusGeneration; const value=await result(bridge.vaultRead(item.id)); if(generation!==focusGeneration||!document.hasFocus()||!dialog.open||!revealed.isConnected)return; revealed.textContent=value; revealed.hidden=false; reveal.textContent='Hide'; } catch(error) { toast(error.message); } });
     const remove=button('Delete',()=>showDeleteSecret(item));
     append(row,node('strong','',item.title),reveal,remove); append(page,row,revealed);
   }
@@ -188,7 +189,7 @@ $('#draft').addEventListener('input',()=>{ drafts.set(selected,$('#draft').value
 $('#search-button').addEventListener('click',()=>{const slot=$('#search-slot');if(slot.firstChild){slot.replaceChildren();search='';render();return;}const field=node('input','search-input');field.placeholder='Search Bots';field.setAttribute('aria-label','Search Bots');field.addEventListener('input',()=>{search=field.value;render();});slot.append(field);field.focus();});
 $('#new-button').addEventListener('click',showNewBot); $('#profile-button').addEventListener('click',()=>showSettings()); $('#apps-button').addEventListener('click',showApps); $('#status-button').addEventListener('click',()=>showConnection()); $('#attachment-button').addEventListener('click',()=>{const content=panel('Conversation actions');append(content,button('Export conversation…',()=>exportConversation()),button('Attachment status',()=>showConnection('Files cannot be uploaded until the Grok Bot connection protocol is verified. Nothing has been uploaded.')));});
 for(const control of document.querySelectorAll('[data-window]')) control.addEventListener('click',()=>window.desktop?.windowAction(control.dataset.window));
-window.addEventListener('blur',()=>{for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
+window.addEventListener('blur',()=>{focusGeneration++;for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key==='n'){event.preventDefault();showNewBot();}else if(event.key===','){event.preventDefault();showSettings();}else if(event.key==='f'){event.preventDefault();$('#search-button').click();}else if(event.key==='Enter'&&!dialog.open){event.preventDefault();$('#composer').requestSubmit();}});
 try { workspace=await result(bridge.load());selected=workspace.bots[0]?.id; }catch(error){toast(error.message);}
 render();
