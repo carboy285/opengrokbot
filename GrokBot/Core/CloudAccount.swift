@@ -162,6 +162,7 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     func pin(_ device: CloudDevice) throws {
         guard let owner = session?.user.id else { throw CloudError.signedOut }
         if let old = pinnedHosts[device.id.uuidString], old != device.public_key { throw CloudError.message("The desktop’s identity changed. Sign out and verify the desktop before reconnecting.") }
+        if pinnedHosts[device.id.uuidString] == device.public_key { return }
         var next = pinnedHosts; next[device.id.uuidString] = device.public_key
         try secrets.save(JSONEncoder().encode(next),account:"hosts-" + owner.uuidString); pinnedHosts = next
     }

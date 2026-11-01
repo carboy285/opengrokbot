@@ -12,7 +12,7 @@ final class CloudRelayClient {
         let id = UUID(), owner = account.session?.user.id
         let request = CloudRequest(method:command == nil ? "GET":"POST",target:target,body:try command.map { try CloudCoding.encoder().encode($0) } ?? Data())
         try await account.send(CloudCoding.encoder().encode(request),to:peer,id:id,kind:"request")
-        let deadline = Date().addingTimeInterval(35)
+        let started = Date(), deadline = Date().addingTimeInterval(35)
         while Date() < deadline {
             try Task.checkCancellation()
             guard account.session?.user.id == owner else { throw CloudError.signedOut }
@@ -27,7 +27,8 @@ final class CloudRelayClient {
                     throw CloudError.message(object?["error"] ?? "Desktop request failed (\(response.status)).")
                 }; return response
             }
-            try await Task.sleep(for:.milliseconds(500))
+            let elapsed = Date().timeIntervalSince(started)
+            try await Task.sleep(for: elapsed < 2 ? .milliseconds(100) : elapsed < 6 ? .milliseconds(250) : .milliseconds(500))
         }; throw CloudError.timeout
     }
 }

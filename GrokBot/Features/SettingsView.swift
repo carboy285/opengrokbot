@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var remote: RemoteController
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("appearance") private var appearance = "light"
     @State private var disconnect = false
     var body: some View {
         NavigationStack {

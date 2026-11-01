@@ -23,6 +23,11 @@ struct RemoteBotDetailView: View {
                         BotAvatar(color: bot.color, size: 80, appearance: bot.appearance)
                     }.buttonStyle(.plain).accessibilityLabel("Change Bot avatar").disabled(!remote.online)
                     Text(bot.name).font(.title2.weight(.medium))
+                    Button {
+                        remote.setPinned(!remote.isPinned(bot), bot: bot)
+                    } label: {
+                        Label(remote.isPinned(bot) ? "Unpin Bot" : "Pin to top", systemImage: remote.isPinned(bot) ? "pin.slash" : "pin")
+                    }.buttonStyle(.bordered)
                     Picker("Bot details",selection:$tab) { Text("Details").tag("Details");Text("Library").tag("Library");Text("Computer").tag("Computer") }.pickerStyle(.segmented)
                     if tab == "Details" {
                         if let members = bot.memberIDs {

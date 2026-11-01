@@ -21,21 +21,24 @@ struct BotAvatar: View {
     var appearance: BotAppearance? = nil
     var body: some View {
         Group {
-        if let appearance { CustomBotAvatar(appearance: appearance, size: size) }
-        else { ZStack {
-            RoundedRectangle(cornerRadius: size * 0.36)
-                .fill(Palette.bot(color))
-                .rotationEffect(.degrees(color == "pink" ? -12 : -20))
-            HStack(spacing: size * 0.12) {
-                Capsule().frame(width: size * 0.1, height: size * 0.26)
-                Capsule().frame(width: size * 0.1, height: size * 0.26)
+            if let appearance {
+                CustomBotAvatar(appearance: appearance, size: size)
+            } else if color != "white" {
+                CustomBotAvatar(appearance: BotAppearance(
+                    shape: color == "pink" ? .circle : color == "ochre" ? .hexagon : .pebble,
+                    color: color), size: size)
+            } else {
+                ZStack {
+                    Circle().fill(Color.primary)
+                    HStack(spacing: size * 0.12) {
+                        Capsule().frame(width: size * 0.1, height: size * 0.25)
+                        Capsule().frame(width: size * 0.09, height: size * 0.23).offset(y: -size * 0.035)
+                    }
+                    .foregroundStyle(Palette.background).rotationEffect(.degrees(-28))
+                    .offset(x: size * 0.12, y: -size * 0.12)
+                }
             }
-            .foregroundStyle(Color(uiColor: .systemBackground))
-            .rotationEffect(.degrees(-25))
-        } }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        }.frame(width: size, height: size).accessibilityHidden(true)
     }
 }
 

@@ -13,16 +13,27 @@ struct RootView: View {
     @State private var filter = RosterFilter.all
     @State private var deleting: Bot?
     @FocusState private var searching: Bool
-    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 108
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 104
+    @State private var inspectedBot: Bot?
 
-    private var featured: Bot? { model.workspace.bots.first(where: { $0.isMain == true }) ?? model.workspace.bots.first }
-    private var showFeatured: Bool { model.search.isEmpty && filter == .all }
-    private var bots: [Bot] {
+    private var matchingBots: [Bot] {
         model.visibleBots.filter { bot in
-            (!showFeatured || bot.id != featured?.id) &&
             (filter != .working || remote.running.contains(bot.id)) &&
             (filter != .groups || bot.memberIDs != nil)
         }
+    }
+    private var pinnedBots: [Bot] {
+        let ids = remote.pinnedBotIDs ?? model.workspace.bots.filter { $0.isMain == true }.map(\.id)
+        return matchingBots.filter { remote.isPinned($0) }.sorted {
+            (ids.firstIndex(of: $0.id) ?? 0) < (ids.firstIndex(of: $1.id) ?? 0)
+        }
+    }
+    private var bots: [Bot] { matchingBots.filter { !remote.isPinned($0) } }
+    private var initials: String {
+        guard remote.account.signedIn else { return "" }
+        let name = remote.account.email.split(separator: "@").first.map(String.init) ?? ""
+        let letters = name.split(whereSeparator: { !$0.isLetter }).prefix(2).compactMap(\.first)
+        return letters.isEmpty ? "" : String(letters).uppercased()
     }
 
     var body: some View {
@@ -39,6 +50,12 @@ struct RootView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $createBot) { CreateBotView() }
+            .sheet(item: $inspectedBot) { bot in
+                NavigationStack {
+                    RemoteBotDetailView(botID: bot.id)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { inspectedBot = nil } } }
+                }.presentationDetents([.large]).presentationDragIndicator(.visible)
+            }
             .navigationDestination(for: Bot.self) { bot in ConversationView(bot: bot) }
             .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its conversations?", isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }
@@ -54,7 +71,13 @@ struct RootView: View {
     private var header: some View {
         VStack(spacing: 15) {
             HStack {
-                RoundButton(symbol: "person.crop.circle", label: "Account and settings") { settings = true }
+                Button { settings = true } label: {
+                    Group {
+                        if initials.isEmpty { Image(systemName: "person.crop.circle").font(.system(size: 25)) }
+                        else { Text(initials).font(.system(size: 16, weight: .medium)).foregroundStyle(.secondary) }
+                    }.frame(width: 48, height: 48).background(.primary.opacity(0.04), in: Circle())
+                        .padding(4).glassChrome(in: Circle())
+                }.buttonStyle(.plain).accessibilityLabel("Account and settings")
                 Spacer()
                 if remote.hasSnapshot {
                     RoundButton(symbol: "plus", label: "Create a Bot") { createBot = true }.disabled(!remote.online)
@@ -67,31 +90,21 @@ struct RootView: View {
     private var roster: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if showFeatured, let bot = featured {
-                    NavigationLink(value: bot) {
-                        VStack(spacing: 16) {
-                            ZStack(alignment: .bottomTrailing) {
-                                BotAvatar(color: bot.color, size: min(heroSize, 150), appearance: bot.appearance)
-                                Image(systemName: "star.fill").font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.white).frame(width: 27, height: 27)
-                                    .background(.orange, in: Circle())
-                                    .overlay(Circle().stroke(Palette.background, lineWidth: 3)).offset(x: 3, y: 3)
-                            }
-                            Text(bot.name).font(.title2.weight(.medium)).foregroundStyle(.primary)
-                            Text("Your assistant").font(.subheadline).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity).padding(.top, 36).padding(.bottom, 42)
-                            .contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel("Open \(bot.name), your main assistant")
+                if !pinnedBots.isEmpty {
+                    if pinnedBots.count == 1, let bot = pinnedBots.first {
+                        pinnedTile(bot, large: true).frame(maxWidth: .infinity)
+                            .padding(.top, 32).padding(.bottom, 28)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 18)], spacing: 28) {
+                            ForEach(pinnedBots) { bot in pinnedTile(bot, large: false) }
+                        }.padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 26)
+                    }
                 }
                 ForEach(bots) { bot in
                     NavigationLink(value: bot) { botRow(bot) }.buttonStyle(.plain)
-                        .contextMenu {
-                            if bot.isMain != true {
-                                Button("Delete Bot", systemImage: "trash", role: .destructive) { deleting = bot }.disabled(!remote.online)
-                            }
-                        }
+                        .contextMenu { botActions(bot) }
                 }
-                if bots.isEmpty, !showFeatured || featured == nil {
+                if matchingBots.isEmpty {
                     ContentUnavailableView(filter == .working ? "No Bots working" : filter == .groups ? "No groups yet" : "No matches",
                         systemImage: filter == .working ? "sparkles" : "magnifyingglass",
                         description: Text(filter == .all ? "Try another name or topic." : filter == .working ? "Your running Bots will appear here." : "Groups created on your Mac appear here."))
@@ -103,13 +116,41 @@ struct RootView: View {
         .scrollDismissesKeyboard(.interactively)
     }
 
+    private func pinnedTile(_ bot: Bot, large: Bool) -> some View {
+        Button { inspectedBot = bot } label: {
+            VStack(spacing: large ? 17 : 12) {
+                ZStack(alignment: .bottomTrailing) {
+                    BotAvatar(color: bot.color, size: large ? min(heroSize, 140) : 64, appearance: bot.appearance)
+                    Image(systemName: "star.fill").font(.system(size: large ? 11 : 8, weight: .bold))
+                        .foregroundStyle(.white).frame(width: large ? 25 : 20, height: large ? 25 : 20)
+                        .background(.orange, in: Circle())
+                        .overlay(Circle().stroke(Palette.background, lineWidth: 3)).offset(x: 2, y: 2)
+                }
+                Text(bot.name).font(large ? .title3 : .subheadline).foregroundStyle(.primary)
+                    .multilineTextAlignment(.center).lineLimit(2)
+            }.frame(maxWidth: .infinity).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel("\(bot.name), pinned. Open Bot details")
+            .contextMenu { botActions(bot) }
+    }
+
+    @ViewBuilder
+    private func botActions(_ bot: Bot) -> some View {
+        Button(remote.isPinned(bot) ? "Unpin Bot" : "Pin to top", systemImage: remote.isPinned(bot) ? "pin.slash" : "pin") {
+            remote.setPinned(!remote.isPinned(bot), bot: bot)
+        }
+        Button("Bot details", systemImage: "info.circle") { inspectedBot = bot }
+        if bot.isMain != true {
+            Button("Delete Bot", systemImage: "trash", role: .destructive) { deleting = bot }.disabled(!remote.online)
+        }
+    }
+
     private func botRow(_ bot: Bot) -> some View {
         let latest = model.entries(for: bot).last
         return HStack(spacing: 18) {
-            BotAvatar(color: bot.color, size: 50, appearance: bot.appearance)
+            BotAvatar(color: bot.color, size: 46, appearance: bot.appearance)
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(bot.name).font(.title3.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                    Text(bot.name).font(.system(.body, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                     Spacer(minLength: 0)
                     if let date = latest?.date {
                         Text(date, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
@@ -125,9 +166,9 @@ struct RootView: View {
                         .font(.body).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.quaternary)
+            Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium)).foregroundStyle(.quaternary)
         }
-        .padding(.horizontal, 24).padding(.vertical, 23).contentShape(Rectangle())
+        .padding(.horizontal, 24).padding(.vertical, 19).contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 

@@ -5,7 +5,7 @@ struct GrokBotApp: App {
     @StateObject private var model = AppModel()
     @StateObject private var remote = RemoteController()
     @Environment(\.scenePhase) private var phase
-    @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("appearance") private var appearance = "light"
 
     var body: some Scene {
         WindowGroup {
@@ -13,7 +13,10 @@ struct GrokBotApp: App {
                 .environmentObject(model).environmentObject(remote)
                 .onAppear { remote.attach(model) }
                 .onOpenURL { remote.receive($0) }
-                .onChange(of: phase) { _, phase in remote.setActive(phase == .active) }
+                .onChange(of: phase) { _, phase in
+                    if phase == .active { remote.setActive(true) }
+                    else if phase == .background { remote.setActive(false) }
+                }
                 .sheet(isPresented: $remote.showConnection) { ConnectDesktopView().environmentObject(remote) }
                 .alert("Desktop request failed", isPresented: Binding(get: { remote.error != nil && !remote.showConnection }, set: { if !$0 { remote.error = nil } })) { Button("OK") { remote.error = nil } } message: { Text(remote.error ?? "") }
                 .preferredColorScheme(appearance == "system" ? nil : (appearance == "dark" ? .dark : .light))

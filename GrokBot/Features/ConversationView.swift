@@ -80,7 +80,7 @@ struct ConversationView: View {
                 }.buttonStyle(.plain).frame(maxWidth: 220).accessibilityLabel("Bot details for \(bot.name)")
             }.padding(.horizontal, 20).padding(.top, 8)
             if !remote.online { RemoteConnectionBanner() }
-        }.padding(.bottom, 10).background(Palette.background)
+        }.padding(.bottom, 10).background(.ultraThinMaterial)
     }
 
     private var emptyConversation: some View {

@@ -13,6 +13,7 @@ final class RemoteController: ObservableObject {
     @Published private(set) var running: Set<UUID> = []
     @Published private(set) var providers: [RemoteProvider] = []
     @Published private(set) var defaultProvider: CLIProvider?
+    @Published private(set) var pinnedBotIDs: [UUID]?
     @Published var showConnection = false
     @Published var busy = false
     @Published var drafts: [UUID:String] = [:]
@@ -37,7 +38,6 @@ final class RemoteController: ObservableObject {
         account.$session.map { $0?.user.id }.removeDuplicates().sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.clearState(); self?.startPolling() }
         }.store(in:&subscriptions)
-        startPolling()
     }
     func receive(_ url: URL) { if url.host == "auth" { showConnection = true } }
     func select(_ device: CloudDevice) {
@@ -45,6 +45,7 @@ final class RemoteController: ObservableObject {
             try account.pin(device)
             guard let owner = account.session?.user.id else { throw CloudError.signedOut }
             try secrets.save(Data(device.id.uuidString.utf8),account:owner.uuidString)
+            try secrets.save(JSONEncoder().encode(device), account: "last-host-" + owner.uuidString)
             clearState(); connection = device; hostName = device.name; startPolling()
         } catch { self.error = error.localizedDescription }
     }
@@ -54,25 +55,30 @@ final class RemoteController: ObservableObject {
     }
     private func clearState() {
         epoch = UUID(); polling?.cancel(); polling = nil; connection = nil; state = nil
-        online = false; hasSnapshot = false; needsApproval = false; running = []; providers = []; defaultProvider = nil
+        online = false; hasSnapshot = false; needsApproval = false; running = []; providers = []; defaultProvider = nil; pinnedBotIDs = nil
         drafts = [:]; pendingSends = [:]
         model?.applyRemoteSnapshot(Workspace()); model?.leavePreview()
     }
     func setActive(_ active: Bool) {
+        if self.active == active, (!active || polling != nil) { return }
         self.active = active
         if active { startPolling() } else { polling?.cancel(); polling = nil; online = false }
     }
     private func startPolling(autoSelect: Bool = true) {
         polling?.cancel()
         guard active, account.signedIn else { status = "Sign in to connect your desktop"; return }
+        restoreHost()
         if connection == nil { status = "Finding your Mac…" }
         let current = epoch
         polling = Task {
-            var ticks = 0
+            var nextDiscovery = connection == nil ? Date.distantPast : Date().addingTimeInterval(15)
             while !Task.isCancelled, current == epoch {
                 do {
-                    if ticks % 10 == 0 {
+                    if Date() >= nextDiscovery {
                         try await account.sync()
+                        try Task.checkCancellation()
+                        guard current == epoch else { return }
+                        nextDiscovery = Date().addingTimeInterval(connection == nil ? 2 : 20)
                         if connection == nil, autoSelect, let owner = account.session?.user.id {
                             let selection = try secrets.read(account:owner.uuidString).flatMap { String(data:$0,encoding:.utf8) }
                             let saved = selection.flatMap(UUID.init(uuidString:))
@@ -98,15 +104,16 @@ final class RemoteController: ObservableObject {
                             ? "Open OpenGrokBot on your Mac and sign in with this account. In Settings → Computer, make sure Allow phone access is on."
                             : "Choose your Mac in Connect Desktop to load its Bots."
                     }
-                    ticks += 1
                 } catch {
                     if Task.isCancelled || current != epoch { return }
-                    online = false; status = error.localizedDescription; ticks = 0
+                    online = false; status = error.localizedDescription
+                    nextDiscovery = Date.distantPast
                     if let cloudError = error as? CloudError, case .approvalRequired = cloudError {
                         needsApproval = true
                     }
                 }
-                try? await Task.sleep(for:.seconds(2))
+                let interval: Duration = !online ? .seconds(2) : running.isEmpty ? .milliseconds(700) : .milliseconds(250)
+                try? await Task.sleep(for: interval)
             }
         }
     }
@@ -123,10 +130,50 @@ final class RemoteController: ObservableObject {
                 guard snapshot.protocolVersion == 1 else { throw RemoteError.incompatible }
                 state = snapshot; hostName = snapshot.hostName; running = Set(snapshot.running)
                 providers = snapshot.providers; defaultProvider = snapshot.defaultProvider
-                model?.applyRemoteSnapshot(snapshot.workspace); if !hasSnapshot { showConnection = false }; hasSnapshot = true
+                model?.applyRemoteSnapshot(snapshot.workspace)
+                if !hasSnapshot {
+                    loadPins(); showConnection = false
+                    if let owner = account.session?.user.id {
+                        try? secrets.save(JSONEncoder().encode(peer), account: "last-host-" + owner.uuidString)
+                    }
+                }
+                hasSnapshot = true
             } catch { state = nil; throw error }
         }
         needsApproval = false; online = true; status = "Connected to \(hostName)"
+    }
+    private func restoreHost() {
+        guard connection == nil, let owner = account.session?.user.id else { return }
+        do {
+            guard let selection = try secrets.read(account: owner.uuidString),
+                  let id = String(data: selection, encoding: .utf8).flatMap(UUID.init(uuidString:)),
+                  let data = try secrets.read(account: "last-host-" + owner.uuidString) else { return }
+            let host = try JSONDecoder().decode(CloudDevice.self, from: data)
+            guard host.id == id else { return }
+            try account.pin(host)
+            connection = host; hostName = host.name
+        } catch { self.error = error.localizedDescription }
+    }
+    private var pinsKey: String? {
+        guard let owner = account.session?.user.id, let host = connection?.id else { return nil }
+        return "pinned-bots-" + owner.uuidString + "-" + host.uuidString
+    }
+    private func loadPins() {
+        guard let key = pinsKey else { return }
+        do {
+            if let data = try secrets.read(account: key) { pinnedBotIDs = try JSONDecoder().decode([UUID].self, from: data) }
+        } catch { self.error = "Your pinned Bots could not be loaded. Unlock this iPhone and try again." }
+    }
+    func isPinned(_ bot: Bot) -> Bool { pinnedBotIDs?.contains(bot.id) ?? (bot.isMain == true) }
+    func setPinned(_ pinned: Bool, bot: Bot) {
+        guard let key = pinsKey else { return }
+        var ids = pinnedBotIDs ?? model?.workspace.bots.filter { $0.isMain == true }.map(\.id) ?? []
+        ids.removeAll { $0 == bot.id }
+        if pinned { ids.append(bot.id) }
+        do {
+            try secrets.save(JSONEncoder().encode(ids), account: key)
+            pinnedBotIDs = ids
+        } catch { self.error = "Your pinned Bots could not be saved. Unlock this iPhone and try again." }
     }
     @discardableResult
     func command(_ command: RemoteCommand) async -> Bool {

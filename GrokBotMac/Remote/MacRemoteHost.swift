@@ -47,12 +47,18 @@ final class MacRemoteHost: ObservableObject {
         guard account.signedIn, app != nil, !enabled else { return }
         enabled = true; preferences.set(true,forKey:"cloudHostEnabled"); feedback = "Connecting to your account…"
         polling = Task { [weak self] in
-            var ticks = 0
+            var nextHeartbeat = Date.distantPast
+            var lastRequest = Date.distantPast
             while !Task.isCancelled {
                 guard let self, self.enabled else { return }
+                var retrying = false
                 do {
-                    if ticks % 15 == 0 { try await self.account.sync(available:true) }
+                    if Date() >= nextHeartbeat {
+                        try await self.account.sync(available:true)
+                        nextHeartbeat = Date().addingTimeInterval(20)
+                    }
                     let packets = try await self.account.poll()
+                    if !packets.isEmpty { lastRequest = Date() }
                     for packet in packets {
                         try Task.checkCancellation()
                         // A phone can register between heartbeats. Discover it before
@@ -91,10 +97,11 @@ final class MacRemoteHost: ObservableObject {
                             try await self.account.acknowledge(packet)
                         } catch { try? await self.account.acknowledge(packet) }
                     }
-                    self.feedback = "Phone access is on. Approve a phone below to allow control."
-                    ticks += 1
-                } catch { self.feedback = error.localizedDescription; ticks = 0 }
-                try? await Task.sleep(for:.seconds(1))
+                    let message = "Phone access is on. Approve a phone below to allow control."
+                    if self.feedback != message { self.feedback = message }
+                } catch { self.feedback = error.localizedDescription; nextHeartbeat = .distantPast; retrying = true }
+                let interval: Duration = retrying ? .seconds(2) : Date().timeIntervalSince(lastRequest) < 10 ? .milliseconds(250) : .milliseconds(700)
+                try? await Task.sleep(for: interval)
             }
         }
     }
