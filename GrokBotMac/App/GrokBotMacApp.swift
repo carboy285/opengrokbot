@@ -19,7 +19,10 @@ struct GrokBotMacApp: App {
                 .onAppear {
                     if !app.previewEnabled { app.enterPreview() }
                     desktop.selectFirst(in: app)
+                    desktop.refreshCLIs()
+                    if !UserDefaults.standard.bool(forKey: "localCLISetupComplete") { desktop.panel = .setup }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in desktop.stopAll() }
                 .alert("Couldn’t complete that action", isPresented: Binding(get: { app.errorMessage != nil }, set: { if !$0 { app.errorMessage = nil } })) {
                     Button("OK") { app.errorMessage = nil }
                 } message: { Text(app.errorMessage ?? "") }
@@ -29,7 +32,7 @@ struct GrokBotMacApp: App {
         .defaultSize(width: 1370, height: 940)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Preview Bot…") { desktop.panel = .newBot }.keyboardShortcut("n")
+                Button("New Bot…") { desktop.panel = .newBot }.keyboardShortcut("n")
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { desktop.openSettings() }.keyboardShortcut(",")

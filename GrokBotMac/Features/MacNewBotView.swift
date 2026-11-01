@@ -32,9 +32,9 @@ struct MacNewBotView: View {
             }.frame(maxWidth: 500)
             Spacer()
             HStack {
-                Text("Creates a local preview Bot. No agent is started.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                Text("Creates a Bot with its own AI CLI conversation.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
                 Spacer()
-                MacPillButton(title: "Create preview Bot", prominent: true) {
+                MacPillButton(title: "Create Bot", prominent: true) {
                     if app.addBot(name: name, purpose: purpose, color: color) {
                         desktop.selectedID = app.workspace.bots.last?.id
                         desktop.panel = nil

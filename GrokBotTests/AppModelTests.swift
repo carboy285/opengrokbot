@@ -36,7 +36,8 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
         let model = AppModel(store: store)
         model.enterPreview()
-        let bot = try XCTUnwrap(model.workspace.bots.first)
+        XCTAssertTrue(model.addBot(name: "My Bot", purpose: "Help", color: "purple"))
+        let bot = try XCTUnwrap(model.workspace.bots.last)
         model.removeBot(bot)
         XCTAssertFalse(model.workspace.bots.contains(where: { $0.id == bot.id }))
         XCTAssertTrue(model.entries(for: bot).isEmpty)

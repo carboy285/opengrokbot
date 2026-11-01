@@ -6,7 +6,7 @@ struct MacSettingsView: View {
     @EnvironmentObject private var desktop: MacAppModel
     @AppStorage("macAppearance") private var appearance = "dark"
     @AppStorage("spellChecking") private var spellChecking = true
-    @AppStorage("profileName") private var profileName = "Local preview"
+    @AppStorage("profileName") private var profileName = "You"
     @State private var reset = false
 
     var body: some View {
@@ -25,7 +25,7 @@ struct MacSettingsView: View {
                     }.buttonStyle(.plain).accessibilityAddTraits(desktop.settingsTab == tab ? [.isSelected] : [])
                 }
                 Spacer()
-                Text("OpenGrokBot 0.2.0").font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
+                Text("OpenGrokBot 0.3.0").font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
             }
             .padding(16).padding(.top, 6).frame(width: 238).background(MacTheme.sidebar)
             Rectangle().fill(MacTheme.line).frame(width: 1)
@@ -40,17 +40,17 @@ struct MacSettingsView: View {
                         switch desktop.settingsTab {
                         case .general: general
                         case .computer: computer
-                        case .permissions: unavailable(title: "Permissions belong to your connected Bot", detail: "Auto-review and approval rules are managed by Grok Bot. No rules are read or changed in offline preview.", icon: "shield")
+                        case .permissions: unavailable(title: "Your CLI keeps its permissions", detail: "Codex runs with read-only workspace access. Other CLIs keep their own configured permissions. This app does not add approval-bypass flags or auto-approve tools.", icon: "shield")
                         case .vault: MacVaultView()
-                        case .usage: unavailable(title: "No usage to report", detail: "This app has made no model or service requests. Your Grok Bot subscription usage will be available after a verified connection.", icon: "chart.bar")
+                        case .usage: unavailable(title: "AI usage belongs to your CLI account", detail: "OpenGrokBot has no subscription or inference fees of its own. Your chosen CLI provider may have usage limits or charges. No account usage percentage is guessed here.", icon: "chart.bar")
                         case .updates: updates
                         }
                     }.padding(.horizontal, 36).padding(.bottom, 34).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }.background(MacTheme.canvas)
         }
-        .confirmationDialog("Replace all local preview Bots and notes?", isPresented: $reset, titleVisibility: .visible) {
-            Button("Reset preview", role: .destructive) { app.resetPreview(); desktop.selectedID = app.workspace.bots.first?.id }
+        .confirmationDialog("Reset all Bots and conversations?", isPresented: $reset, titleVisibility: .visible) {
+            Button("Reset conversations", role: .destructive) { desktop.stopAll(); app.resetPreview(); desktop.selectedID = app.workspace.bots.first?.id }
         }
     }
 
@@ -58,10 +58,10 @@ struct MacSettingsView: View {
         Group {
             HStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("One place for your AI teammates").font(.system(size: 18, weight: .medium))
-                    Text("Grok Bot’s official plans bring your Bots and their tools together. Learn what’s included in the service.")
+                    Text("Free and open source").font(.system(size: 18, weight: .medium))
+                    Text("Use AI CLIs installed on your Mac. There is no OpenGrokBot subscription; model access and usage follow your chosen CLI account or local provider.")
                         .font(.system(size: 15)).lineSpacing(5).foregroundStyle(MacTheme.secondary)
-                    MacPillButton(title: "View official plans", prominent: true) { openDocumentation("https://docs.x.ai/grok-bot/get-started") }
+                    MacPillButton(title: "Set up AI CLI", prominent: true) { desktop.panel = .setup }
                         .padding(.top, 8)
                 }
                 Spacer(minLength: 0)
@@ -81,10 +81,10 @@ struct MacSettingsView: View {
                         .frame(width: 56, height: 56).background(MacTheme.raised, in: Circle())
                     VStack(alignment: .leading, spacing: 6) {
                         TextField("Display name", text: $profileName).textFieldStyle(.plain).font(.system(size: 17))
-                        Text("Local workspace · Not signed in").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+                        Text("Local profile · CLI handles sign-in").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
                     }
                     Spacer()
-                    MacPillButton(title: "Connection status") { desktop.panel = .integration }
+                    MacPillButton(title: "AI CLI setup") { desktop.panel = .setup }
                 }.padding(20)
             }
             section("Appearance") {
@@ -103,9 +103,9 @@ struct MacSettingsView: View {
             }
             section("Local data") {
                 HStack {
-                    Text("Preview Bots and notes").font(.system(size: 15))
+                    Text("Bots and conversations").font(.system(size: 15))
                     Spacer()
-                    MacPillButton(title: "Reset preview…") { reset = true }
+                    MacPillButton(title: "Reset conversations…") { reset = true }
                 }.padding(18)
             }
         }
@@ -113,7 +113,7 @@ struct MacSettingsView: View {
 
     private var computer: some View {
         Group {
-            unavailable(title: "Your Bot’s computer", detail: "Grok Bot works on a hosted computer. This independent app has not established access to that computer, so screen viewing, terminal control, and resets are unavailable.", icon: "desktopcomputer")
+            unavailable(title: "AI runs from this Mac", detail: "This app launches the installed CLI on this Mac. Each Bot has a separate working folder and saved CLI session. Cloud computer control is not part of this local version.", icon: "desktopcomputer")
             section("This Mac") {
                 VStack(spacing: 0) {
                     settingRow("Time zone") { Text(TimeZone.current.identifier).foregroundStyle(MacTheme.secondary) }
@@ -125,7 +125,7 @@ struct MacSettingsView: View {
 
     private var updates: some View {
         VStack(alignment: .leading, spacing: 20) {
-            unavailable(title: "OpenGrokBot 0.2.0", detail: "Install a new build from this project’s release artifacts. This build does not modify or update the official Grok Bot application.", icon: "arrow.down.circle")
+            unavailable(title: "OpenGrokBot 0.3.0", detail: "Install a new build from this project’s release artifacts. This build does not modify or update the official Grok Bot application.", icon: "arrow.down.circle")
             MacPillButton(title: "Open project") { openDocumentation("https://github.com/carboy285/opengrokbot") }
         }
     }
@@ -135,7 +135,7 @@ struct MacSettingsView: View {
             Image(systemName: icon).font(.system(size: 36, weight: .light)).foregroundStyle(MacTheme.secondary)
             Text(title).font(.system(size: 23, weight: .medium))
             Text(detail).font(.system(size: 16)).lineSpacing(5).foregroundStyle(MacTheme.secondary)
-            Button("View connection status") { desktop.panel = .integration }.buttonStyle(.link)
+            Button("View connection status") { desktop.panel = .setup }.buttonStyle(.link)
         }.padding(28).frame(maxWidth: .infinity, alignment: .leading).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 18))
     }
 

@@ -43,8 +43,9 @@ struct MacWorkspaceView: View {
         }
         .foregroundStyle(.primary.opacity(0.9))
         .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its local notes?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-            Button("Delete preview Bot", role: .destructive) {
+            Button("Delete Bot", role: .destructive) {
                 if let bot = deleting {
+                    desktop.stop(botID: bot.id)
                     app.removeBot(bot)
                     if desktop.selectedID == bot.id { desktop.selectedID = app.workspace.bots.first?.id }
                 }
@@ -61,7 +62,7 @@ struct MacWorkspaceView: View {
                     desktop.showSearch.toggle()
                     searchFocused = desktop.showSearch
                 }
-                MacCircleButton(symbol: "plus", label: "New preview Bot") { desktop.panel = .newBot }
+                MacCircleButton(symbol: "plus", label: "New Bot") { desktop.panel = .newBot }
             }.padding(.horizontal, 18).padding(.top, 12)
             if desktop.showSearch {
                 HStack {
@@ -108,10 +109,10 @@ struct MacWorkspaceView: View {
                 }.padding(.horizontal, 8)
             }
             Spacer(minLength: 10)
-            Button { desktop.panel = .integration } label: {
+            Button { desktop.panel = .setup } label: {
                 HStack(spacing: 6) {
-                    Circle().fill(Color.orange.opacity(0.8)).frame(width: 5, height: 5)
-                    Text("Offline preview · Not connected").font(.system(size: 11))
+                    Circle().fill(desktop.canChat ? Color.green : Color.orange.opacity(0.8)).frame(width: 5, height: 5)
+                    Text(desktop.statusText).font(.system(size: 11))
                 }.foregroundStyle(MacTheme.secondary)
             }.buttonStyle(.plain).padding(.bottom, 14)
             HStack(spacing: 10) {
@@ -144,6 +145,7 @@ struct MacWorkspaceView: View {
         case .apps: MacConnectAppsView()
         case .newBot: MacNewBotView()
         case .integration: MacIntegrationView()
+        case .setup: MacSetupView()
         }
     }
 
@@ -151,8 +153,8 @@ struct MacWorkspaceView: View {
         VStack(spacing: 22) {
             MacBotAvatar(size: 92)
             Text("A place for your Bots").font(.system(size: 28, weight: .medium))
-            Text("Create a preview Bot to explore this local workspace.").foregroundStyle(MacTheme.secondary)
-            MacPillButton(title: "Create preview Bot", prominent: true) { desktop.panel = .newBot }
+            Text("Create a Bot to start a separate AI conversation.").foregroundStyle(MacTheme.secondary)
+            MacPillButton(title: "Create Bot", prominent: true) { desktop.panel = .newBot }
         }
     }
 }

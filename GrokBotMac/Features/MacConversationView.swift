@@ -52,7 +52,7 @@ struct MacConversationView: View {
                     Button("Export conversation…") { desktop.exportConversation(bot, app: app) }
                     Divider()
                     Button("Attachment status…") {
-                        desktop.importFeedback = "Files cannot be sent to Grok Bot until the connection protocol is verified. Nothing has been uploaded."
+                        desktop.importFeedback = "File attachments are not implemented yet. You can paste text into a message; the selected CLI will receive it."
                         desktop.panel = .integration
                     }
                 } label: {
@@ -63,24 +63,43 @@ struct MacConversationView: View {
                     .textFieldStyle(.plain).font(.system(size: 18)).lineLimit(1...7)
                     .disableAutocorrection(!spellChecking).focused($composing)
                     .padding(.vertical, 9)
-                    .accessibilityLabel("Local preview message for \(bot.name)")
-                if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button { saveNote() } label: {
+                    .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
+                if desktop.runningBots.contains(bot.id) {
+                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").frame(width: 38, height: 38) }.buttonStyle(.plain).help("Stop response")
+                } else if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button { sendMessage() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(.black)
                             .frame(width: 38, height: 38).background(.white, in: Circle())
-                    }.buttonStyle(.plain).keyboardShortcut(.return, modifiers: .command)
-                        .help("Save local note (⌘Return)").accessibilityLabel("Save local note")
+                    }.buttonStyle(.plain).disabled(!desktop.canChat).keyboardShortcut(.return, modifiers: .command)
+                        .help("Send message (⌘Return)").accessibilityLabel("Send message")
                 } else {
                     Image(systemName: "mic").font(.system(size: 21)).foregroundStyle(MacTheme.secondary)
-                        .frame(width: 36, height: 38).help("Voice requires a verified Grok Bot connection")
+                        .frame(width: 36, height: 38).help("Voice input is not available in this version")
                     Image(systemName: "waveform").font(.system(size: 21, weight: .bold)).foregroundStyle(.black)
                         .frame(width: 38, height: 38).background(.white, in: Circle())
-                        .help("Voice chat is unavailable in offline preview")
+                        .help("Voice chat is not available in this version")
                 }
             }
             .padding(9).glassChrome(in: RoundedRectangle(cornerRadius: 31))
-            Text("Offline preview · Notes stay on this Mac · ⌘Return to save")
-                .font(.system(size: 10)).foregroundStyle(MacTheme.secondary)
+            HStack(spacing: 9) {
+                if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
+                if desktop.installedCLIs.isEmpty {
+                    Button("Set up an AI CLI") { desktop.panel = .setup }.buttonStyle(.link)
+                } else {
+                    Picker("AI CLI", selection: Binding(get: { desktop.selectedCLIID }, set: { desktop.chooseCLI($0) })) {
+                        ForEach(desktop.installedCLIs) { cli in Text(cli.provider.name).tag(cli.id) }
+                    }.labelsHidden().frame(width: 140).controlSize(.mini).disabled(!desktop.runningBots.isEmpty)
+                }
+                Spacer()
+                if desktop.runningBots.contains(bot.id) {
+                    ProgressView().controlSize(.mini)
+                    Text("Working…")
+                    Button("Stop") { desktop.stop(botID: bot.id) }.buttonStyle(.link)
+                } else { Text("⌘Return to send · Uses your CLI account") }
+            }.font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
+            if let error = desktop.runErrors[bot.id] {
+                HStack { Text(error).font(.system(size: 11)); Spacer(); Button("Retry") { desktop.retry(bot: bot, app: app) } }.foregroundStyle(MacTheme.secondary)
+            }
         }.padding(.horizontal, 20).padding(.bottom, 12).padding(.top, 8)
     }
 
@@ -89,13 +108,13 @@ struct MacConversationView: View {
             MacBotAvatar(color: bot.color, size: 70)
             Text(bot.name).font(.system(size: 24, weight: .medium))
             Text(bot.purpose).foregroundStyle(MacTheme.secondary)
-            Text("Write a local note below to start your preview conversation.")
+            Text("Send your first message to start chatting with your selected local AI CLI.")
                 .font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
         }.frame(maxWidth: .infinity)
     }
 
-    private func saveNote() {
-        if app.addNote(draft.wrappedValue, to: bot) { draft.wrappedValue = ""; composing = true }
+    private func sendMessage() {
+        if desktop.send(draft.wrappedValue, to: bot, app: app) { draft.wrappedValue = ""; composing = true }
     }
 }
 
@@ -111,11 +130,11 @@ private struct MacMessageView: View {
                 Text("School")
             }.font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
                 .frame(maxWidth: .infinity).padding(.vertical, 2)
-                .accessibilityLabel("Example activity: \(entry.text)")
+                .accessibilityLabel("Activity: \(entry.text)")
         } else {
             HStack(alignment: .top) {
                 if entry.kind == .user { Spacer(minLength: 90) }
-                Text(entry.text)
+                Text(entry.text.isEmpty && entry.state == .streaming ? "Thinking…" : entry.text)
                     .font(.system(size: 18)).lineSpacing(6).textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .background(entry.kind == .user ? MacTheme.userBubble : MacTheme.panel, in: RoundedRectangle(cornerRadius: entry.kind == .user ? 24 : 23))
@@ -128,7 +147,7 @@ private struct MacMessageView: View {
                         }
                     }
                     .accessibilityIdentifier("conversation-message")
-                    .accessibilityLabel("\(entry.kind == .user ? "Local preview note" : "Example Bot message"): \(entry.text)")
+                    .accessibilityLabel("\(entry.kind == .user ? "You" : "AI reply"): \(entry.text)")
                 if entry.kind == .bot { Spacer(minLength: 90) }
             }.frame(maxWidth: .infinity)
         }

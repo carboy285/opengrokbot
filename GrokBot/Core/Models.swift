@@ -6,6 +6,7 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var purpose: String
     var color: String
     var symbol: String
+    var isMain: Bool? = nil
 }
 
 struct Entry: Identifiable, Codable, Equatable, Sendable {
@@ -14,6 +15,8 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     let botID: UUID
     let kind: Kind
     var text: String
+    var state: MessageState? = nil
+    var provider: String? = nil
     let date: Date
 
     init(botID: UUID, kind: Kind, text: String) {
@@ -25,31 +28,64 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+enum MessageState: String, Codable, Sendable { case streaming, complete, stopped, failed }
+
 struct Workspace: Codable, Equatable, Sendable {
     var bots: [Bot] = []
     var entries: [Entry] = []
+    var schemaVersion: Int? = 2
+    var sessions: [String: String]? = [:]
 
-    static var preview: Workspace {
-        let bots = [
-            Bot(id: UUID(), name: "Grok Bot", purpose: "A place to bring it all together", color: "white", symbol: "sparkles"),
-            Bot(id: UUID(), name: "Soccer & Percussion", purpose: "Practice plans, one day at a time", color: "purple", symbol: "music.note"),
-            Bot(id: UUID(), name: "AI Brief", purpose: "Research worth your time", color: "purple", symbol: "newspaper"),
-            Bot(id: UUID(), name: "STEMBound", purpose: "Make room for your next idea", color: "pink", symbol: "atom"),
-            Bot(id: UUID(), name: "School", purpose: "Make a plan for the week ahead", color: "ochre", symbol: "book.closed")
+    static var fresh: Workspace {
+        Workspace(bots: [Bot(id: UUID(), name: "Grok Bot", purpose: "Your AI assistant, powered by a CLI on this device.", color: "white", symbol: "sparkles", isMain: true)])
+    }
+
+    // Kept as a source-compatible alias; no demo Bots or messages are seeded.
+    static var preview: Workspace { .fresh }
+
+    mutating func migrateLegacyDemo() {
+        guard schemaVersion != 2 else { return }
+        let signatures = ["Grok Bot": "A place to bring it all together", "Soccer & Percussion": "Practice plans, one day at a time", "AI Brief": "Research worth your time", "STEMBound": "Make room for your next idea", "School": "Make a plan for the week ahead"]
+        let seeded = Set(bots.filter { signatures[$0.name] == $0.purpose }.map(\.id))
+        let fixtures: Set<String> = [
+            "Your week is coming together. You’ve got percussion practice, a STEMBound meeting, and a Spanish test on Wednesday.\n\nWant me to have the School bot help you study for Wednesday’s Spanish test?",
+            "Messaged · School", "Message from · School",
+            "I sent it to the School bot. It’ll ask you in its own chat what the Spanish test covers, then put together a study plan for Sunday through Tuesday and some practice questions. Do you have a study guide or notes you can share with it?",
+            "Nice! Send it right here, either a photo of the study guide or a quick list of the topics, and I’ll pass it to School so it can build your plan.",
+            "Want me to set up those snare drum routines for the week?",
+            "Which workflow do you want? A quick daily brief, a deeper research note, or a running list of ideas?",
+            "What’s on your plate right now?", "What do you need help with for Wednesday’s Spanish test?",
+            "This is an offline interface preview. Nothing here is sent to Grok Bot. You can explore conversations, write local notes, and create preview Bots.",
+            "Example handoff · School",
+            "A study guide, a few practice questions, and time to review. This is where a Bot’s progress and finished work would appear.",
+            "What would you like to work on? Add a local note below to try the conversation layout."
         ]
-        return Workspace(bots: bots, entries: [
-            Entry(botID: bots[0].id, kind: .bot, text: "Your week is coming together. You’ve got percussion practice, a STEMBound meeting, and a Spanish test on Wednesday.\n\nWant me to have the School bot help you study for Wednesday’s Spanish test?"),
-            Entry(botID: bots[0].id, kind: .user, text: "Sure"),
-            Entry(botID: bots[0].id, kind: .activity, text: "Messaged · School"),
-            Entry(botID: bots[0].id, kind: .bot, text: "I sent it to the School bot. It’ll ask you in its own chat what the Spanish test covers, then put together a study plan for Sunday through Tuesday and some practice questions. Do you have a study guide or notes you can share with it?"),
-            Entry(botID: bots[0].id, kind: .activity, text: "Message from · School"),
-            Entry(botID: bots[0].id, kind: .user, text: "Yea"),
-            Entry(botID: bots[0].id, kind: .bot, text: "Nice! Send it right here, either a photo of the study guide or a quick list of the topics, and I’ll pass it to School so it can build your plan."),
-            Entry(botID: bots[1].id, kind: .bot, text: "Want me to set up those snare drum routines for the week?"),
-            Entry(botID: bots[2].id, kind: .bot, text: "Which workflow do you want? A quick daily brief, a deeper research note, or a running list of ideas?"),
-            Entry(botID: bots[3].id, kind: .bot, text: "What’s on your plate right now?"),
-            Entry(botID: bots[4].id, kind: .bot, text: "What do you need help with for Wednesday’s Spanish test?")
-        ])
+        let legacyMain = bots.first { $0.name == "Grok Bot" && seeded.contains($0.id) }?.id
+        let hasFullFixture = entries.first?.text.hasPrefix("Your week is coming together.") == true
+        entries = entries.enumerated().filter { index, entry in
+            if seeded.contains(entry.botID) && entry.kind != .user && fixtures.contains(entry.text) { return false }
+            if hasFullFixture && entry.botID == legacyMain && ((index == 1 && entry.text == "Sure") || (index == 5 && entry.text == "Yea")) { return false }
+            return true
+        }.map(\.element)
+        bots.removeAll { bot in seeded.contains(bot.id) && bot.id != legacyMain && !entries.contains { $0.botID == bot.id } }
+        if let main = bots.firstIndex(where: { $0.name == "Grok Bot" && ($0.id == legacyMain || $0.isMain == true) }) {
+            bots[main].isMain = true
+            bots[main].purpose = "Your AI assistant, powered by a CLI on this device."
+            let value = bots.remove(at: main); bots.insert(value, at: 0)
+        } else { bots.insert(Self.fresh.bots[0], at: 0) }
+        schemaVersion = 2
+    }
+
+    private enum CodingKeys: String, CodingKey { case bots, entries, schemaVersion, sessions }
+    init(bots: [Bot] = [], entries: [Entry] = [], schemaVersion: Int? = 2, sessions: [String:String]? = [:]) {
+        self.bots = bots; self.entries = entries; self.schemaVersion = schemaVersion; self.sessions = sessions
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        bots = try values.decode([Bot].self, forKey: .bots)
+        entries = try values.decode([Entry].self, forKey: .entries)
+        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        sessions = try values.decodeIfPresent([String:String].self, forKey: .sessions) ?? [:]
     }
 }
 

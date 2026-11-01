@@ -1,0 +1,125 @@
+import Foundation
+
+enum CLIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
+    case codex, claude, grok, opencode, gemini
+    var id: String { rawValue }
+    var name: String { switch self { case .codex: "Codex"; case .claude: "Claude Code"; case .grok: "Grok Build"; case .opencode: "OpenCode"; case .gemini: "Gemini CLI" } }
+    var executable: String { rawValue }
+    var loginCommand: String { switch self { case .codex: "codex login"; case .opencode: "opencode auth login"; default: executable } }
+    var guideURL: URL {
+        let address: String
+        switch self {
+        case .codex: address = "https://github.com/openai/codex#quickstart"
+        case .claude: address = "https://code.claude.com/docs/en/setup"
+        case .grok: address = "https://github.com/xai-org/grok-build#installing-the-released-binary"
+        case .opencode: address = "https://opencode.ai/docs/"
+        case .gemini: address = "https://geminicli.com/docs/get-started/installation/"
+        }
+        return URL(string: address)!
+    }
+    var installCommand: String {
+        switch self {
+        case .codex: "npm install -g @openai/codex"
+        case .claude: "npm install -g @anthropic-ai/claude-code"
+        case .opencode: "npm install -g opencode-ai"
+        case .gemini: "npm install -g @google/gemini-cli"
+        case .grok: "See the official Grok Build install guide."
+        }
+    }
+
+}
+
+struct InstalledCLI: Identifiable, Hashable, Sendable {
+    let provider: CLIProvider
+    let path: String
+    let version: String
+    var id: String { provider.rawValue + ":" + path }
+}
+
+enum CLIEvent: Sendable, Equatable { case session(String), text(String), activity(String), failed }
+
+enum CLIError: Error, LocalizedError, Equatable {
+    case notInstalled, notLoggedIn, failed(Int32), invalidOutput, stopped, timedOut
+    var errorDescription: String? {
+        switch self {
+        case .notInstalled: "Choose an installed AI CLI in setup first."
+        case .notLoggedIn: "Your CLI needs authentication. Open setup, sign in through the CLI, then try again."
+        case .failed(let code): "The AI CLI stopped with exit code \(code). Check its login and configuration in Terminal, then retry."
+        case .invalidOutput: "The CLI did not return a supported AI response. Update the CLI or select another installation."
+        case .stopped: "Response stopped. You can send another message."
+        case .timedOut: "The CLI did not finish within ten minutes. Check its connection and try again."
+        }
+    }
+}
+
+struct CLICommand: Sendable {
+    let arguments: [String]
+    let input: String
+    static func chat(provider: CLIProvider, prompt: String, session: String?, promptFile: String? = nil) -> CLICommand {
+        switch provider {
+        case .codex:
+            var args = ["exec", "--sandbox", "read-only"]
+            if let session { args += ["resume", session] }
+            args += ["--json", "--skip-git-repo-check", "-"]
+            return CLICommand(arguments: args, input: prompt)
+        case .claude:
+            var args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+            if let session { args += ["--resume", session] }
+            return CLICommand(arguments: args, input: prompt)
+        case .opencode:
+            var args = ["run", "--format", "json"]
+            if let session { args += ["--session", session] }
+            return CLICommand(arguments: args, input: prompt)
+        case .gemini:
+            var args = ["--output-format", "stream-json"]
+            if let session { args += ["--resume", session] }
+            return CLICommand(arguments: args, input: prompt)
+        case .grok:
+            var args = ["--prompt-file", promptFile ?? "prompt.txt", "--output-format", "streaming-messages-json", "--include-partial-messages"]
+            if let session { args += ["--resume", session] }
+            return CLICommand(arguments: args, input: "")
+        }
+    }
+}
+
+/// Decode only documented conversational fields. Auth metadata and stderr never enter chat.
+struct CLIEventParser {
+    private(set) var text = ""
+    private var codexOrder: [String] = []
+    private var codexMessages: [String:String] = [:]
+    mutating func parse(_ data: Data) -> [CLIEvent] {
+        guard let value = try? JSONSerialization.jsonObject(with: data) as? [String:Any], let type = value["type"] as? String else { return [] }
+        var events: [CLIEvent] = []
+        if let id = (value["thread_id"] ?? value["session_id"] ?? value["sessionID"]) as? String,
+           !id.isEmpty, id.count <= 200, id.first != "-", id.rangeOfCharacter(from: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_" )).inverted) == nil { events.append(.session(id)) }
+        if type == "turn.failed" || (type == "result" && (value["is_error"] as? Bool == true || value["status"] as? String == "error")) { events.append(.failed); return events }
+        if type == "error" { events.append(.activity("The CLI is handling a connection or provider error…")) }
+        if value["parent_tool_use_id"] is String { return events }
+        if type == "text", let part = value["part"] as? [String:Any], let message = part["text"] as? String {
+            let id = part["id"] as? String ?? "answer"
+            if codexMessages[id] == nil { codexOrder.append(id) }
+            codexMessages[id] = message
+            text = codexOrder.compactMap { codexMessages[$0] }.joined(separator: "\n\n")
+            events.append(.text(text))
+        } else if type == "message", value["role"] as? String == "assistant", let message = value["content"] as? String {
+            if value["delta"] as? Bool == true { text += message } else { text = message }
+            events.append(.text(text))
+        } else if type == "item.completed" || type == "item.updated", let item = value["item"] as? [String:Any] {
+            if item["type"] as? String == "agent_message", let message = item["text"] as? String {
+                let id = item["id"] as? String ?? "answer"
+                if codexMessages[id] == nil { codexOrder.append(id) }
+                codexMessages[id] = message
+                text = codexOrder.compactMap { codexMessages[$0] }.joined(separator: "\n\n")
+                events.append(.text(text))
+            } else if type == "item.updated" { events.append(.activity("Working…")) }
+        } else if type == "stream_event", let event = value["event"] as? [String:Any], let delta = event["delta"] as? [String:Any], delta["type"] as? String == "text_delta", let fragment = delta["text"] as? String {
+            text += fragment; events.append(.text(text))
+        } else if type == "assistant", let message = value["message"] as? [String:Any], let content = message["content"] as? [[String:Any]], text.isEmpty {
+            text = content.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined(separator: "\n")
+            if !text.isEmpty { events.append(.text(text)) }
+        } else if type == "result", let result = value["result"] as? String, !result.isEmpty {
+            text = result; events.append(.text(text))
+        }
+        return events
+    }
+}
