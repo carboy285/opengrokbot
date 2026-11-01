@@ -172,8 +172,8 @@ function configureIPC() {
   validateWorkspace({...state,bots:state.bots.map(x=>x.id===id?next:x)});state.bots=state.bots.map(x=>x.id===id?next:x);await atomicJSON('preview-workspace.json',state);notify();return state;
  });
  handle('bots:reorder',async ids=>{await ensureState();if(!Array.isArray(ids)||ids.length!==state.bots.length||new Set(ids).size!==ids.length||ids.some(id=>!state.bots.some(x=>x.id===id)))throw new PublicError('Use the current Bot list.');for(const bot of state.bots)bot.sortOrder=ids.indexOf(bot.id);await atomicJSON('preview-workspace.json',state);notify();return state;});
- handle('drafts:load',async()=>{await ensureState();return loadJSON('drafts.json',{});});
- handle('drafts:save',async drafts=>{if(!drafts||typeof drafts!=='object'||Array.isArray(drafts)||Object.keys(drafts).length>100||Object.entries(drafts).some(([id,text])=>!state?.bots.some(x=>x.id===id)||typeof text!=='string'||text.length>100000))throw new PublicError('Drafts are too large.');await atomicJSON('drafts.json',drafts);});
+ handle('drafts:load',async()=>{await ensureState();const drafts=await loadJSON('drafts.json',{});return Object.fromEntries(Object.entries(drafts).filter(([id,text])=>state.bots.some(x=>x.id===id)&&typeof text==='string'));});
+ handle('drafts:save',async drafts=>{await ensureState();if(!drafts||typeof drafts!=='object'||Array.isArray(drafts)||Object.keys(drafts).length>100||Object.values(drafts).some(text=>typeof text!=='string'||text.length>100000))throw new PublicError('Drafts are too large.');const retained=Object.fromEntries(Object.entries(drafts).filter(([id])=>state.bots.some(bot=>bot.id===id)));await atomicJSON('drafts.json',retained);});
   handle('workspace:load', async () => {await ensureState();return state;});
   handle('workspace:save', async value => {
     await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before changing Bots.');

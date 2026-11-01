@@ -62,6 +62,7 @@ struct MacWorkspaceView: View {
                 if let bot = deleting {
                     desktop.stop(botID: bot.id)
                     app.removeBot(bot)
+                    if !app.workspace.bots.contains(where: { $0.id == bot.id }) { desktop.drafts[bot.id] = nil }
                     if desktop.selectedID == bot.id { desktop.selectedID = app.workspace.bots.first?.id }
                 }
                 deleting = nil
