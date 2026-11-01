@@ -30,60 +30,16 @@
 	<string>NSApplication</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 OpenGrokBot contributors. Independent project.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect your iPhone to your own OpenGrokBot desktop host over Wi-Fi or Tailscale.</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-		<key>NSExceptionDomains</key>
+	<key>CFBundleURLTypes</key>
+	<array>
 		<dict>
-			<key>10.0.0.0/8</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>172.16.0.0/12</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>192.168.0.0/16</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>100.64.0.0/10</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>127.0.0.0/8</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>169.254.0.0/16</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>fc00::/7</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>fe80::/10</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-			<key>::1</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
+			<key>CFBundleURLName</key>
+			<string>org.opengrokbot.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>opengrokbot</string>
+			</array>
 		</dict>
-	</dict>
+	</array>
 </dict>
 </plist>

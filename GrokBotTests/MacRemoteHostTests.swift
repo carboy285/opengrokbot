@@ -12,9 +12,9 @@ final class MacRemoteHostTests: XCTestCase {
         let secrets = KeychainSecretStore(service:suite)
         let app = AppModel(store:WorkspaceStore(url:root.appendingPathComponent("workspace.json")));app.enterPreview()
         let desktop = MacAppModel()
-        let host = MacRemoteHost(port:48301,preferences:preferences,secrets:secrets)
+        let host = MacRemoteHost(preferences:preferences,account:CloudAccount(kind:"host",secrets:secrets))
         defer {
-            host.stop();desktop.stopAll(immediately:true);try? secrets.delete(account:"pairing")
+            host.stop();desktop.stopAll(immediately:true);try? secrets.delete(account:"session")
             preferences.removePersistentDomain(forName:suite)
             for bot in app.workspace.bots { try? FileManager.default.removeItem(at:desktop.workingDirectory(for:bot)) }
             try? FileManager.default.removeItem(at:root)
@@ -23,31 +23,25 @@ final class MacRemoteHostTests: XCTestCase {
         try "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"id\":\"reply\",\"type\":\"agent_message\",\"text\":\"Reply on the desktop\"}}'\n".write(to:executable,atomically:true,encoding:.utf8)
         try FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:executable.path)
         desktop.installedCLIs=[InstalledCLI(provider:.codex,path:executable.path,version:"fixture")];desktop.selectedCLIID=desktop.installedCLIs[0].id
-        host.mode = .wifi;host.address = "http://127.0.0.1:48301";host.attach(app:app,desktop:desktop);host.start()
-        for _ in 0..<100 { if host.enabled { break };try await Task.sleep(for:.milliseconds(20)) }
-        let pairing = try XCTUnwrap(host.pairing), client = RemoteHTTPClient()
-        let initial = try await client.snapshot(pairing,since:nil)
-        let first = try XCTUnwrap(initial)
+        host.attach(app:app,desktop:desktop)
+        func call(_ command: RemoteCommand? = nil, target: String = "/v1/state") async throws -> HostHTTPResponse {
+            await host.dispatch(HostHTTPRequest(method:command == nil ? "GET":"POST",target:command == nil ? target:"/v1/command",headers:[:],body:try command.map { try JSONEncoder().encode($0) } ?? Data()))
+        }
+        let first = try CloudCoding.decoder().decode(RemoteSnapshot.self,from:await call().body)
         XCTAssertEqual(first.workspace.bots.count,1);XCTAssertTrue(first.workspace.entries.isEmpty);XCTAssertTrue((first.workspace.sessions ?? [:]).isEmpty)
-        let unchanged = try await client.snapshot(pairing,since:first.revision)
-        XCTAssertNil(unchanged)
+        let unchanged = try await call(target:"/v1/state?since=" + first.revision)
+        XCTAssertEqual(unchanged.status,204)
         let bot = try XCTUnwrap(first.workspace.bots.first)
         let config = BotAIConfiguration(providers:[BotAIProvider(provider:.codex,model:"remote-model")],activeProvider:.codex)
-        _ = try await client.fetch(pairing,path:"/v1/command",command:RemoteCommand(action:"configure_bot",botID:bot.id,configuration:config))
+        _ = try await call(RemoteCommand(action:"configure_bot",botID:bot.id,configuration:config))
         let command = RemoteCommand(action:"send",botID:bot.id,text:"From my phone 🌎")
-        _ = try await client.fetch(pairing,path:"/v1/command",command:command)
-        _ = try await client.fetch(pairing,path:"/v1/command",command:command)
+        _ = try await call(command)
+        _ = try await call(command)
         for _ in 0..<100 { if app.entries(for:bot).last?.state == .complete { break };try await Task.sleep(for:.milliseconds(20)) }
-        let final = try await client.snapshot(pairing,since:nil)
-        let result = try XCTUnwrap(final)
+        let result = try CloudCoding.decoder().decode(RemoteSnapshot.self,from:await call().body)
         XCTAssertEqual(result.workspace.entries.filter{$0.kind == .user}.count,1)
         XCTAssertEqual(result.workspace.entries.last?.text,"Reply on the desktop")
         XCTAssertEqual(app.workspace.bots.first?.aiConfiguration?.providers.first?.model,"remote-model")
-        host.rotateKey()
-        do { _ = try await client.snapshot(pairing,since:nil);XCTFail("Revoked pairing must be rejected") } catch { if case RemoteError.unauthorized = error {} else { XCTFail("Wrong error: \(error)") } }
-        let refreshed = try XCTUnwrap(host.pairing)
-        let repaired = try await client.snapshot(refreshed,since:nil)
-        XCTAssertNotNil(repaired)
     }
 }
 #endif

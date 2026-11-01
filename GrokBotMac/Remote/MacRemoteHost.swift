@@ -1,129 +1,108 @@
 import AppKit
-import Darwin
 import Combine
 import Foundation
-import Security
 
 @MainActor
 final class MacRemoteHost: ObservableObject {
-    enum Mode: String, CaseIterable, Identifiable {
-        case tailscale = "Tailscale · private", funnel = "Tailscale Funnel · public HTTPS", wifi = "Wi-Fi / private IP", proxy = "My HTTPS proxy"
-        var id: String { rawValue }
-    }
-    @Published var mode: Mode
-    @Published var address: String
+    let account: CloudAccount
     @Published private(set) var enabled = false
-    @Published private(set) var changing = false
     @Published private(set) var feedback: String?
-    let port: UInt16
     private let preferences: UserDefaults
-    private var token = ""
     private var revision = UUID().uuidString
-    private let server = LocalHTTPServer()
-    private let secrets: KeychainSecretStore
     private weak var app: AppModel?
     private weak var desktop: MacAppModel?
     private var subscriptions: Set<AnyCancellable> = []
     private var receipts: Set<UUID> = []
-    private var ownedRoute: (String,Bool)?
-
-    init(port: UInt16 = 48291, preferences: UserDefaults = .standard, secrets: KeychainSecretStore = KeychainSecretStore(service: "org.opengrokbot.remote-host")) {
-        self.port = port; self.preferences = preferences; self.secrets = secrets
-        mode = Mode(rawValue: preferences.string(forKey: "remoteMode") ?? "") ?? .tailscale
-        address = preferences.string(forKey: "remoteAddress") ?? ""
-        if let route = preferences.string(forKey: "remoteOwnedRoute") { ownedRoute = (route, preferences.bool(forKey: "remoteOwnedFunnel")) }
+    private var polling: Task<Void,Never>?
+    private var baselines: [UUID:RemoteSnapshot] = [:]
+    private var replies: [String:CloudResponse] = [:]
+    private var owner: UUID?
+    init(preferences: UserDefaults = .standard, account: CloudAccount = CloudAccount(kind: "host")) {
+        self.preferences = preferences; self.account = account
+        account.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
     }
-
-    var needsCleanup: Bool { !enabled && ownedRoute != nil }
-    var pairing: RemotePairing? { enabled ? try? RemotePairing(address: address, token: token) : nil }
-    var serveCommand: String { "tailscale \(mode == .funnel ? "funnel" : "serve") --bg --https=8443 http://127.0.0.1:\(port)" }
-
     func attach(app: AppModel, desktop: MacAppModel) {
         guard self.app == nil else { return }; self.app = app; self.desktop = desktop
         app.$workspace.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$runningBots.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$installedCLIs.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$selectedCLIID.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
-        if preferences.bool(forKey: "remoteEnabled") { start(restoring: true) }
-    }
-    func start(restoring: Bool = false) {
-        guard !enabled, !changing, app != nil else { return }
-        if ownedRoute != nil && !restoring { feedback = "Remove the previous Tailscale route before enabling a different connection."; return }
-        do {
-            if let data = try secrets.read(account: "pairing"), let saved = String(data: data, encoding: .utf8), saved.range(of:"^[A-Za-z0-9_-]{43,128}$",options:.regularExpression) != nil { token = saved }
-            else { try replaceToken() }
-            if mode == .wifi, address.isEmpty { address = "http://\(Self.localIPv4() ?? "your-mac.local"):\(port)" }
-            if mode == .proxy || mode == .wifi { _ = try RemotePairing(address: address, token: token); if mode == .proxy && URL(string: address)?.scheme != "https" { throw RemoteError.invalidPairing } }
-        } catch { feedback = "Unlock Keychain and enter a valid host address, then try again."; return }
-        changing = true; feedback = nil
-        let lan = mode == .wifi
-        server.start(port: port, lan: lan, handler: { [weak self] request in
-            await self?.handle(request) ?? .error(503, "Host is unavailable")
-        }, ready: { [weak self] success in
-            Task { @MainActor in
+        account.$session.map { $0?.user.id }.removeDuplicates().sink { [weak self] id in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.changing = false; self.enabled = success
-                if success {
-                    self.preferences.set(true, forKey: "remoteEnabled")
-                    if self.mode == .tailscale || self.mode == .funnel { self.configureTailscale() }
-                    else { self.savePreferences(); self.feedback = "Remote access is on. Pair your iPhone using this desktop’s link." }
-                } else { self.feedback = "Port \(self.port) is unavailable. Stop the other service or restart this app." }
+                if self.owner != id { let restore = self.preferences.bool(forKey:"cloudHostEnabled"); self.stop(); self.preferences.set(restore,forKey:"cloudHostEnabled"); self.owner = id; self.replies = [:]; self.baselines = [:] }
+                if id != nil, self.preferences.bool(forKey: "cloudHostEnabled") { self.start() }
             }
-        })
+        }.store(in: &subscriptions)
+    }
+    func start() {
+        guard account.signedIn, app != nil, !enabled else { return }
+        enabled = true; preferences.set(true,forKey:"cloudHostEnabled"); feedback = "Connecting to your account…"
+        polling = Task { [weak self] in
+            var ticks = 0
+            while !Task.isCancelled {
+                guard let self, self.enabled else { return }
+                do {
+                    if ticks % 15 == 0 { try await self.account.sync(available:true) }
+                    let packets = try await self.account.poll()
+                    for packet in packets {
+                        try Task.checkCancellation()
+                        guard let peer = self.account.controllers.first(where: { $0.id == packet.sender }), self.account.approved(peer) else { try? await self.account.acknowledge(packet); continue }
+                        do {
+                            let data = try self.account.decrypt(packet,peer:peer)
+                            guard packet.kind == "request" else { throw CloudError.invalidPacket }
+                            let cacheKey = peer.id.uuidString + packet.id.uuidString
+                            let response: CloudResponse
+                            if let cached = self.replies[cacheKey] { response = cached }
+                            else {
+                                let request = try CloudCoding.decoder().decode(CloudRequest.self,from:data)
+                                guard packet.kind == "request", request.target.count <= 2048, request.body.count <= 131072 else { throw CloudError.invalidPacket }
+                                response = await self.respond(request,peer:peer)
+                                if self.replies.count >= 128 { self.replies.removeAll() }; self.replies[cacheKey] = response
+                            }
+                            // An approval revoked while a CLI model lookup awaited must also block its result.
+                            guard self.enabled, self.account.approved(peer) else { continue }
+                            try await self.account.send(CloudCoding.encoder().encode(response),to:peer,id:packet.id,kind:"response")
+                            try await self.account.acknowledge(packet)
+                        } catch { try? await self.account.acknowledge(packet) }
+                    }
+                    self.feedback = "Phone access is on. Approve a phone below to allow control."
+                    ticks += 1
+                } catch { self.feedback = error.localizedDescription; ticks = 0 }
+                try? await Task.sleep(for:.seconds(1))
+            }
+        }
     }
     func stop() {
-        server.stop(); enabled = false; preferences.set(false, forKey: "remoteEnabled")
-        guard let route = ownedRoute else { feedback = "Remote access is off."; return }
-        changing = true
-        Task {
-            let port = port
-            let removed = await Task.detached { TailscaleHosting.remove(localPort: port, address: route.0, funnel: route.1) }.value
-            changing = false
-            if removed { ownedRoute = nil; preferences.removeObject(forKey: "remoteOwnedRoute"); preferences.removeObject(forKey: "remoteOwnedFunnel"); feedback = "Remote access is off." }
-            else { feedback = "The app server is off. Remove its port 8443 route in Tailscale before changing connection modes." }
+        enabled = false; polling?.cancel(); polling = nil; baselines = [:]; replies = [:]
+        preferences.set(false,forKey:"cloudHostEnabled"); feedback = "Phone access is off."
+        // The registered host expires as offline even if this update cannot reach the network.
+        Task { if account.signedIn { try? await account.sync(available:false) } }
+    }
+    func approve(_ device: CloudDevice, allowed: Bool) {
+        do { try account.approve(device,allowed:allowed); baselines[device.id] = nil; replies = [:] }
+        catch { feedback = error.localizedDescription }
+    }
+    private func respond(_ request: CloudRequest, peer: CloudDevice) async -> CloudResponse {
+        if request.method == "GET", let parts = URLComponents(string:request.target), parts.path == "/v1/state", let next = snapshot() {
+            let since = parts.queryItems?.first(where:{$0.name == "since"})?.value
+            if since == next.revision { return CloudResponse(status:204,body:Data()) }
+            let baseline = baselines[peer.id].flatMap { $0.revision == since ? $0:nil }
+            do {
+                let patch = try CloudStatePatch.make(next,previous:baseline)
+                let data = try CloudCoding.encoder().encode(patch); baselines[peer.id] = next
+                return CloudResponse(status:200,body:data)
+            } catch { return CloudResponse(status:500,body:Data()) }
         }
-    }
-    func rotateKey() {
-        do { try replaceToken(); receipts.removeAll(); feedback = "Pairing key changed. Existing phones must pair again." }
-        catch { feedback = "The pairing key could not be changed. Unlock Keychain and try again." }
-    }
-    func copyLink() {
-        guard let link = pairing?.link.absoluteString else { return }
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string)
-        feedback = "Pairing link copied. Treat it like a password; it controls this workspace."
-    }
-    func configureTailscale() {
-        guard enabled, !changing else { return }; changing = true
-        let port = port, funnel = mode == .funnel
-        Task {
-            let link = await Task.detached { TailscaleHosting.configure(localPort: port, funnel: funnel) }.value
-            changing = false
-            if let link { address = link; ownedRoute = (link,funnel); preferences.set(link,forKey:"remoteOwnedRoute"); preferences.set(funnel,forKey:"remoteOwnedFunnel"); savePreferences(); feedback = funnel ? "Funnel HTTPS is ready. Your pairing key is still required." : "Private Tailscale HTTPS is ready. Connect your iPhone to the same tailnet." }
-            else { feedback = "Tailscale needs setup or port 8443 is already in use. Use the command below in Terminal, authorize Tailscale if asked, then enter its HTTPS address. Existing routes are not overwritten." }
-        }
-    }
-    func saveAddress() {
-        guard (mode == .wifi || URL(string: address)?.scheme == "https"), (try? RemotePairing(address: address, token: token)) != nil else { feedback = "Enter an HTTPS address, or a private Wi-Fi address in Wi-Fi mode."; return }
-        if mode == .tailscale || mode == .funnel { ownedRoute = (address,mode == .funnel); preferences.set(address,forKey:"remoteOwnedRoute"); preferences.set(mode == .funnel,forKey:"remoteOwnedFunnel") }
-        savePreferences(); feedback = "Pairing address saved."
-    }
-    private func savePreferences() {
-        preferences.set(mode.rawValue, forKey: "remoteMode"); preferences.set(address, forKey: "remoteAddress")
-    }
-    private func replaceToken() throws {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw RemoteError.unavailable }
-        let value = bytes.map { String(format: "%02x", $0) }.joined()
-        try secrets.save(Data(value.utf8), account: "pairing"); token = value
+        let response = await dispatch(HostHTTPRequest(method:request.method,target:request.target,headers:[:],body:request.body))
+        return CloudResponse(status:response.status,body:response.body)
     }
     private func snapshot() -> RemoteSnapshot? {
         guard let app, let desktop else { return nil }
         var workspace = app.workspace; workspace.sessions = nil
         return RemoteSnapshot(hostName: Host.current().localizedName ?? "Mac", revision: revision, workspace: workspace, running: Array(desktop.runningBots), providers: desktop.installedCLIs.map { RemoteProvider(provider: $0.provider, version: $0.version) }, defaultProvider: desktop.selectedCLI?.provider)
     }
-    private func handle(_ request: HostHTTPRequest) async -> HostHTTPResponse {
-        guard enabled else { return .error(503, "Remote access is off") }
-        guard request.authorized(token: token) else { return .error(401, "Pairing key required") }
+    func dispatch(_ request: HostHTTPRequest) async -> HostHTTPResponse {
         guard let parts = URLComponents(string: request.target), let app, let desktop else { return .error(400, "Invalid request") }
         func query(_ name: String) -> String? { parts.queryItems?.first { $0.name == name }?.value }
         do {
@@ -159,19 +138,5 @@ final class MacRemoteHost: ObservableObject {
             revision = UUID().uuidString
             return try .json(["accepted":true])
         } catch { return .error(400,"The request could not be completed") }
-    }
-    private static func localIPv4() -> String? {
-        var pointer: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&pointer) == 0 else { return nil }; defer { freeifaddrs(pointer) }
-        var item = pointer
-        while let current = item {
-            defer { item = current.pointee.ifa_next }
-            guard let addr = current.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET), String(cString: current.pointee.ifa_name) != "lo0" else { continue }
-            var name = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &name, socklen_t(name.count), nil, 0, NI_NUMERICHOST) == 0 {
-                let ip = String(cString: name); if RemotePairing.isLocalHost(ip) { return ip }
-            }
-        }
-        return nil
     }
 }

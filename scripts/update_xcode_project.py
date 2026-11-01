@@ -37,7 +37,7 @@ def add_to_group(group_id, children):
     group['children'] = list(dict.fromkeys(group['children'] + children))
 
 # Shared controller contract/client and iOS controller sources.
-remote_shared = ['GrokBot/Core/RemoteProtocol.swift', 'GrokBot/Core/RemoteClient.swift']
+remote_shared = ['GrokBot/Core/RemoteProtocol.swift', 'GrokBot/Core/RemoteClient.swift'] + sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBot/Core').glob('Cloud*.swift'))
 remote_ios = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBot/Remote').glob('*.swift'))
 for path in remote_shared + remote_ios:
     key = reference(path)
@@ -66,7 +66,7 @@ reference(ios_entitlements, 'text.plist.entitlements')
 add_to_group(uid('appgroup'), [uid(ios_entitlements)])
 for configuration in ('Debug','Release'):
     objects[uid('app'+configuration)]['buildSettings']['CODE_SIGN_ENTITLEMENTS'] = ios_entitlements
-    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.5.0'
+    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.6.0'
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
 shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',team_shared,glass]+remote_shared
@@ -85,7 +85,7 @@ add_to_group(uid('products'),[app_product,test_product])
 mac_group=add('mac-group',isa='PBXGroup',children=[uid(p) for p in mac_sources]+[uid('GrokBotMac/Resources/'+p) for p in ['Info.plist','GrokBotMac.entitlements','AppIcon.icns']],name='GrokBotMac',sourceTree='<group>')
 add_to_group(uid('main'),[mac_group])
 base={'SDKROOT':'macosx','MACOSX_DEPLOYMENT_TARGET':'14.0','SUPPORTED_PLATFORMS':'macosx','SWIFT_VERSION':'6.0','CODE_SIGN_STYLE':'Automatic','SWIFT_STRICT_CONCURRENCY':'complete','COMBINE_HIDPI_IMAGES':'YES'}
-app_configs=configs('mac-app',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac','PRODUCT_NAME':'OpenGrokBot','PRODUCT_MODULE_NAME':'GrokBotMac','INFOPLIST_FILE':'GrokBotMac/Resources/Info.plist','GENERATE_INFOPLIST_FILE':'NO','CURRENT_PROJECT_VERSION':'2','MARKETING_VERSION':'0.5.0','CODE_SIGN_ENTITLEMENTS':'GrokBotMac/Resources/GrokBotMac.entitlements','ENABLE_HARDENED_RUNTIME':'YES','ENABLE_APP_SANDBOX':'NO','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks']})
+app_configs=configs('mac-app',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac','PRODUCT_NAME':'OpenGrokBot','PRODUCT_MODULE_NAME':'GrokBotMac','INFOPLIST_FILE':'GrokBotMac/Resources/Info.plist','GENERATE_INFOPLIST_FILE':'NO','CURRENT_PROJECT_VERSION':'2','MARKETING_VERSION':'0.6.0','CODE_SIGN_ENTITLEMENTS':'GrokBotMac/Resources/GrokBotMac.entitlements','ENABLE_HARDENED_RUNTIME':'YES','ENABLE_APP_SANDBOX':'NO','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks']})
 test_configs=configs('mac-test',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac.tests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_HOST':'$(BUILT_PRODUCTS_DIR)/OpenGrokBot.app/Contents/MacOS/OpenGrokBot','BUNDLE_LOADER':'$(TEST_HOST)','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks','@loader_path/../Frameworks']})
 proxy=add('mac-proxy',isa='PBXContainerItemProxy',containerPortal=project['rootObject'],proxyType='1',remoteGlobalIDString=mac_id,remoteInfo='GrokBotMac')
 dep=add('mac-dependency',isa='PBXTargetDependency',target=mac_id,targetProxy=proxy)
@@ -123,6 +123,13 @@ def encode(value,indent=0):
     if isinstance(value,dict): return '{\n'+''.join('\t'*(indent+1)+json.dumps(k)+' = '+encode(v,indent+1)+';\n' for k,v in value.items())+'\t'*indent+'}'
     if isinstance(value,list): return '(\n'+''.join('\t'*(indent+1)+encode(v,indent+1)+',\n' for v in value)+'\t'*indent+')'
     return json.dumps(str(value))
+# Prune removed Swift files and their stale group/build references.
+stale = {key for key, value in objects.items() if value.get('isa') == 'PBXFileReference' and str(value.get('path','')).endswith('.swift') and not (ROOT/value['path']).exists()}
+stale |= {key for key,value in objects.items() if value.get('isa') == 'PBXBuildFile' and value.get('fileRef') in stale}
+for key in stale: objects.pop(key,None)
+for value in objects.values():
+    for field in ('children','files'):
+        if field in value: value[field] = [key for key in value[field] if key not in stale]
 PROJECT.write_text('// !$*UTF8*$!\n'+encode(project)+'\n')
 scheme=(ROOT/'GrokBot.xcodeproj/xcshareddata/xcschemes/GrokBot.xcscheme').read_text()
 scheme=scheme.replace(uid('app'),mac_id).replace(uid('test'),test_id).replace('BuildableName="GrokBot.app"','BuildableName="OpenGrokBot.app"').replace('BlueprintName="GrokBot"','BlueprintName="GrokBotMac"').replace('BuildableName="GrokBotTests.xctest"','BuildableName="GrokBotMacTests.xctest"').replace('BlueprintName="GrokBotTests"','BlueprintName="GrokBotMacTests"')

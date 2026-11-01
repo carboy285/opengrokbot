@@ -1,118 +1,133 @@
 import Foundation
 import SwiftUI
+import Combine
 
 @MainActor
 final class RemoteController: ObservableObject {
+    let account: CloudAccount
     @Published private(set) var online = false
     @Published private(set) var hasSnapshot = false
     @Published private(set) var hostName = "Desktop"
-    @Published private(set) var status = "Connect your desktop"
+    @Published private(set) var status = "Sign in to connect your desktop"
     @Published private(set) var running: Set<UUID> = []
     @Published private(set) var providers: [RemoteProvider] = []
     @Published private(set) var defaultProvider: CLIProvider?
     @Published var showPairing = false
-    @Published var pairingDraft = ""
     @Published var busy = false
     @Published var drafts: [UUID:String] = [:]
     @Published var error: String?
-    private let client: RemoteHTTPClient
+    private let client: CloudRelayClient
     private let secrets: KeychainSecretStore
-    private var connection: RemotePairing?
+    private var connection: CloudDevice?
     private var polling: Task<Void,Never>?
-    private var revision: String?
-    private var sequence = 0
-    private var appliedSequence = 0
+    private var state: RemoteSnapshot?
     private weak var model: AppModel?
     private var pendingSends: [UUID:(String,UUID)] = [:]
+    private var subscriptions: Set<AnyCancellable> = []
+    private var active = true
+    private var epoch = UUID()
 
-    init(client: RemoteHTTPClient = RemoteHTTPClient(), secrets: KeychainSecretStore = KeychainSecretStore(service: "org.opengrokbot.ios.remote")) { self.client = client; self.secrets = secrets }
-
+    init(account: CloudAccount = CloudAccount(kind:"controller"), secrets: KeychainSecretStore = KeychainSecretStore(service:"org.opengrokbot.ios.cloud-selection")) {
+        self.account = account; self.client = CloudRelayClient(account:account); self.secrets = secrets
+        account.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in:&subscriptions)
+    }
     func attach(_ model: AppModel) {
         guard self.model == nil else { return }; self.model = model
-        do {
-            if let data = try secrets.read(account: "desktop") {
-                connection = try JSONDecoder().decode(RemotePairing.self, from: data)
-                startPolling()
-            }
-        } catch { status = "Unlock this iPhone to restore the desktop connection." }
+        account.$session.map { $0?.user.id }.removeDuplicates().sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.clearState(); self?.startPolling() }
+        }.store(in:&subscriptions)
+        startPolling()
     }
-    func receive(_ url: URL) { pairingDraft = url.absoluteString; showPairing = true }
-    func connect(link: String) async {
-        busy = true; defer { busy = false }
+    func receive(_ url: URL) { if url.host == "auth" { showPairing = true } }
+    func select(_ device: CloudDevice) {
         do {
-            let pairing = try RemotePairing(link: link.trimmingCharacters(in: .whitespacesAndNewlines))
-            let host = pairing.baseURL.host?.trimmingCharacters(in:CharacterSet(charactersIn:"[]")) ?? ""
-            guard host != "localhost", host != "::1", !host.hasPrefix("127.") else { throw RemoteError.rejected("That address points at this iPhone. Copy the desktop’s Wi-Fi IP or Tailscale HTTPS pairing link instead.") }
-            guard let snapshot = try await client.snapshot(pairing, since: nil) else { throw RemoteError.incompatible }
-            try secrets.save(JSONEncoder().encode(pairing), account: "desktop")
-            polling?.cancel(); connection = pairing; revision = nil; sequence = 0; appliedSequence = 0
-            apply(snapshot); showPairing = false; pairingDraft = ""; error = nil
-            startPolling()
-        } catch { self.error = message(error) }
+            try account.pin(device)
+            guard let owner = account.session?.user.id else { throw CloudError.signedOut }
+            try secrets.save(Data(device.id.uuidString.utf8),account:owner.uuidString)
+            clearState(); connection = device; hostName = device.name; showPairing = false; startPolling()
+        } catch { self.error = error.localizedDescription }
     }
     func disconnect() {
-        polling?.cancel(); polling = nil; connection = nil; revision = nil
-        online = false; hasSnapshot = false; running = []; providers = []
+        if let owner = account.session?.user.id { try? secrets.delete(account:owner.uuidString) }
+        clearState(); status = "Choose your desktop"; startPolling(autoSelect:false)
+    }
+    private func clearState() {
+        epoch = UUID(); polling?.cancel(); polling = nil; connection = nil; state = nil
+        online = false; hasSnapshot = false; running = []; providers = []; defaultProvider = nil
+        drafts = [:]; pendingSends = [:]
         model?.applyRemoteSnapshot(Workspace()); model?.leavePreview()
-        try? secrets.delete(account: "desktop"); status = "Connect your desktop"
     }
     func setActive(_ active: Bool) {
-        if active { if connection != nil { startPolling() } }
-        else { polling?.cancel(); polling = nil; online = false }
+        self.active = active
+        if active { startPolling() } else { polling?.cancel(); polling = nil; online = false }
     }
-    private func startPolling() {
+    private func startPolling(autoSelect: Bool = true) {
         polling?.cancel()
-        guard connection != nil else { return }
+        guard active, account.signedIn else { status = "Sign in to connect your desktop"; return }
+        let current = epoch
         polling = Task {
-            var failures = 0
-            while !Task.isCancelled {
-                do { try await refresh(); failures = 0 }
-                catch {
-                    if Task.isCancelled { return }
-                    online = false; failures += 1; status = message(error)
-                    if case RemoteError.unauthorized = error { showPairing = true; return }
+            var ticks = 0
+            while !Task.isCancelled, current == epoch {
+                do {
+                    if ticks % 10 == 0 {
+                        try await account.sync()
+                        if connection == nil, autoSelect, let owner = account.session?.user.id {
+                            let saved = try secrets.read(account:owner.uuidString).flatMap { String(data:$0,encoding:.utf8) }.flatMap(UUID.init(uuidString:))
+                            if let device = account.hosts.first(where:{$0.id == saved}) ?? (saved == nil && account.hosts.count == 1 ? account.hosts.first:nil) {
+                                try account.pin(device); connection = device; hostName = device.name
+                            }
+                        }
+                    }
+                    if connection != nil { try await refresh() } else { status = "Choose your desktop" }
+                    ticks += 1
+                } catch {
+                    if Task.isCancelled || current != epoch { return }
+                    online = false; status = error.localizedDescription; ticks = 0
                 }
-                try? await Task.sleep(for: .milliseconds(failures == 0 ? 700 : min(15000, failures * 2000)))
+                try? await Task.sleep(for:.seconds(2))
             }
         }
     }
-    private func refresh(force: Bool = false) async throws {
-        guard let pairing = connection else { return }
-        sequence += 1; let request = sequence
-        let result = try await client.snapshot(pairing, since: force ? nil : revision)
-        try Task.checkCancellation()
-        guard connection == pairing, request >= appliedSequence else { return }
-        appliedSequence = request
-        if let result { apply(result) }
+    private func refresh() async throws {
+        guard let peer = connection else { return }; let current = epoch
+        var parts = URLComponents(); parts.path = "/v1/state"
+        if let revision = state?.revision { parts.queryItems = [URLQueryItem(name:"since",value:revision)] }
+        let response = try await client.fetch(peer,target:parts.string!)
+        try Task.checkCancellation(); guard current == epoch else { return }
+        if response.status != 204 {
+            do {
+                let patch = try CloudCoding.decoder().decode(CloudStatePatch.self,from:response.body)
+                let snapshot = try patch.applying(to:state)
+                guard snapshot.protocolVersion == 1 else { throw RemoteError.incompatible }
+                state = snapshot; hostName = snapshot.hostName; running = Set(snapshot.running)
+                providers = snapshot.providers; defaultProvider = snapshot.defaultProvider
+                model?.applyRemoteSnapshot(snapshot.workspace); hasSnapshot = true
+            } catch { state = nil; throw error }
+        }
         online = true; status = "Connected to \(hostName)"
-    }
-    private func apply(_ snapshot: RemoteSnapshot) {
-        revision = snapshot.revision; hostName = snapshot.hostName; running = Set(snapshot.running)
-        providers = snapshot.providers; defaultProvider = snapshot.defaultProvider
-        model?.applyRemoteSnapshot(snapshot.workspace); hasSnapshot = true; online = true; status = "Connected to \(hostName)"
     }
     @discardableResult
     func command(_ command: RemoteCommand) async -> Bool {
-        guard online, let pairing = connection else { error = "Reconnect to your desktop before changing the workspace."; return false }
+        guard online, let peer = connection else { error = "Reconnect to your desktop before changing the workspace."; return false }
+        let current = epoch
         do {
-            _ = try await client.fetch(pairing, path: "/v1/command", command: command)
-            try? await refresh(force: true)
-            return true
-        } catch { self.error = message(error); return false }
+            _ = try await client.fetch(peer,target:"/v1/command",command:command)
+            guard current == epoch else { return false }
+            try? await refresh(); return true
+        } catch { self.error = error.localizedDescription; return false }
     }
     func send(_ text: String, bot: Bot) async -> Bool {
-        let id = pendingSends[bot.id].flatMap { $0.0 == text ? $0.1 : nil } ?? UUID()
+        let id = pendingSends[bot.id].flatMap { $0.0 == text ? $0.1:nil } ?? UUID()
         pendingSends[bot.id] = (text,id)
-        let accepted = await command(RemoteCommand(requestID: id, action: "send", botID: bot.id, text: text))
+        let accepted = await command(RemoteCommand(requestID:id,action:"send",botID:bot.id,text:text))
         if accepted { pendingSends[bot.id] = nil }; return accepted
     }
     func models(_ provider: CLIProvider) async -> [AvailableCLIModel] {
-        guard let pairing = connection, let data = try? await client.fetch(pairing, path: "/v1/models", query: [URLQueryItem(name: "provider", value: provider.rawValue)]) else { return [] }
-        return (try? JSONDecoder().decode([AvailableCLIModel].self, from: data)) ?? []
+        guard let peer = connection, let response = try? await client.fetch(peer,target:"/v1/models?provider=" + provider.rawValue) else { return [] }
+        return (try? CloudCoding.decoder().decode([AvailableCLIModel].self,from:response.body)) ?? []
     }
     func files(_ bot: Bot) async -> [RemoteFile] {
-        guard let pairing = connection, let data = try? await client.fetch(pairing, path: "/v1/files", query: [URLQueryItem(name: "bot", value: bot.id.uuidString)]) else { return [] }
-        return (try? JSONDecoder().decode([RemoteFile].self, from: data)) ?? []
+        guard let peer = connection, let response = try? await client.fetch(peer,target:"/v1/files?bot=" + bot.id.uuidString) else { return [] }
+        return (try? CloudCoding.decoder().decode([RemoteFile].self,from:response.body)) ?? []
     }
-    private func message(_ error: Error) -> String { (error as? RemoteError)?.errorDescription ?? RemoteError.unavailable.errorDescription! }
 }
