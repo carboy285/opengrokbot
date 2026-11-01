@@ -19,3 +19,27 @@ On the hosting Mac/PC, sign into Settings → Computer and enable Allow phone ac
 A roster can appear before full history. While the status says loading chat history, the displayed snippet is only a preview. If the full workspace exceeds the encrypted relay limit, the error explains that older conversations must be exported on the host.
 
 No automated tests, syntax checks, UI automation, test database queries or physical-device validation were run, as requested. Existing relay logs were inspected for diagnosis. Installer compilation/packaging is recorded separately and does not establish runtime interoperability.
+
+
+## Visible local browsers
+
+Bot details → **Open local browser** opens a native browser window on the hosting computer. Mac uses WebKit with a persistent data store identified by Bot UUID; Windows uses a sandboxed Chromium WebContentsView with a persistent session partition identified by Bot UUID. Cookies/logins remain local and separate for each Bot. The existing browse_web tool now navigates and reads that visible local browser instead of Browserbase; the cloud adapter and provider configuration UI were removed. Windows supports HTTP/HTTPS; Mac accepts HTTPS. At most eight browser windows can be open together. Browser permissions/downloads are not automatically granted. Use the window to click, type or sign in manually.
+
+Approved phone and desktop viewers can open the browser on the host and fetch a bounded JPEG still preview over the existing encrypted relay. Previews refresh manually and do not provide interactive remote desktop control. They are not permanent cloud screenshots. Browser pages are untrusted input; page text is returned with a bounded size and labeled as context.
+
+Implementation references: [WebKit profile data stores](https://webkit.org/blog/14423/building-profiles-with-new-webkit-api/) and [Electron persistent sessions](https://www.electronjs.org/docs/latest/api/session).
+
+## Linux VM setup
+
+The user chose Linux guests. In Bot details, install the supported manager using the download link, download the Linux guest asset, then choose the setup action. OpenGrokBot does not silently install a privileged hypervisor or accept OS installer prompts.
+
+- **Mac:** install [UTM](https://mac.getutm.app/) into Applications, download a Linux `.utm` template from the [gallery](https://mac.getutm.app/gallery/) matching the Mac's architecture, and select it. Setup imports the template and duplicates it for this Bot with 2 CPU cores and 4 GB RAM, saves the assigned VM UUID, and opens the UTM console. Disk size comes from the template. Allow macOS's Automation request to control UTM. Failed imports may leave a VM in UTM; inspect it before retrying. The source template is not deleted. [UTM automation reference](https://docs.getutm.app/scripting/reference/).
+- **Windows:** install [VirtualBox 7.2+](https://www.virtualbox.org/wiki/Downloads), then select an [Ubuntu 24.04 x64 desktop ISO](https://releases.ubuntu.com/24.04/) or prepared Linux OVA. ISO setup creates a separate 2-core/4-GB VM with a 32-GB VDI, NAT networking, clipboard/drag-and-drop disabled, a random guest login and an unattended-install request with Guest Additions. The installer runs in the visible console and may take several minutes. OpenGrokBot stores the login encrypted with Windows device storage; **Copy guest login** retrieves it for the owner. The VM manager's installation media may also contain guest-install credentials. The temporary password input file is removed after the manager consumes it. OVA imports keep template disk size and credentials. Interrupted setup retains the VM record instead of deleting disks. [VirtualBox command reference](https://docs.oracle.com/en/virtualization/virtualbox/7.2/user/vboxmanage.html).
+
+The AI CLI remains on the host. Optional `vm_exec` actions execute a bounded command in the assigned guest only after the owner enables **Allow this Bot to run guest commands**. UTM requires qemu-guest-agent in the Linux guest and can execute as guest root; VirtualBox ISO guests require Guest Additions and the saved guest login. Imported OVAs use their existing logins and do not expose this guest-command toggle. Guest output is untrusted context, not new human approval. A VM console is visible on the host; VM remote-desktop streaming and installing a separate guest AI agent are not provided. A UTM command that times out may continue inside the guest.
+
+## Recent Bot order
+
+Unpinned Bots sort by the newest chat-open timestamp or message activity, newest first. Chat opens are persisted on the hosting computer and carried in workspace snapshots so phone and desktop viewers converge. Pinned order is preserved. Unused Bots keep their existing relative order. Drag/folder organization remains available, but unpinned recency determines their displayed order.
+
+Browser/VM managers were not launched and guests were not installed in this Linux workspace. VM creation, guest tools, browser isolation and physical-device interoperability were not runtime-tested. Compilation/packaging results are recorded with the release downloads.

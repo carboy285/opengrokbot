@@ -47,6 +47,7 @@ const pendingSends=new Map();
 let folderFilter='*',draggedBot=null,draftTimer,displayedBot=null,cloudStatus=null;
 function persistDrafts(){clearTimeout(draftTimer);draftTimer=setTimeout(()=>{bridge.saveDrafts?.(Object.fromEntries(drafts)).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>toast('Your draft could not be saved.'));},400);}
 const isPinned=bot=>bot.isPinned??!!bot.isMain;
+const recentBots=bots=>{const times=new Map();for(const entry of workspace.entries){const time=Date.parse(entry.date)||0;times.set(entry.botID,Math.max(times.get(entry.botID)||0,time));}return bots.map((bot,index)=>({bot,index,time:Math.max(times.get(bot.id)||0,Date.parse(bot.lastUsedAt)||0)})).sort((a,b)=>b.time-a.time||a.index-b.index).map(x=>x.bot);};
 const orderedBots=()=>workspace.bots.map((bot,index)=>({bot,index})).sort((a,b)=>(a.bot.sortOrder??a.index)-(b.bot.sortOrder??b.index)).map(x=>x.bot);
 async function organize(bot,changes){try{if(bridge.organizeBot)workspace=await result(bridge.organizeBot(bot.id,changes));else{const next=structuredClone(workspace);Object.assign(next.bots.find(x=>x.id===bot.id),changes);if(!await persist(next))return;}render();}catch(error){toast(error.message);}}
 const dialog = $('#panel');
@@ -63,14 +64,14 @@ async function persist(next) {
   try { await result(bridge.save(next)); workspace = next; return true; }
   catch (error) { toast(error.message); return false; }
 }
-function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id; render(); }
+function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});render(); }
 function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
   const matches=bot=>(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
   const primary=$('#primary-bot');primary.replaceChildren();
   for(const bot of orderedBots().filter(x=>isPinned(x)&&matches(x))){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
   const list=$('#bot-list');list.replaceChildren();
-  const visible=orderedBots().filter(bot=>!isPinned(bot)&&matches(bot));
+  const visible=recentBots(orderedBots().filter(bot=>!isPinned(bot)&&matches(bot)));
   for(const bot of visible){
     const row=button('',()=>selectBot(bot.id),`bot-row ${bot.id===selected?'selected':''}`);row.draggable=true;
     const preview=entries(bot).at(-1)?.text||bot.purpose;
@@ -161,6 +162,8 @@ function renderInspector(){
  for(const name of ['Details','Library','Computer']){const tab=button(name,()=>{inspectorTab=name;renderInspector();},name===inspectorTab?'active':'');tab.setAttribute('aria-current',String(name===inspectorTab));tabs.append(tab);}
  const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
  if(inspectorTab==='Details'){
+  body.append(button('Set up / open Linux VM',()=>showBotVM(bot)));
+  append(body,node('h3','','Local browser'),node('p','muted','A visible browser on this computer, with a separate cookie/login profile for this Bot.'),button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(error){toast(error.message);}}));
   append(body,node('h3','','Scheduled tasks'),node('p','muted','Ask this Bot to schedule a one-time or recurring task, or run when another Bot messages it. Tasks run while this desktop app is running; missed times catch up once.'));
   for(const task of bot.schedules||[]){append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}`),button('Cancel task',async()=>{await result(bridge.cancelTask(bot.id,task.id));}));}
   if(bot.memberIDs){body.append(node('h3','','Group members'));for(const member of workspace.bots.filter(x=>bot.memberIDs.includes(x.id)))body.append(button(member.name,()=>selectBot(member.id)));body.append(node('p','muted','Each member answers with its own provider and model.'));}
@@ -307,7 +310,7 @@ function showSettings(tab = 'General') {
     for (const [value,label] of [['system','Follow System'],['dark','Dark'],['light','Light']]) { const option=node('option','',label); option.value=value; select.append(option); } select.value=localStorage.getItem('appearance') || 'dark'; select.addEventListener('change',()=>applyTheme(select.value));
     append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),node('span','muted','Bot color')),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
     append(page,promo,node('p','settings-label','Account'),account,node('p','settings-label','Appearance'),appearance,button('Reset conversations…',()=>confirmReset()));
-  } else if (tab === 'Computer') { page.append(button('View another computer on this account',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}})); page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderCloudBrowser(page); }
+  } else if (tab === 'Computer') { page.append(button('View another computer on this account',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}})); page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); page.append(node('p','muted','Each Bot has its own visible local browser with separate cookies and login storage. Open it from Bot details. No cloud browser account is required.')); }
   else if (tab === 'Permissions') page.append(unavailable('CLI tool permissions', 'Codex runs with read-only workspace access. Other CLIs retain their own permissions. The app does not add approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
@@ -383,11 +386,16 @@ bridge.loadDrafts?.().then(response=>{if(response.ok){for(const[id,text]of Objec
 if(bridge.checkUpdates&&Date.now()-Number(localStorage.getItem('lastUpdateCheck')||0)>86400000){localStorage.setItem('lastUpdateCheck',String(Date.now()));bridge.checkUpdates().then(response=>{if(response.ok&&response.value.available){toast(`${response.value.version} is available. Open Settings → Updates to download it.`);$('#profile-button').classList.add('update-available');}}).catch(()=>{});}
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||event.altKey||dialog.open)return;if(event.key.toLowerCase()==='k'){event.preventDefault();const content=panel('Switch Bot');const field=node('input','field'),results=node('div','switcher-results');field.placeholder='Find a Bot…';field.setAttribute('aria-label','Find a Bot');const draw=()=>{results.replaceChildren();for(const bot of orderedBots().filter(x=>x.name.toLowerCase().includes(field.value.toLowerCase())))results.append(button(bot.name,()=>{dialog.close();selectBot(bot.id);}));};field.addEventListener('input',draw);append(content,field,results);draw();field.focus();}});
 
-async function renderCloudBrowser(page){
- const card=append(node('section','settings-card'),node('h3','','Cloud browser'),node('p','muted','Each request opens a separate browser session at Browserbase. Browsers run in the cloud; cookies and logins are not retained. Create a Browserbase account, then enter its API key and project UUID. Provider usage may be billed.'));
- const status=node('p','muted','Loading configuration…'),key=node('input','field'),project=node('input','field');key.type='password';key.placeholder='Browserbase API key';key.setAttribute('aria-label',key.placeholder);project.placeholder='Browserbase project UUID';project.setAttribute('aria-label',project.placeholder);
- append(card,status,key,project,button('Save connection',async()=>{try{await result(bridge.browserConfigure(key.value,project.value));key.value='';status.textContent='Connection configuration saved. Ask a Bot to read an HTTPS page.';}catch(error){status.textContent=error.message;}}),button('Disconnect',async()=>{try{await result(bridge.browserRemove());status.textContent='Not connected';}catch(error){status.textContent=error.message;}}));page.append(card);
- try{const value=await result(bridge.browserStatus());status.textContent=value.configured?'Connection configuration saved':'Not connected';}catch(error){status.textContent=error.message;}
-}
 
 if(bridge.openMirror){const switcher=button('This computer ▾',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}});switcher.className='folder-filter';switcher.setAttribute('aria-label','Switch to another computer on this account');$('#search-slot').before(switcher);}
+
+async function showBotVM(bot){
+ const content=panel(bot.name+' · Linux VM');append(content,node('p','muted','Install VirtualBox 7.2+, then download an Ubuntu 24.04 desktop ISO (x64) or supply a prepared Linux OVA. Setup creates a VM for this Bot: 2 CPU cores, 4 GB RAM and a 32 GB disk for ISO installs. OVA imports keep their disk size.'));
+ append(content,button('Download VirtualBox',()=>bridge.openDocs('https://www.virtualbox.org/wiki/Downloads')),button('Download Ubuntu Linux',()=>bridge.openDocs('https://releases.ubuntu.com/24.04/')));
+ const info=node('p','muted','Loading VM settings…'),controls=node('div');append(content,info,controls,node('p','muted','The console opens locally in VirtualBox. The AI CLI remains on the host. Optional Bot commands run inside Linux through Guest Additions; no separate guest AI agent is installed. ISO installation takes time inside the console. Copy guest login after setup.'));
+ const draw=async()=>{const state=await result(bridge.vmStatus(bot.id));info.textContent=state.assigned?'VM: '+state.name+' · '+state.state:state.installed?'VirtualBox found. Choose a Linux guest image to set up.':'Install VirtualBox, then reopen this panel.';controls.replaceChildren();
+  const setup=button(state.assigned?'Open VM console':'Choose image and set up VM…',async()=>{setup.disabled=true;info.textContent=state.assigned?'Opening console…':'Setting up VM. This may take several minutes…';try{await result(state.assigned?bridge.vmOpen(bot.id):bridge.vmSetup(bot.id));await draw();}catch(error){info.textContent=error.message;setup.disabled=false;}});setup.disabled=!state.installed||state.busy;controls.append(setup);
+  if(state.hasCredentials){const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=state.commandsEnabled;checkbox.addEventListener('change',async()=>{try{await result(bridge.vmCommands(bot.id,checkbox.checked));}catch(error){info.textContent=error.message;}});append(controls,append(node('label'),checkbox,node('span','',' Allow this Bot to run guest commands (requires Guest Additions)')));}
+  if(state.hasCredentials)controls.append(button('Copy guest login',async()=>{try{const login=await result(bridge.vmCredentials(bot.id));await navigator.clipboard.writeText('Username: '+login.username+'\nPassword: '+login.password);info.textContent='Guest login copied.';}catch(error){info.textContent=error.message;}}));
+ };try{await draw();}catch(error){info.textContent=error.message;}
+}

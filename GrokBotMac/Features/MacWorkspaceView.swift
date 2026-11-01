@@ -56,6 +56,7 @@ struct MacWorkspaceView: View {
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
         .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
+        .onChange(of: desktop.selectedID) { _, id in if let id { _ = app.touchBot(id) } }
         .onChange(of: desktop.showSearch) { _, visible in searchFocused = visible }
         .foregroundStyle(.primary.opacity(0.9))
         .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its local notes?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
@@ -111,7 +112,7 @@ struct MacWorkspaceView: View {
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    ForEach(sidebarBots.filter { !pinned($0) }) { bot in
+                    ForEach(app.recentlyUsed(sidebarBots.filter { !pinned($0) })) { bot in
                         Button { desktop.selectedID = bot.id } label: {
                             HStack(spacing: 16) {
                                 MacBotAvatar(color: bot.color, size: 39, appearance: bot.appearance)

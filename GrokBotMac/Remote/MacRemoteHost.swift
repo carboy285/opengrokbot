@@ -150,7 +150,7 @@ final class MacRemoteHost: ObservableObject {
                                     let error = RemoteHostResponse.error(400, "The remote request format is unsupported. Update both devices to 0.7.2.")
                                     response = CloudResponse(status: error.status, body: error.body)
                                 }
-                                if self.replies.count >= 128 { self.replies.removeAll() }; self.replies[cacheKey] = response
+                                if response.body.count <= 128_000 { if self.replies.count >= 128 { self.replies.removeAll() }; self.replies[cacheKey] = response }
                             }
                             // An approval revoked while a CLI model lookup awaited must also block its result.
                             guard self.enabled, self.account.approved(peer) else { continue }
@@ -229,6 +229,9 @@ final class MacRemoteHost: ObservableObject {
             if request.method == "GET", parts.path == "/v1/state", let snapshot = snapshot() {
                 return query("since") == revision ? RemoteHostResponse(status: 204) : try .json(snapshot)
             }
+            if request.method == "GET", parts.path == "/v1/browser", let bot = app.workspace.bots.first(where: { $0.id.uuidString.lowercased() == query("bot")?.lowercased() }) {
+                return try .json(try await LocalBotBrowsers.shared.preview(bot))
+            }
             if request.method == "GET", parts.path == "/v1/models", let provider = query("provider").flatMap(CLIProvider.init(rawValue:)), let cli = desktop.installedCLIs.first(where: { $0.provider == provider }) {
                 let models = await Task.detached { CLIModelCatalog.models(for: cli) }.value
                 return try .json(models)
@@ -243,6 +246,14 @@ final class MacRemoteHost: ObservableObject {
             if receipts.contains(command.requestID) || app.workspace.entries.contains(where: { $0.id == command.requestID }) { return try .json(["accepted":true]) }
             let bot = app.workspace.bots.first { $0.id == command.botID }
             switch command.action {
+            case "touch_bot":
+                guard let bot, app.touchBot(bot.id) else { return .error(404, "Bot not found") }
+            case "open_vm":
+                guard let bot, MacBotVMs.shared.assigned(bot.id) != nil else { return .error(409, "Set up this Bot’s Linux VM on the host desktop first.") }
+                await MacBotVMs.shared.open(bot)
+            case "open_browser":
+                guard let bot else { return .error(404, "Bot not found") }
+                _ = try LocalBotBrowsers.shared.open(bot, address: command.text)
             case "cancel_task":
                 guard let id = command.botID, let taskID = command.taskID, app.removeSchedule(taskID, botID: id) else { return .error(400, "Task could not be cancelled.") }
             case "update_avatar":

@@ -1,5 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
+  vmCommands:(id,value)=>ipcRenderer.invoke('vm:commands',id,value),
+  vmStatus:id=>ipcRenderer.invoke('vm:status',id),
+  vmSetup:id=>ipcRenderer.invoke('vm:setup',id),
+  vmOpen:id=>ipcRenderer.invoke('vm:open',id),
+  vmCredentials:id=>ipcRenderer.invoke('vm:credentials',id),
+  touchBot:id=>ipcRenderer.invoke('bot:touch',id),
+  openBrowser:(id,address)=>ipcRenderer.invoke('browser:open',id,address),
   openMirror:()=>ipcRenderer.invoke('workspace:mirror'),
   cloudStatus:()=>ipcRenderer.invoke('cloud:status'),
   cloudSignIn:(email,password,create)=>ipcRenderer.invoke('cloud:sign-in',email,password,create),
@@ -26,9 +33,6 @@ contextBridge.exposeInMainWorld('desktop', {
   checkLogin:()=>ipcRenderer.invoke('setup:login'),
   completeSetup:()=>ipcRenderer.invoke('setup:complete'),
   send:(id,text,requestID)=>ipcRenderer.invoke('chat:send',id,text,requestID),
-  browserStatus:()=>ipcRenderer.invoke('browser:status'),
-  browserConfigure:(key,project)=>ipcRenderer.invoke('browser:configure',key,project),
-  browserRemove:()=>ipcRenderer.invoke('browser:remove'),
   cancelTask:(botID,id)=>ipcRenderer.invoke('tasks:cancel',botID,id),
   retry:id=>ipcRenderer.invoke('chat:retry',id),
   stop:id=>ipcRenderer.invoke('chat:stop',id),

@@ -248,6 +248,11 @@ final class RemoteController: ObservableObject {
         var seen = Set<String>()
         return ((try? CloudCoding.decoder().decode([AvailableCLIModel].self,from:response.body)) ?? []).filter { seen.insert($0.id).inserted }
     }
+    func browserPreview(_ botID: UUID) async throws -> RemoteBrowserPreview {
+        guard let peer = connection else { throw CloudError.message("Choose a hosting computer first.") }
+        let response = try await client.fetch(peer, target: "/v1/browser?bot=" + botID.uuidString)
+        return try CloudCoding.decoder().decode(RemoteBrowserPreview.self, from: response.body)
+    }
     func files(_ bot: Bot) async -> [RemoteFile] {
         guard let peer = connection, let response = try? await client.fetch(peer,target:"/v1/files?bot=" + bot.id.uuidString) else { return [] }
         return (try? CloudCoding.decoder().decode([RemoteFile].self,from:response.body)) ?? []

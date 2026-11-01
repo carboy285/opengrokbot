@@ -56,7 +56,7 @@ struct ConversationView: View {
                     scrollToLatest(proxy)
                 }
             }
-            .task(id: bot.id) { nearBottom = true; scrollToLatest(proxy) }
+            .task(id: bot.id) { nearBottom = true; scrollToLatest(proxy); _ = await remote.command(RemoteCommand(action: "touch_bot", botID: bot.id)) }
             .onChange(of: model.entries(for: bot).last) { _, _ in
                 if nearBottom && !userScrolling { scrollToLatest(proxy) }
             }

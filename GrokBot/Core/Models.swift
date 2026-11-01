@@ -14,6 +14,7 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var isPinned: Bool? = nil
     var folder: String? = nil
     var sortOrder: Int? = nil
+    var lastUsedAt: String? = nil
     var schedules: [BotSchedule]? = nil
 }
 

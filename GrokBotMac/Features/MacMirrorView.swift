@@ -16,6 +16,8 @@ struct MacMirrorView: View {
     @State private var name = ""
     @State private var purpose = ""
     @State private var editing: Bot?
+    @State private var browser = false
+    private var roster: [Bot] { workspace.visibleBots.filter { remote.isPinned($0) } + workspace.recentlyUsed(workspace.visibleBots.filter { !remote.isPinned($0) }) }
     private var bot: Bot? { workspace.workspace.bots.first { $0.id == selected } }
     var body: some View {
         VStack(spacing: 0) {
@@ -35,7 +37,7 @@ struct MacMirrorView: View {
                 VStack(spacing: 12) { Text("Sign in under Settings → Computer to view another computer."); Button("Close") { dismiss() } }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {
-                    List(workspace.workspace.bots, selection: $selected) { item in
+                    List(roster, selection: $selected) { item in
                         HStack { MacBotAvatar(color: item.color, size: 32, appearance: item.appearance); Text(item.name); if remote.isPinned(item) { Image(systemName: "pin.fill").font(.caption) } }
                             .tag(item.id)
                             .contextMenu {
@@ -58,9 +60,10 @@ struct MacMirrorView: View {
         .background(MacTheme.canvas)
         .task { remote.account.useAccount(from: source); remote.attach(workspace); remote.setActive(true) }
         .onDisappear { remote.setActive(false) }
-        .onChange(of: selected) { old, _ in if let old { remote.drafts[old] = draft }; draft = selected.flatMap { remote.drafts[$0] } ?? ""; follow = true }
+        .onChange(of: selected) { old, _ in if let old { remote.drafts[old] = draft }; draft = selected.flatMap { remote.drafts[$0] } ?? ""; follow = true; if let id = selected { Task { _ = await remote.command(RemoteCommand(action: "touch_bot", botID: id)) } } }
         .onChange(of: remote.account.session?.user.id) { _, _ in selected = nil; draft = "" }
         .alert("Remote workspace", isPresented: Binding(get: { remote.error != nil }, set: { if !$0 { remote.error = nil } })) { Button("OK") { remote.error = nil } } message: { Text(remote.error ?? "") }
+        .sheet(isPresented: $browser) { if let bot { CloudBrowserView(botID: bot.id, remote: remote).frame(width: 900, height: 700) } }
         .sheet(item: $editing) { bot in
             BotAvatarPicker(bot: bot, save: { appearance in await remote.command(RemoteCommand(action: "update_avatar", botID: bot.id, appearance: appearance)) }, close: { editing = nil }).frame(width: 450, height: 650)
         }
@@ -78,6 +81,7 @@ struct MacMirrorView: View {
             HStack {
                 Button { editing = bot } label: { MacBotAvatar(color: bot.color, size: 36, appearance: bot.appearance) }.buttonStyle(.plain).disabled(!remote.online)
                 Text(bot.name).font(.headline)
+                Button("Browser") { browser = true }.disabled(!remote.online)
                 Menu("Provider") {
                     ForEach(remote.providers) { provider in
                         Button(provider.provider.name + " · default model") {

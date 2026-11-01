@@ -19,6 +19,21 @@ final class AppModel: ObservableObject {
         }.sorted { ($0.element.sortOrder ?? $0.offset) < ($1.element.sortOrder ?? $1.offset) }.map(\.element)
     }
 
+    func recentlyUsed(_ bots: [Bot]) -> [Bot] {
+        var latest: [UUID:Date] = [:]
+        for entry in workspace.entries { latest[entry.botID] = max(latest[entry.botID] ?? .distantPast, entry.date) }
+        for bot in bots { if let value = bot.lastUsedAt.flatMap(BotSchedule.date) { latest[bot.id] = max(latest[bot.id] ?? .distantPast, value) } }
+        return bots.enumerated().sorted { left, right in
+            let a = latest[left.element.id] ?? .distantPast, b = latest[right.element.id] ?? .distantPast
+            return a == b ? left.offset < right.offset : a > b
+        }.map(\.element)
+    }
+    @discardableResult
+    func touchBot(_ id: UUID) -> Bool {
+        guard let index = workspace.bots.firstIndex(where: { $0.id == id }) else { return false }
+        if let last = workspace.bots[index].lastUsedAt.flatMap(BotSchedule.date), Date().timeIntervalSince(last) < 2 { return true }
+        return commit { $0.bots[index].lastUsedAt = ISO8601DateFormatter().string(from: Date()) }
+    }
     func enterPreview() {
         do { workspace = try store.load() ?? .fresh }
         catch {
@@ -131,7 +146,7 @@ final class AppModel: ObservableObject {
             func target(_ name: String) -> Bot? { value.bots.first { $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame || $0.name.caseInsensitiveCompare(name) == .orderedSame } }
             for action in parsed.actions {
                 switch action.action {
-                case "browse_web": break // Executed by the desktop after successful CLI completion.
+                case "browse_web", "open_vm", "vm_exec": break // Executed by the desktop after successful CLI completion.
                 case "schedule_task":
                     guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, !(value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).contains(where: { $0.name == action.name && $0.enabled }),
                           let task = BotSchedule.make(action), let index = value.bots.firstIndex(where: { $0.id == bot.id }), (value.bots[index].schedules ?? []).count < 100 else { note("Task not scheduled: use a unique name, a future ISO date, valid timezone and recurrence, or message_received trigger."); continue }

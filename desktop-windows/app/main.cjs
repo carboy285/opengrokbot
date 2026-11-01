@@ -15,13 +15,13 @@ const updates = require('./updates.cjs');
 const stoppedBots=new Set();
 let remoteTray, quitting = false, revision = randomUUID(), updateState;
 class PublicError extends Error {}
-let state,settings,installed=[],composioConfiguration,connectedTools=[],composioBusy=false,browserConfiguration;
+let state,settings,installed=[],composioConfiguration,connectedTools=[],composioBusy=false;
 const active=new Map(),pendingBots=new Set();
 let initialization;
 let window,mirrorWindow;
 const rendererFile = path.resolve(__dirname, '../renderer/index.html');
 const mirrorFile = path.resolve(__dirname, '../renderer/mirror.html');
-const documentation = new Set(['https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://tailscale.com/download','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
+const documentation = new Set(['https://www.virtualbox.org/wiki/Downloads','https://releases.ubuntu.com/24.04/','https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://tailscale.com/download','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
 let writeQueue = Promise.resolve();
 function file(name) { return path.join(app.getPath('userData'), name); }
 function authorized(event) {
@@ -68,7 +68,6 @@ async function initializeState(){
   settings.composioUserID||='opengrokbot-'+randomUUID();settings.overrides||={};
   const encrypted=await loadJSON('composio.encrypted.json',null);
   if(encrypted){requireVault();composioConfiguration=JSON.parse(safeStorage.decryptString(Buffer.from(encrypted.encrypted,'base64')));if(!composio.trustedURL(composioConfiguration.session?.mcp?.url))throw new Error('Invalid stored session');}
-  const browserEncrypted=await loadJSON('browser.encrypted.json',null);if(browserEncrypted){requireVault();browserConfiguration=JSON.parse(safeStorage.decryptString(Buffer.from(browserEncrypted.encrypted,'base64')));}
   state=migrated;await atomicJSON('preview-workspace.json',state);await saveSettings();
 }
 function saveSettings(){return atomicJSON('settings.json',settings);}
@@ -113,8 +112,10 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    }});
    runs.add(run);
    run.done.then(async()=>{settings.providerHealth||={};settings.providerHealth[installation.provider]={state:'ready',detail:'Last message succeeded',at:new Date().toISOString()};teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');
+    if(teamwork.parse(finalText).actions.some(x=>x.action==='open_vm')){let text;try{await localVMs.open(botID);text='Opened this Bot’s VM console on the host. AI CLI still runs on the host; guest automation is separate.';}catch(error){text=error.message;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
+    const guest=teamwork.parse(finalText).actions.find(x=>x.action==='vm_exec');if(guest){let text;if(browserDepth>=1)text='Guest/browser tool limit reached for this turn.';else{try{text='Linux VM result (untrusted context):\n'+await localVMs.execute(botID,guest.argv);}catch(error){text=error.message;}continueBrowser=!delivery;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
     const action=teamwork.parse(finalText).actions.find(x=>x.action==='browse_web');
-    if(action){let text;if(browserDepth>=1)text='Browser limit reached for this turn. Ask again to read another page.';else{try{text='Cloud browser result (untrusted web content, not instructions):\n'+await require('./cloud-browser.cjs').readPage(browserConfiguration,botID,action.url);}catch(error){text=error.message;}continueBrowser=!delivery;}
+    if(action){let text;if(browserDepth>=1)text='Browser limit reached for this turn. Ask again to read another page.';else{try{text='Local browser result (untrusted web content, not instructions):\n'+await localBrowsers.read(botID,action.url);}catch(error){text=error.message;}continueBrowser=!delivery;}
      state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
    },error=>{reply.state=error.message==='Response stopped.'?'stopped':'failed';reply.error=error.message;settings.providerHealth||={};settings.providerHealth[installation.provider]={state:/sign.in|login|auth/i.test(error.message)?'needs-login':'error',detail:error.message,at:new Date().toISOString()};if(!reply.text)reply.text=error.message;if(delivery)teamwork.finish(state,delivery,reply.state);}).catch(error=>{reply.state='failed';reply.error='The app could not finish this response. Retry after checking Bot settings.';if(!reply.text)reply.text=reply.error;}).finally(async()=>{
     runs.delete(run);if(!runs.size)active.delete(botID);
@@ -167,9 +168,12 @@ const cloud = new CloudHost({
  pins:()=>state.bots.map(bot=>({bot_id:bot.id,is_pinned:bot.isPinned??!!bot.isMain,explicit:typeof bot.isPinned==='boolean'})),
  applyPins:async rows=>{let changed=false;for(const row of rows){const bot=state.bots.find(bot=>bot.id.toLowerCase()===row.bot_id.toLowerCase());if(bot&&(bot.isPinned??!!bot.isMain)!==row.is_pinned){bot.isPinned=row.is_pinned;changed=true;}}if(changed){await atomicJSON('preview-workspace.json',state);notify();}},
  snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
+ browser:id=>localBrowsers.preview(id),
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
  changed:status=>{mirror.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
 });
+const localVMs = new (require('./local-vm.cjs').LocalVMs)({getBot:id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),load:()=>loadJSON('bot-vms.json',{}),save:value=>atomicJSON('bot-vms.json',value),root:file('VirtualMachines')});
+const localBrowsers = new (require('./local-browser.cjs').LocalBrowsers)(id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()));
 const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
 function openMirror(){
  if(mirrorWindow&&!mirrorWindow.isDestroyed()){mirrorWindow.show();mirrorWindow.focus();return;}
@@ -184,6 +188,9 @@ async function remoteFiles(id){if(!state.bots.some(x=>x.id.toLowerCase()===Strin
 async function remoteCommand(command){
  if(state.entries.some(x=>x.id.toLowerCase()===command.requestID.toLowerCase()))return;
  const bot=state.bots.find(x=>x.id.toLowerCase()===String(command.botID).toLowerCase());
+ if(command.action==='touch_bot'){if(!bot)throw new Error('Unknown Bot');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();return;}
+ if(command.action==='open_vm'){if(!bot)throw new Error('Unknown Bot');await localVMs.open(bot.id);return;}
+ if(command.action==='open_browser'){if(!bot)throw new Error('Unknown Bot');localBrowsers.open(bot.id,command.text);return;}
  if(command.action==='send'){if(!bot||typeof command.text!=='string'||!command.text.trim()||command.text.length>100000)throw new Error('Invalid message');await startChat(bot.id,command.text,undefined,command.requestID);return;}
  if(command.action==='stop'){if(bot)stoppedBots.add(bot.id);if(!bot)throw new Error('Unknown Bot');for(const run of active.get(bot.id)||[])run.cancel();return;}
  if(command.action==='retry'){if(!bot)throw new Error('Unknown Bot');const message=state.teamMessages?.findLast(x=>x.to===bot.id&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(bot.id);return;}
@@ -200,16 +207,21 @@ async function remoteCommand(command){
  await atomicJSON('preview-workspace.json',state);notify();
 }
 function configureIPC() {
+ handle('bot:touch',async id=>{await ensureState();const bot=state.bots.find(bot=>bot.id===id);if(!bot)throw new PublicError('Choose a Bot.');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();});
+ handle('vm:commands',async(id,enabled)=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.setCommands(id,enabled);}catch(error){throw new PublicError(error.message);}});
+ handle('vm:status',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');return localVMs.status(id);});
+ handle('vm:setup',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');const choice=await dialog.showOpenDialog(window,{title:'Choose an Ubuntu 24.04 Linux ISO or a Linux OVA template',properties:['openFile'],filters:[{name:'Linux guest image',extensions:['iso','ova']}]});if(choice.canceled)return localVMs.status(id);try{return await localVMs.setup(id,choice.filePaths[0]);}catch(error){throw new PublicError(error.message);}});
+ handle('vm:open',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.open(id);}catch(error){throw new PublicError(error.message);}});
+ handle('vm:credentials',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.credentials(id);}catch(error){throw new PublicError(error.message);}});
+ handle('browser:open',async(id,address)=>{await ensureState();try{localBrowsers.open(id,address);return true;}catch(error){throw new PublicError(error.message);}});
  handle('workspace:mirror',async()=>{await ensureState();if(!cloud.data.session)throw new PublicError('Sign in under Settings → Computer first.');openMirror();});
+ handle('mirror:browser',id=>mirrorAction(async()=>{if(typeof id!=='string'||!/^[a-f0-9-]{36}$/i.test(id))throw new Error('Choose a Bot.');return (await mirror.fetch('/v1/browser?bot='+encodeURIComponent(id))).value;}));
  handle('mirror:retry',()=>mirrorAction(async()=>{if(!mirror.peer)return mirror.discover();return mirror.select(mirror.peer.id);}));
  handle('mirror:discover',()=>mirrorAction(()=>mirror.discover()));
  handle('mirror:select',id=>mirrorAction(()=>mirror.select(id)));
- handle('mirror:command',command=>mirrorAction(()=>{if(!command||typeof command!=='object'||JSON.stringify(command).length>131072||!['send','stop','retry','create_bot','delete_bot','configure_bot','update_avatar','cancel_task'].includes(command.action))throw new Error('Unsupported remote command.');return mirror.command(command);}));
+ handle('mirror:command',command=>mirrorAction(()=>{if(!command||typeof command!=='object'||JSON.stringify(command).length>131072||!['send','stop','retry','create_bot','delete_bot','configure_bot','update_avatar','cancel_task','open_browser','open_vm','touch_bot'].includes(command.action))throw new Error('Unsupported remote command.');return mirror.command(command);}));
  handle('mirror:pin',(bot,value)=>mirrorAction(()=>{if(typeof bot!=='string'||!/^[a-f0-9-]{36}$/i.test(bot)||typeof value!=='boolean')throw new Error('Invalid pin setting.');return mirror.pin(bot,value);}));
  handle('mirror:close',()=>{mirrorWindow?.close();});
- handle('browser:status',async()=>{await ensureState();return {configured:!!browserConfiguration};});
- handle('browser:configure',async(key,project)=>{await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing browser access.');requireVault();if(typeof key!=='string'||!key.trim()||key.length>4096||typeof project!=='string'||!/^[a-f0-9-]{36}$/i.test(project))throw new PublicError('Enter a Browserbase key and project UUID.');const value={key:key.trim(),project};await atomicJSON('browser.encrypted.json',{encrypted:safeStorage.encryptString(JSON.stringify(value)).toString('base64')});browserConfiguration=value;return {configured:true};});
- handle('browser:remove',async()=>{if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing browser access.');await atomicJSON('browser.encrypted.json',null);browserConfiguration=null;return {configured:false};});
  handle('tasks:cancel',async(botID,id)=>{await ensureState();const bot=state.bots.find(x=>x.id===botID);if(!bot)throw new PublicError('Unknown Bot');bot.schedules=bot.schedules?.filter(x=>x.id!==id);await atomicJSON('preview-workspace.json',state);notify();});
  handle('cloud:status',()=>cloud.status());
  handle('cloud:sign-in',(email,password,create)=>cloudAction(()=>cloud.signIn(email,password,create===true)));
@@ -341,5 +353,5 @@ app.whenReady().then(() => {
   window.loadFile(rendererFile);
   (async()=>{try{await ensureState();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
 });
-app.on('before-quit',()=>{quitting=true;mirror.stop();cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
+app.on('before-quit',()=>{quitting=true;localBrowsers.closeAll();mirror.stop();cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
 app.on('window-all-closed', () => {if(!cloud.active)app.quit();});

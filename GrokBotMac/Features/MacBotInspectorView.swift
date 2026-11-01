@@ -76,6 +76,11 @@ struct MacBotInspectorView: View {
                 Text("Drag Bots in the sidebar to change their order.").font(.caption).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 10) {
+                Button("Open local browser", systemImage: "globe") {
+                    do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription }
+                }
+                Text("This Bot has its own local browser profile. Its window is visible on this computer.").font(.caption).foregroundStyle(.secondary)
+                MacBotVMControls(bot: bot)
                 Text("Scheduled tasks").font(.headline)
                 Text("Ask this Bot to schedule a task at a time, repeat hourly/daily/weekly, or react to incoming Bot messages. This app must be running; missed times catch up once.").font(.caption).foregroundStyle(.secondary)
                 ForEach(bot.schedules ?? []) { task in

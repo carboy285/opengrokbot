@@ -117,7 +117,7 @@ struct MacSettingsView: View {
         Group {
             unavailable(title: "AI runs from this Mac", detail: "This app launches the installed CLI on this Mac. Each Bot has a separate working folder and saved CLI session. Approved iPhones can control this workspace using the same account.", icon: "desktopcomputer")
             MacRemoteAccessView(remote: desktop.remote)
-            HostedBrowserSettings()
+            Text("Bot browsers run locally, with a separate visible browser and cookie/login profile for each Bot. Open Bot details → Open local browser. No browser provider account is needed.").font(.callout).foregroundStyle(.secondary)
             Button("View another computer on this account") { desktop.panel = nil; desktop.showMirror = true }
             section("This Mac") {
                 VStack(spacing: 0) {

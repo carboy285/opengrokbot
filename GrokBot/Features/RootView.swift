@@ -29,7 +29,7 @@ struct RootView: View {
             (ids.firstIndex(of: $0.id) ?? 0) < (ids.firstIndex(of: $1.id) ?? 0)
         }
     }
-    private var bots: [Bot] { matchingBots.filter { !remote.isPinned($0) } }
+    private var bots: [Bot] { model.recentlyUsed(matchingBots.filter { !remote.isPinned($0) }) }
     private var initials: String {
         guard remote.account.signedIn else { return "" }
         let name = remote.account.email.split(separator: "@").first.map(String.init) ?? ""

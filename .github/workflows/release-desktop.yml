@@ -102,7 +102,6 @@ jobs:
           path: artifacts/windows/*Setup.exe
           if-no-files-found: error
   publish:
-    if: false # Hold 0.7.2 publication while local browsers are added.
     needs: [mac, windows, ios_sources]
     runs-on: ubuntu-latest
     permissions:
@@ -120,7 +119,9 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.7.2 fixes remote workspace loading between Windows, Mac and iPhone. Loads a small Bot roster first, then transfers conversation history. Accepts both earlier full-workspace replies and current delta envelopes, retries lost mailbox requests without replaying commands, preserves errors instead of looping through loading messages, adds Windows reconnect, and labels approvals for phones and PCs.
+          0.7.2 fixes remote workspace loading between Windows, Mac and iPhone. Loads a small Bot roster first, then transfers conversation history. Accepts both earlier full-workspace replies and current delta envelopes, retries lost mailbox requests without replaying commands, preserves errors instead of looping through loading messages, adds Windows reconnect, and labels approvals for phones and PCs. Unpinned Bots sort by recent chat use and messages; pinned order is preserved.
+
+          Includes visible per-Bot LOCAL browsers with separate persistent cookie/login storage, encrypted still previews for approved viewers, and Linux VM setup through user-installed UTM (Mac) or VirtualBox (Windows). No cloud browser account is required. Download the VM manager and Linux guest image/template through the setup links in Bot details; the app imports/provisions the VM and opens its console. Optional guest commands require guest tools and a per-Bot enable switch. Hardware VM setup and browser/remote behavior have not been validated on real devices.
 
           Update the hosting computer and viewing devices to 0.7.2. Keep the host awake with remote/phone access enabled and approve each viewing device after comparing its fingerprint. iPhone is a viewer; select the hosting Mac or Windows PC from it.
 

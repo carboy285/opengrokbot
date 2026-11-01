@@ -69,3 +69,10 @@ struct RemoteHostResponse: Sendable {
         (try? .json(["error":message],status:status)) ?? RemoteHostResponse(status:500)
     }
 }
+
+
+struct RemoteBrowserPreview: Codable, Sendable {
+    var title: String
+    var url: String
+    var imageData: Data?
+}
