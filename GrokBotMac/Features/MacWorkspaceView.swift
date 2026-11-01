@@ -96,7 +96,7 @@ struct MacWorkspaceView: View {
                 ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in Text(folder).tag(Optional(folder)) }
             }.labelsHidden().padding(.horizontal, 18).padding(.top, 16)
             if sidebarBots.contains(where: { pinned($0) }) {
-                ScrollView(.horizontal) {
+                ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(sidebarBots.filter { pinned($0) }) { bot in
                             Button { desktop.selectedID = bot.id } label: {
@@ -108,6 +108,7 @@ struct MacWorkspaceView: View {
                                 .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
                         }
                     }.padding(.horizontal, 18).padding(.vertical, 20)
+                        .background(PinnedScrollIndicators().allowsHitTesting(false).accessibilityHidden(true))
                 }.scrollIndicators(.hidden)
             }
             ScrollView {
@@ -200,6 +201,26 @@ struct MacWorkspaceView: View {
             Text("A place for your Bots").font(.system(size: 28, weight: .medium))
             Text("Create a Bot to start a separate AI conversation.").foregroundStyle(MacTheme.secondary)
             MacPillButton(title: "Create Bot", prominent: true) { desktop.panel = .newBot }
+        }
+    }
+}
+
+
+/// Enforce hidden chrome on this scroll view even with macOS “Always” scrollbars.
+private struct PinnedScrollIndicators: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) { view.hideIndicatorsAfterLayout() }
+    @MainActor
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hideIndicatorsAfterLayout() }
+        func hideIndicatorsAfterLayout() {
+            DispatchQueue.main.async { [weak self] in
+                guard let scroll = self?.enclosingScrollView else { return }
+                scroll.scrollerStyle = .overlay
+                scroll.autohidesScrollers = true
+                scroll.hasHorizontalScroller = false
+                scroll.horizontalScrollElasticity = .allowed
+            }
         }
     }
 }
