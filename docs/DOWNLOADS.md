@@ -1,4 +1,17 @@
-# Downloads · 0.7.2
+# Downloads · 0.7.3
+
+[Mac DMG](https://github.com/carboy285/opengrokbot/releases/download/v0.7.3/OpenGrokBot-0.7.3-mac-universal.dmg) · [Windows installer](https://github.com/carboy285/opengrokbot/releases/download/v0.7.3/OpenGrokBot-0.7.3-Windows-x64-Setup.exe) · [Matching iPhone/Xcode sources](https://github.com/carboy285/opengrokbot/releases/download/v0.7.3/OpenGrokBot-0.7.3-Source.zip)
+
+Hides the Mac sidebar’s pinned-Bot horizontal scrollbar even when macOS is set to always show scrollbars. Sideways scrolling remains available. Version 0.7.3, build 11; all 0.7.2 features are retained.
+
+Runtime commit: `506f3a58b45d8dfc62fe17c2ad6e84bc13b3e7a1`. [Packaging run](https://github.com/carboy285/opengrokbot/actions/runs/41360400774).
+Packaging completed successfully: the universal Mac app and iPhone sources compiled, both desktop installers were packaged, and the release was published. No automated tests were run.
+
+[Install matching iPhone sources](../INSTALL-IOS-0.7.3.md). No automated tests or physical-device validation were run, as requested. Mac remains ad-hoc signed/not notarized; Windows remains unsigned.
+
+---
+
+## Previous release · 0.7.2
 
 [Release and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.7.2)
 
