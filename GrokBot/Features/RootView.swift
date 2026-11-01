@@ -92,8 +92,11 @@ struct RootView: View {
             LazyVStack(spacing: 0) {
                 if !pinnedBots.isEmpty {
                     if pinnedBots.count == 1, let bot = pinnedBots.first {
-                        pinnedTile(bot, large: true).frame(maxWidth: .infinity)
-                            .padding(.top, 32).padding(.bottom, 28)
+                        HStack {
+                            Spacer(minLength: 0)
+                            pinnedTile(bot, large: true)
+                            Spacer(minLength: 0)
+                        }.padding(.top, 32).padding(.bottom, 28)
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 18)], spacing: 28) {
                             ForEach(pinnedBots) { bot in pinnedTile(bot, large: false) }
@@ -128,7 +131,8 @@ struct RootView: View {
                 }
                 Text(bot.name).font(large ? .title3 : .subheadline).foregroundStyle(.primary)
                     .multilineTextAlignment(.center).lineLimit(2)
-            }.frame(maxWidth: .infinity).contentShape(Rectangle())
+            }.frame(width: large ? min(max(heroSize + 24, 140), 180) : 100)
+                .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("\(bot.name), pinned. Open chat")
             .contextMenu { botActions(bot) }
     }

@@ -30,10 +30,10 @@ jobs:
       - name: Compile universal Mac app and package DMG
         run: ./scripts/build-macos.sh
       - name: Archive matching Xcode sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.6.5-Xcode/ --output=artifacts/OpenGrokBot-0.6.5-Xcode.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.6.6-Xcode/ --output=artifacts/OpenGrokBot-0.6.6-Xcode.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenGrokBot-0.6.5-Apple
+          name: OpenGrokBot-0.6.6-Apple
           path: |
             artifacts/macos/*.dmg
             artifacts/macos/*.sha256
@@ -50,4 +50,4 @@ jobs:
 
           The Mac app is ad-hoc signed and is not notarized. This development build was compiled and packaged without running unit tests, UI tests, or other test suites, as requested. Physical Mac/iPhone behavior remains unverified.
           NOTES
-          gh release create v0.6.5 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.6.5 · Apple update' --prerelease --notes-file /tmp/opengrokbot-release.md artifacts/macos/*.dmg artifacts/macos/*.sha256 artifacts/*-Xcode.zip
+          gh release create v0.6.6 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.6.6 · Apple update' --prerelease --notes-file /tmp/opengrokbot-release.md artifacts/macos/*.dmg artifacts/macos/*.sha256 artifacts/*-Xcode.zip
