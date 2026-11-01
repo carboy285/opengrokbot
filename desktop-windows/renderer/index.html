@@ -10,12 +10,12 @@
 <body>
 <div id="workspace">
   <aside class="sidebar">
-    <header class="sidebar-header"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><div class="sidebar-actions"><button class="circle" id="search-button" aria-label="Search Bots">⌕</button><button class="circle" id="new-button" aria-label="New preview Bot">＋</button></div></header>
+    <header class="sidebar-header"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><div class="sidebar-actions"><button class="circle" id="search-button" aria-label="Search Bots">⌕</button><button class="circle" id="new-button" aria-label="New Bot">＋</button></div></header>
     <div id="search-slot"></div><div id="primary-bot"></div><nav id="bot-list" aria-label="Bots"></nav>
-    <footer><button class="mode" id="status-button">● Offline preview · Not connected</button><div class="footer-actions"><button class="profile circle" id="profile-button" aria-label="Settings">LP</button><button class="apps-pill glass" id="apps-button">Connect apps <span class="app-chips"><b>N</b><b>#</b><b>G</b></span></button></div></footer>
+    <footer><button class="mode" id="status-button">Set up an AI CLI</button><div class="footer-actions"><button class="profile circle" id="profile-button" aria-label="Settings">You</button><button class="apps-pill glass" id="apps-button">Connect apps <span class="app-chips"><b>N</b><b>#</b><b>G</b></span></button></div></footer>
   </aside>
-  <main class="conversation"><div class="window-actions"><button data-window="minimize" aria-label="Minimize">−</button><button data-window="maximize" aria-label="Maximize">□</button><button data-window="close" aria-label="Close">×</button></div><div id="chat-heading" class="chat-heading glass"></div><section id="messages" aria-label="Preview conversation"></section>
-    <div class="composer-area"><form id="composer" class="glass"><button type="button" id="attachment-button" class="plus" aria-label="Conversation actions">＋</button><textarea id="draft" rows="1" placeholder="Message Grok Bot" aria-label="Local preview message"></textarea><span class="microphone" title="Voice requires a verified connection">♩</span><button type="submit" id="save-note" aria-label="Save local note">↑</button></form><small>Offline preview · Notes stay on this device · Ctrl+Enter to save</small></div>
+  <main class="conversation"><div class="window-actions"><button data-window="minimize" aria-label="Minimize">−</button><button data-window="maximize" aria-label="Maximize">□</button><button data-window="close" aria-label="Close">×</button></div><div id="chat-heading" class="chat-heading glass"></div><section id="messages" aria-label="Conversation"></section>
+    <div class="composer-area"><form id="composer" class="glass"><button type="button" id="attachment-button" class="plus" aria-label="Conversation actions">＋</button><textarea id="draft" rows="1" placeholder="Message Grok Bot" aria-label="Message"></textarea><span class="microphone" title="Voice is not supported yet">♩</span><button type="submit" id="save-note" aria-label="Send message">↑</button></form><small>Uses your CLI account · Ctrl+Enter to send</small></div>
   </main>
 </div>
 <dialog id="panel" aria-label="Workspace panel"></dialog><div id="toast" role="status" aria-live="polite"></div>

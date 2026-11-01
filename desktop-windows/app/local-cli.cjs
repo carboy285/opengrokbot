@@ -97,13 +97,14 @@ class EventParser {
   }
   part(id,text){if(!this.parts.has(id))this.order.push(id);this.parts.set(id,text);this.text=this.order.map(x=>this.parts.get(x)).join('\n\n');}
 }
-function runCLI({installation,prompt,session,directory,onEvent,timeout=600000}) {
+function runCLI({installation,prompt,session,directory,onEvent,mcpURL,timeout=600000}) {
   let child, cancelled=false, timedOut=false, cancelTimer;
   const cancel=()=>{cancelled=true;if(child&&!child.killed){child.kill('SIGINT');cancelTimer=setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},2000);cancelTimer.unref();}};
   const done=(async()=>{
     await fsp.mkdir(directory,{recursive:true});
     const promptFile=path.join(directory,'.prompt-'+randomUUID()+'.txt');
     if(installation.provider==='grok')await fsp.writeFile(promptFile,prompt,{mode:0o600});
+    const mcp=await require('./mcp-config.cjs').configure(installation.provider,directory,mcpURL);
     try {
       if(cancelled)throw new Error('Response stopped.');
       const call=invocation(installation.path,provider(installation.provider));
@@ -111,7 +112,7 @@ function runCLI({installation,prompt,session,directory,onEvent,timeout=600000}) 
       return await new Promise((resolve,reject)=>{
         const timer=setTimeout(()=>{timedOut=true;cancel();},timeout);timer.unref();
         const clean=()=>{clearTimeout(timer);clearTimeout(cancelTimer);};
-        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile)],{cwd:directory,env:environment(call.extraEnv),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
+        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
         const decoder=new StringDecoder('utf8');
         const consume=line=>{for(const event of parser.parse(line)){if(event.type==='failed')protocolFailed=true;onEvent(event);}};
         child.stdout.on('data',data=>{
@@ -132,7 +133,7 @@ function runCLI({installation,prompt,session,directory,onEvent,timeout=600000}) 
         });
         child.stdin.end(installation.provider==='grok'?'':prompt);
       });
-    } finally {if(installation.provider==='grok')await fsp.rm(promptFile,{force:true}).catch(()=>{});}
+    } finally {await mcp.cleanup();if(installation.provider==='grok')await fsp.rm(promptFile,{force:true}).catch(()=>{});}
   })();
   return {done,cancel};
 }

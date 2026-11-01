@@ -3,13 +3,19 @@ const { readFile, writeFile, mkdir, rename } = require('node:fs/promises');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { randomUUID } = require('node:crypto');
-const { validateWorkspace, previewWorkspace } = require('./workspace.cjs');
+const { validateWorkspace, previewWorkspace, migrateWorkspace } = require('./workspace.cjs');
 
 if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userData', process.env.OPENGROKBOT_TEST_DATA_DIR);
 
+const cli=require('./local-cli.cjs');
+const composio=require('./composio.cjs');
+class PublicError extends Error {}
+let state,settings,installed=[],composioConfiguration,connectedTools=[];
+const active=new Map(),pendingBots=new Set();
+let initialization;
 let window;
 const rendererFile = path.resolve(__dirname, '../renderer/index.html');
-const documentation = new Set(['https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot']);
+const documentation = new Set(['https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
 let writeQueue = Promise.resolve();
 function file(name) { return path.join(app.getPath('userData'), name); }
 function authorized(event) {
@@ -20,7 +26,7 @@ function handle(name, callback) {
   ipcMain.handle(name, async (event, ...args) => {
     if (!authorized(event)) return { ok: false, error: 'Untrusted request' };
     try { return { ok: true, value: await callback(...args) }; }
-    catch { return { ok: false, error: 'The action could not be completed. Your existing data was kept; unlock your device or check available storage and try again.' }; }
+    catch(error) { return { ok: false, error: error instanceof PublicError?error.message:'The action could not be completed. Your existing data was kept; unlock your device or check available storage and try again.' }; }
   });
 }
 async function atomicJSON(name, value) {
@@ -41,12 +47,97 @@ function requireVault() {
   if (process.platform !== 'win32' || !safeStorage.isEncryptionAvailable()) throw new Error('Windows encryption unavailable');
 }
 
+async function ensureState(){
+  if(state)return;
+  if(!initialization)initialization=initializeState().catch(error=>{initialization=null;throw error;});
+  return initialization;
+}
+async function initializeState(){
+  const loaded=await loadJSON('preview-workspace.json',previewWorkspace());validateWorkspace(loaded);
+  if(loaded.version===1)await atomicJSON('legacy-workspace-backup.json',loaded);
+  const migrated=migrateWorkspace(loaded);
+  for(const entry of migrated.entries)if(entry.state==='streaming')entry.state='stopped';
+  settings=await loadJSON('settings.json',{complete:false,selected:'',overrides:{},composioUserID:'opengrokbot-'+randomUUID()});
+  settings.composioUserID||='opengrokbot-'+randomUUID();settings.overrides||={};
+  const encrypted=await loadJSON('composio.encrypted.json',null);
+  if(encrypted){requireVault();composioConfiguration=JSON.parse(safeStorage.decryptString(Buffer.from(encrypted.encrypted,'base64')));if(!composio.trustedURL(composioConfiguration.session?.mcp?.url))throw new Error('Invalid stored session');}
+  state=migrated;await atomicJSON('preview-workspace.json',state);await saveSettings();
+}
+function saveSettings(){return atomicJSON('settings.json',settings);}
+function selectedCLI(){return installed.find(x=>x.id===settings?.selected);}
+function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete};}
+function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
+function notify(){if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
+async function startChat(botID,text){
+  const bot=state.bots.find(x=>x.id===botID),installation=selectedCLI();
+  if(!bot)throw new PublicError('Choose a Bot.');if(!installation)throw new PublicError('Set up an installed AI CLI first.');
+  if(active.has(botID)||pendingBots.has(botID))throw new PublicError('A response is already running.');
+  if(!text&&!state.entries.some(x=>x.botID===botID&&x.kind==='user'))throw new PublicError('Send your first message first.');
+  pendingBots.add(botID);
+  try {
+  const key=botID+'|'+installation.id;
+  const session=state.sessions?.[key];
+  if(text)state.entries.push({id:randomUUID(),botID,kind:'user',text});
+  // Store the user message before launching any process.
+  await atomicJSON('preview-workspace.json',state);
+  const history=state.entries.filter(x=>x.botID===botID&&!['failed','stopped'].includes(x.state)&&x.text).slice(-30);
+  const prompt=session?history.findLast(x=>x.kind==='user').text:`You are ${bot.name}. ${bot.purpose}\nRespond to the user's latest message.\n\n`+history.map(x=>`${x.kind==='user'?'User':bot.name}: ${x.text}`).join('\n\n').slice(-100000);
+  const reply={id:randomUUID(),botID,kind:'bot',provider:installation.name,text:'',state:'streaming'};state.entries.push(reply);
+  const run=cli.runCLI({installation,prompt,session,directory:file(path.join('Conversations',botID)),mcpURL:composioConfiguration?.session.mcp.url,onEvent:event=>{
+    if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
+    if(event.type==='text'){reply.text=event.text;notify();}
+  }});
+  active.set(botID,run);notify();
+  run.done.then(()=>{reply.state='complete';},error=>{reply.state=error.message==='Response stopped.'?'stopped':'failed';reply.error=error.message;if(!reply.text)reply.text=error.message;}).finally(async()=>{
+    active.delete(botID);
+    try{await atomicJSON('preview-workspace.json',state);}catch{reply.state='failed';reply.error='The response could not be saved. Check available storage.';}
+    notify();
+  });
+  } finally {pendingBots.delete(botID);}
+}
+
 function configureIPC() {
-  handle('workspace:load', async () => validateWorkspace(await loadJSON('preview-workspace.json', previewWorkspace())));
-  handle('workspace:save', async value => { validateWorkspace(value); await atomicJSON('preview-workspace.json', value); });
+  handle('workspace:load', async () => {await ensureState();return state;});
+  handle('workspace:save', async value => {
+    await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before changing Bots.');
+    validateWorkspace(value);if(!value.bots.some(x=>x.isMain===true&&x.name==='Grok Bot'))throw new PublicError('The main Grok Bot must be kept.');
+    // Session IDs belong to the main process; renderer CRUD cannot forge them.
+    value.sessions=state.sessions;await atomicJSON('preview-workspace.json',value);state=value;notify();
+  });
+  handle('setup:status',async()=>{await ensureState();return setupStatus();});
+  handle('setup:scan',async()=>{await ensureState();installed=await cli.discover(settings.overrides);if(!installed.some(x=>x.id===settings.selected))settings.selected=installed[0]?.id||'';await saveSettings();return setupStatus();});
+  handle('setup:choose',async id=>{await ensureState();if(!installed.some(x=>x.id===id))throw new PublicError('Choose an installed CLI.');settings.selected=id;await saveSettings();return setupStatus();});
+  handle('setup:path',async provider=>{
+    await ensureState();if(!cli.providers.some(x=>x.id===provider))throw new Error();
+    const choice=await dialog.showOpenDialog(window,{title:'Choose '+cli.providers.find(x=>x.id===provider).name+' executable',properties:['openFile']});
+    if(!choice.canceled){settings.overrides[provider]=choice.filePaths[0];await saveSettings();}
+    return true;
+  });
+  handle('setup:login',async()=>{const installation=selectedCLI();if(!installation)throw new PublicError('Choose an installed CLI first.');if(installation.provider==='codex'&&(await cli.capture(installation,['login','status'],12000)).exit!==0)throw new PublicError('Run codex login in Terminal, then check again.');return installation.provider==='codex'?'Codex is signed in and ready.':'This CLI will validate its own account when you send a message.';});
+  handle('setup:complete',async()=>{if(!selectedCLI())throw new PublicError('Choose an installed CLI first.');settings.complete=true;await saveSettings();});
+  handle('chat:send',async(botID,text)=>{await ensureState();if(typeof text!=='string'||!text.trim()||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');await startChat(botID,text);return state;});
+  handle('chat:retry',async botID=>{await ensureState();await startChat(botID);return state;});
+  handle('chat:stop',async botID=>{active.get(botID)?.cancel();});
+  handle('composio:status',async()=>{await ensureState();return composioStatus();});
+  handle('composio:connect',async(key,toolkits)=>{
+    await ensureState();requireVault();
+    if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing tool access.');
+    if(typeof key!=='string'||!key.trim()||key.length>4096||!Array.isArray(toolkits)||!toolkits.length||toolkits.length>30||toolkits.some(x=>typeof x!=='string'||!/^[_a-z0-9]{1,100}$/.test(x)))throw new PublicError('Enter a project key and choose tools.');
+    try{
+      const session=await composio.create(key.trim(),settings.composioUserID,toolkits);
+      const config={key:key.trim(),session,toolkits};
+      await atomicJSON('composio.encrypted.json',{encrypted:safeStorage.encryptString(JSON.stringify(config)).toString('base64')});
+      composioConfiguration=config;connectedTools=[];
+      connectedTools=await composio.toolkits(config.key,session.session_id);
+      return composioStatus();
+    }catch(error){throw new PublicError(error.message.startsWith('Composio')?error.message:'Composio configuration could not be saved. Unlock this device and try again.');}
+  });
+  handle('composio:refresh',async()=>{await ensureState();if(composioConfiguration){try{connectedTools=await composio.toolkits(composioConfiguration.key,composioConfiguration.session.session_id);}catch(error){throw new PublicError(error.message);}}return composioStatus();});
+  handle('composio:link',async slug=>{if(!composioConfiguration||!connectedTools.some(x=>x.slug===slug&&x.enabled))throw new PublicError('Choose a tool in your configured project.');try{await shell.openExternal(await composio.link(composioConfiguration.key,composioConfiguration.session.session_id,slug));}catch(error){throw new PublicError(error.message.startsWith('Composio')?error.message:'The authorization page could not be opened.');}});
+  handle('composio:remove',async()=>{if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing tool access.');requireVault();await atomicJSON('composio.encrypted.json',null);composioConfiguration=null;connectedTools=[];return composioStatus();});
   handle('workspace:export', async text => {
     if (typeof text !== 'string' || text.length > 2000000) throw new Error('Invalid export');
-    const result = await dialog.showSaveDialog(window, { defaultPath: 'OpenGrokBot-preview.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
+    const result = await dialog.showSaveDialog(window, { defaultPath: 'OpenGrokBot-conversation.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
     if (result.canceled) return false;
     await writeFile(result.filePath, text, { encoding: 'utf8', mode: 0o600 });
     return true;
@@ -90,4 +181,5 @@ app.whenReady().then(() => {
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.loadFile(rendererFile);
 });
+app.on('before-quit',()=>{for(const run of active.values())run.cancel();});
 app.on('window-all-closed', () => app.quit());

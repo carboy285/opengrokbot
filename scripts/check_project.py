@@ -14,7 +14,7 @@ import tree_sitter_swift
 root = Path(__file__).resolve().parents[1]
 failures = []
 parser = Parser(Language(tree_sitter_swift.language()))
-swift_files = sorted(root.glob('GrokBot/**/*.swift')) + sorted(root.glob('GrokBotTests/*.swift')) + sorted(root.glob('GrokBotMac/**/*.swift')) + sorted(root.glob('GrokBotMacUITests/*.swift'))
+swift_files = sorted(root.glob('GrokBot/**/*.swift')) + sorted(root.glob('GrokBotTests/*.swift')) + sorted(root.glob('GrokBotMac/**/*.swift')) + sorted(root.glob('GrokBotMacUITests/*.swift')) + sorted(root.glob('ComposioBridge/*.swift'))
 for path in swift_files:
     tree = parser.parse(path.read_bytes())
     nodes = [tree.root_node]

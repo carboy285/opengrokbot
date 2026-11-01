@@ -78,7 +78,7 @@ extension MacAppModel {
         if let path = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_CODEX_PATH"] { overrides["codex"] = path }
         #endif
         Task {
-            let found = await Task.detached { CLIInstallationScanner.scan(overrides: overrides) }.value
+            let found = await Task.detached { [overrides] in CLIInstallationScanner.scan(overrides: overrides) }.value
             installedCLIs = found
             if !found.contains(where: { $0.id == selectedCLIID }) { selectedCLIID = found.first?.id ?? "" }
             scanningCLIs = false

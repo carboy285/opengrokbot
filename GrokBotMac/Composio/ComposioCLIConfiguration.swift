@@ -19,7 +19,10 @@ struct ComposioCLIConfiguration {
             let url = directory.appendingPathComponent(relative)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
             // App-owned per-Bot working directories only. Never replace unrelated project settings.
-            guard !FileManager.default.fileExists(atPath: url.path) else { throw CLIError.invalidOutput }
+            if FileManager.default.fileExists(atPath: url.path) {
+                guard try Data(contentsOf: url) == bytes else { throw CLIError.invalidOutput }
+                config.files.append(url); return
+            }
             try bytes.write(to: url, options: .withoutOverwriting)
             try FileManager.default.setAttributes([.posixPermissions:0o600], ofItemAtPath: url.path)
             config.files.append(url)

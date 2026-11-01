@@ -1,8 +1,8 @@
 {
   "name": "opengrokbot-windows",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Independent OpenGrokBot desktop workspace, offline preview",
+  "description": "Free desktop chat for local AI CLIs with optional Composio tools",
   "author": "OpenGrokBot contributors",
   "license": "MIT",
   "main": "desktop-windows/app/main.cjs",

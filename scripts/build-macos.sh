@@ -35,7 +35,10 @@ ditto "$app_path" "$stage_dir/OpenGrokBot.app"
 ln -s /Applications "$stage_dir/Applications"
 cat > "$stage_dir/Read Me.txt" <<'NOTE'
 Drag OpenGrokBot to Applications.
-This is an independent local-preview build. Live Grok Bot access is not implemented.
+Free, independent chat for AI CLIs installed on this Mac.
+On first launch, choose your CLI and sign in through its own setup.
+Optionally enter your Composio project key to connect tools.
+AI providers and Composio apply their own plans and usage limits.
 If ad-hoc signed, macOS may block opening it. Use a locally built copy or a
 Developer ID signed and notarized release; do not disable Gatekeeper globally.
 NOTE
