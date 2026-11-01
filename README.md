@@ -34,6 +34,8 @@ In Mac **Settings → Computer → iPhone remote control**, create an email acco
 
 The phone controls the same Bots, chats, memories, active models and running tasks without saving an independent workspace. Supabase handles accounts, device discovery and encrypted temporary packets; the Mac runs all AI CLIs. Revoke individual phones on the Mac. Google/GitHub buttons appear after their providers are configured in Supabase. Default Supabase email delivery is restricted to project-team addresses; custom SMTP is needed for general signup. See the [connection guide](docs/REMOTE_ACCESS.md).
 
+![Native Mac account setup](docs/screenshots/macos-account-setup.png)
+
 The account connection is available in **Mac/iOS 0.6.0**. Windows 0.5.0 retains its earlier connection implementation and does not connect to the new iOS account controller yet.
 
 ## Bots, models and teamwork
