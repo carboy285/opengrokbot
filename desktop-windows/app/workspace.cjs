@@ -46,15 +46,17 @@ function previewWorkspace(){return {version:2,bots:[{id:randomUUID(),name:'Grok 
 function migrateWorkspace(value){
   validateWorkspace(value);if(value.version===2)return value;
   const fixtures=legacyWorkspace(),fixtureTexts=new Set(fixtures.entries.filter(x=>x.kind!=='user').map(x=>x.text));
+  const seeded=new Set(value.bots.filter(bot=>fixtures.bots.some(x=>x.name===bot.name&&x.purpose===bot.purpose)).map(x=>x.id));
   const main=value.bots.find(x=>x.name==='Grok Bot'&&x.purpose===fixtures.bots[0].purpose);
   const legacyPrefix=main?value.entries.filter(x=>x.botID===main.id).slice(0,7):[];
+  const fullFixture=legacyPrefix.length===7&&legacyPrefix.every((entry,index)=>entry.kind===fixtures.entries[index].kind&&entry.text===fixtures.entries[index].text);
   const discarded=new Set();
   for(const bot of value.bots){
     if(bot===main)continue;
-    if(fixtures.bots.slice(1).some(x=>x.name===bot.name&&x.purpose===bot.purpose)&&value.entries.filter(x=>x.botID===bot.id).every(x=>fixtureTexts.has(x.text)))discarded.add(bot.id);
+    if(fixtures.bots.slice(1).some(x=>x.name===bot.name&&x.purpose===bot.purpose)&&value.entries.filter(x=>x.botID===bot.id).every(x=>x.kind!=='user'&&fixtureTexts.has(x.text)))discarded.add(bot.id);
   }
   value.bots=value.bots.filter(x=>!discarded.has(x.id));
-  value.entries=value.entries.filter(x=>!discarded.has(x.botID)&&!fixtureTexts.has(x.text)&&!(legacyPrefix.indexOf(x)===1&&x.kind==='user'&&x.text==='Sure')&&!(legacyPrefix.indexOf(x)===5&&x.kind==='user'&&x.text==='Yea'));
+  value.entries=value.entries.filter(x=>!discarded.has(x.botID)&&!(seeded.has(x.botID)&&x.kind!=='user'&&fixtureTexts.has(x.text))&&!(fullFixture&&legacyPrefix.indexOf(x)===1&&x.kind==='user'&&x.text==='Sure')&&!(fullFixture&&legacyPrefix.indexOf(x)===5&&x.kind==='user'&&x.text==='Yea'));
   if(main){main.isMain=true;main.purpose=previewWorkspace().bots[0].purpose;}else value.bots.unshift(previewWorkspace().bots[0]);
   value.version=2;value.sessions={};return value;
 }

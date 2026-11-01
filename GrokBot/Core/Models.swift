@@ -61,12 +61,17 @@ struct Workspace: Codable, Equatable, Sendable {
             "What would you like to work on? Add a local note below to try the conversation layout."
         ]
         let legacyMain = bots.first { $0.name == "Grok Bot" && seeded.contains($0.id) }?.id
-        let hasFullFixture = entries.first?.text.hasPrefix("Your week is coming together.") == true
-        entries = entries.enumerated().filter { index, entry in
+        let legacyPrefix = Array(entries.filter { $0.botID == legacyMain }.prefix(7))
+        let hasFullFixture = legacyPrefix.count == 7 && legacyPrefix.enumerated().allSatisfy { index, entry in
+            if index == 1 { return entry.kind == .user && entry.text == "Sure" }
+            if index == 5 { return entry.kind == .user && entry.text == "Yea" }
+            return entry.kind != .user && fixtures.contains(entry.text)
+        }
+        let fixtureUserIDs: Set<UUID> = hasFullFixture ? Set([legacyPrefix[1].id, legacyPrefix[5].id]) : []
+        entries = entries.filter { entry in
             if seeded.contains(entry.botID) && entry.kind != .user && fixtures.contains(entry.text) { return false }
-            if hasFullFixture && entry.botID == legacyMain && ((index == 1 && entry.text == "Sure") || (index == 5 && entry.text == "Yea")) { return false }
-            return true
-        }.map(\.element)
+            return !fixtureUserIDs.contains(entry.id)
+        }
         bots.removeAll { bot in seeded.contains(bot.id) && bot.id != legacyMain && !entries.contains { $0.botID == bot.id } }
         if let main = bots.firstIndex(where: { $0.name == "Grok Bot" && ($0.id == legacyMain || $0.isMain == true) }) {
             bots[main].isMain = true

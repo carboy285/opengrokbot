@@ -28,6 +28,19 @@ final class CLIProtocolTests: XCTestCase {
         XCTAssertTrue(value.bots[0].isMain == true)
     }
 
+    func testMigrationPreservesAuthoredRepliesInEditedLegacyHistory() {
+        let main = Bot(id: UUID(), name: "Grok Bot", purpose: "A place to bring it all together", color: "white", symbol: "sparkles")
+        var value = Workspace(bots: [main], entries: [
+            Entry(botID: main.id, kind: .bot, text: "Your week is coming together. Edited legacy history."),
+            Entry(botID: main.id, kind: .user, text: "Sure"),
+            Entry(botID: main.id, kind: .user, text: "What’s on your plate right now?")
+        ], schemaVersion: nil)
+        value.migrateLegacyDemo()
+        XCTAssertEqual(value.entries.count, 3)
+        XCTAssertEqual(value.entries[1].text, "Sure")
+        XCTAssertEqual(value.entries[2].text, "What’s on your plate right now?")
+    }
+
     func testCodexMessagesReplaceUpdatesAndPreserveSeparateItems() throws {
         var parser = CLIEventParser()
         let lines = [
