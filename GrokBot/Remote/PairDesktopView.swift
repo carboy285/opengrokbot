@@ -15,13 +15,13 @@ struct PairDesktopView: View {
                     Text("Open Settings → Computer → iPhone remote control in the desktop app. Choose Tailscale, Funnel, Wi-Fi, or your HTTPS proxy, then enable access.")
                     Text("Tailscale private access needs the Tailscale app connected to the same tailnet on both devices. Funnel works over public HTTPS without Tailscale on the phone.").font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("2 · Paste its pairing link") {
+                Section {
                     TextField("opengrokbot://pair?host=…#…", text: $remote.pairingDraft, axis: .vertical)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
                         .accessibilityIdentifier("desktop-pairing-link")
                     Button(remote.busy ? "Connecting…" : "Connect to desktop") { Task { await remote.connect(link: remote.pairingDraft) } }
                         .disabled(remote.busy || remote.pairingDraft.isEmpty).accessibilityIdentifier("connect-desktop")
-                } footer: { Text("Pair only with your own desktop. A pairing link is a workspace password. Direct Wi-Fi HTTP is unencrypted; use trusted Wi-Fi, private Tailscale, or HTTPS.") }
+                } header: { Text("2 · Paste its pairing link") } footer: { Text("Pair only with your own desktop. A pairing link is a workspace password. Direct Wi-Fi HTTP is unencrypted; use trusted Wi-Fi, private Tailscale, or HTTPS.") }
                 if let error = remote.error { Section { Text(error).foregroundStyle(.secondary) } }
                 Section { Text("The host must be awake with OpenGrokBot running. Closing or disconnecting the phone does not stop desktop work.").font(.footnote).foregroundStyle(.secondary) }
             }.navigationTitle("Connect Desktop").navigationBarTitleDisplayMode(.inline)

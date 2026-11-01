@@ -43,6 +43,7 @@ final class MacRemoteHost: ObservableObject {
         app.$workspace.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$runningBots.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$installedCLIs.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
+        desktop.$selectedCLIID.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         if preferences.bool(forKey: "remoteEnabled") { ownedRoute = nil; start() }
     }
     func start() {
@@ -63,7 +64,7 @@ final class MacRemoteHost: ObservableObject {
                 guard let self else { return }
                 self.changing = false; self.enabled = success
                 if success {
-                    preferences.set(true, forKey: "remoteEnabled")
+                    self.preferences.set(true, forKey: "remoteEnabled")
                     if self.mode == .tailscale || self.mode == .funnel { self.configureTailscale() }
                     else { self.savePreferences(); self.feedback = "Remote access is on. Pair your iPhone using this desktop’s link." }
                 } else { self.feedback = "Port \(self.port) is unavailable. Stop the other service or restart this app." }

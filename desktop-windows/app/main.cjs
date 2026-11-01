@@ -197,8 +197,8 @@ function configureIPC() {
   handle('files:open-folder',async id=>{await ensureState();if(!state.bots.some(x=>x.id===id))throw new Error('Unknown Bot');const directory=botDirectory(id);await mkdir(directory,{recursive:true});if(await shell.openPath(directory))throw new PublicError('The working folder could not be opened.');});
   handle('files:reveal',async(id,name)=>{await ensureState();if(!state.bots.some(x=>x.id===id)||typeof name!=='string'||path.basename(name)!==name||name.startsWith('.'))throw new Error('Invalid file');const target=path.join(botDirectory(id),name);if(!(await lstat(target)).isFile())throw new Error('Missing file');shell.showItemInFolder(target);});
   handle('setup:status',async()=>{await ensureState();return setupStatus();});
-  handle('setup:scan',async()=>{await ensureState();installed=await cli.discover(settings.overrides);if(!installed.some(x=>x.id===settings.selected))settings.selected=installed[0]?.id||'';await saveSettings();await deliverQueued();return setupStatus();});
-  handle('setup:choose',async id=>{await ensureState();if(!installed.some(x=>x.id===id))throw new PublicError('Choose an installed CLI.');settings.selected=id;await saveSettings();return setupStatus();});
+  handle('setup:scan',async()=>{await ensureState();installed=await cli.discover(settings.overrides);if(!installed.some(x=>x.id===settings.selected))settings.selected=installed[0]?.id||'';await saveSettings();notify();await deliverQueued();return setupStatus();});
+  handle('setup:choose',async id=>{await ensureState();if(!installed.some(x=>x.id===id))throw new PublicError('Choose an installed CLI.');settings.selected=id;await saveSettings();notify();return setupStatus();});
   handle('setup:path',async provider=>{
     await ensureState();if(!cli.providers.some(x=>x.id===provider))throw new Error();
     const choice=await dialog.showOpenDialog(window,{title:'Choose '+cli.providers.find(x=>x.id===provider).name+' executable',properties:['openFile']});

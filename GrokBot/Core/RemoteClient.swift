@@ -36,7 +36,8 @@ final class RemoteHTTPClient: NSObject, URLSessionTaskDelegate, @unchecked Senda
     func snapshot(_ pairing: RemotePairing, since: String?) async throws -> RemoteSnapshot? {
         guard let data = try await fetch(pairing, path: "/v1/state", query: since.map { [URLQueryItem(name:"since", value:$0)] } ?? []) else { return nil }
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        let snapshot = try decoder.decode(RemoteSnapshot.self, from: data)
+        let snapshot: RemoteSnapshot
+        do { snapshot = try decoder.decode(RemoteSnapshot.self, from: data) } catch { throw RemoteError.incompatible }
         guard snapshot.protocolVersion == 1 else { throw RemoteError.incompatible }
         return snapshot
     }
