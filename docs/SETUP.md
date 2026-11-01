@@ -35,7 +35,15 @@ The project key and MCP capability URL are stored securely on the device. The pr
 
 ## Start chatting
 
-The workspace starts with only **Grok Bot** and an empty conversation. Type a message, then use **Command-Return** on Mac or **Control-Enter** on Windows. Each added Bot has a separate saved session. Switching providers keeps their sessions separate.
+The workspace starts with only **Grok Bot** and an empty conversation. Type a message and press **Enter** to send. Use **Shift+Enter** for a new line.
+
+Click the Bot’s name at the top to open its side panel. In **Details**, enable the providers you want available and choose **one active provider**. Select its model from the local catalog (Codex/OpenCode), or enter an exact model ID and select **Apply**. A blank model uses the CLI’s default. Model access follows that CLI’s configured account. Only the active provider/model answers, and provider/model changes keep separate saved sessions.
+
+Ask in chat to create a specialist, for example: “Make me a bot called Travel that plans trips and never books without asking.” It inherits the creating Bot’s provider/model. Ask to remember a fact privately, or explicitly put it in shared memory for all Bots. Ask one Bot to message another with a focused request. The recipient’s labeled reply appears in both chats; it is never represented as a message or approval from you.
+
+For a group, ask a Bot to create a named group with 2–8 existing Bots. Open it in the sidebar and send a message to receive each member’s answer using its own selected model. Group messages are limited to 8,000 characters. You can delete an additional Bot or group through its sidebar context menu. There is no pin control.
+
+**Library** shows actual nonhidden files in the working folder; **Computer** shows the local runtime and can open that folder. This version does not schedule routines or provide a cloud computer.
 
 If the CLI fails, the app preserves the user message and displays an error with a retry option. Check sign-in, provider configuration, and CLI version in Terminal. Stop a response using **Stop**. Responses time out after ten minutes. Conversation text is stored locally and may be included in normal device backups.
 

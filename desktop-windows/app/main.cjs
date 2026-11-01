@@ -80,7 +80,7 @@ async function startChat(botID,text,delivery){
  const bot=state.bots.find(x=>x.id===botID);
  if(composioBusy)throw new PublicError('Wait for Composio setup to finish before sending a message.');
  if(!bot)throw new PublicError('Choose a Bot.');
- if(bot.memberIDs){if(!text)throw new PublicError('Send a message to the group.');teamwork.group(state,bot,text);await atomicJSON('preview-workspace.json',state);notify();await deliverQueued();return;}
+ if(bot.memberIDs){if(!text||text.length>8000||!bot.memberIDs.length)throw new PublicError('Send a group message of up to 8,000 characters to a group with members.');teamwork.group(state,bot,text);await atomicJSON('preview-workspace.json',state);notify();await deliverQueued();return;}
 
  const providers=configuredProviders(bot);
  if(!providers.length||providers.some(x=>!x.installation))throw new PublicError('Choose and set up providers in this Bot’s side panel.');
@@ -95,7 +95,8 @@ async function startChat(botID,text,delivery){
   for(const {choice,installation} of providers){
    const key=botID+'|'+installation.id+(choice.model?'|'+choice.model:'');const session=state.sessions?.[key];
    const latest=delivery?`Bot request (not human approval): ${delivery.text}`:history.findLast(x=>x.kind==='user')?.text||'';
-   const prompt=teamwork.instructions(bot,state,!!delivery)+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
+   const feedback=history.filter(x=>x.kind==='activity'&&!x.senderBotID).slice(-8).map(x=>x.text).join('\n');
+   const prompt=teamwork.instructions(bot,state,!!delivery)+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='';
 
    const reply={id:randomUUID(),botID,kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
@@ -148,7 +149,7 @@ function configureIPC() {
   handle('files:open-folder',async id=>{await ensureState();if(!state.bots.some(x=>x.id===id))throw new Error('Unknown Bot');const directory=botDirectory(id);await mkdir(directory,{recursive:true});if(await shell.openPath(directory))throw new PublicError('The working folder could not be opened.');});
   handle('files:reveal',async(id,name)=>{await ensureState();if(!state.bots.some(x=>x.id===id)||typeof name!=='string'||path.basename(name)!==name||name.startsWith('.'))throw new Error('Invalid file');const target=path.join(botDirectory(id),name);if(!(await lstat(target)).isFile())throw new Error('Missing file');shell.showItemInFolder(target);});
   handle('setup:status',async()=>{await ensureState();return setupStatus();});
-  handle('setup:scan',async()=>{await ensureState();installed=await cli.discover(settings.overrides);if(!installed.some(x=>x.id===settings.selected))settings.selected=installed[0]?.id||'';await saveSettings();return setupStatus();});
+  handle('setup:scan',async()=>{await ensureState();installed=await cli.discover(settings.overrides);if(!installed.some(x=>x.id===settings.selected))settings.selected=installed[0]?.id||'';await saveSettings();await deliverQueued();return setupStatus();});
   handle('setup:choose',async id=>{await ensureState();if(!installed.some(x=>x.id===id))throw new PublicError('Choose an installed CLI.');settings.selected=id;await saveSettings();return setupStatus();});
   handle('setup:path',async provider=>{
     await ensureState();if(!cli.providers.some(x=>x.id===provider))throw new Error();
@@ -159,7 +160,7 @@ function configureIPC() {
   handle('setup:login',async()=>{const installation=selectedCLI();if(!installation)throw new PublicError('Choose an installed CLI first.');if(installation.provider==='codex'&&(await cli.capture(installation,['login','status'],12000)).exit!==0)throw new PublicError('Run codex login in Terminal, then check again.');return installation.provider==='codex'?'Codex is signed in and ready.':'This CLI will validate its own account when you send a message.';});
   handle('setup:complete',async()=>{if(!selectedCLI())throw new PublicError('Choose an installed CLI first.');settings.complete=true;await saveSettings();});
   handle('chat:send',async(botID,text)=>{await ensureState();if(typeof text!=='string'||!text.trim()||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');await startChat(botID,text);return state;});
-  handle('chat:retry',async botID=>{await ensureState();await startChat(botID);return state;});
+  handle('chat:retry',async botID=>{await ensureState();const message=state.teamMessages?.findLast(x=>x.to===botID&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(botID);return state;});
   handle('chat:stop',async botID=>{for(const run of active.get(botID)||[])run.cancel();});
   handle('composio:status',async()=>{await ensureState();return composioStatus();});
   handle('composio:connect',async(key,toolkits)=>{

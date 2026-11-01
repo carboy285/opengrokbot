@@ -2,7 +2,7 @@
 
 A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS target is included, but desktop host pairing for iPhone chat is not implemented yet.
 
-Start with **one empty assistant named Grok Bot**. There are no seeded conversations or extra Bots. Add your own Bots when you want separate conversations.
+Start with **one empty assistant named Grok Bot**. There are no seeded conversations or extra Bots. Ask Grok Bot to create specialists, or add your own Bots when you want separate conversations.
 
 [Downloads](docs/DOWNLOADS.md) · [Setup guide](docs/SETUP.md) · [Verification](docs/VERIFICATION.md) · [Source review](https://github.com/carboy285/opengrokbot/pull/1)
 
@@ -27,6 +27,16 @@ The app is free. AI providers, local model configurations, and Composio have the
 | iOS 18+ | Native SwiftUI roster and setup guidance | Xcode project; no desktop host bridge yet |
 
 The development Mac build is ad-hoc signed and not notarized. The Windows build is unsigned. iPhone device installation requires your own signing team. See the [Mac](docs/MACOS.md), [Windows](docs/WINDOWS.md), and [iPhone](docs/DEVICE_SETUP.md) guides.
+
+## Bots, models and teamwork
+
+Click the Bot’s name at the top of a conversation to open its side panel. **Details** contains provider and model controls; **Library** lists real files in its working folder; **Computer** shows its local runtime. Enable providers you want available, then choose **one active provider** and its model. Only that selected model answers for that Bot. Codex and OpenCode can load their local model catalogs; exact model IDs can also be entered. A blank model uses the CLI’s default.
+
+Press **Enter** to send; **Shift+Enter** adds a line break. Your unsent draft stays in place when the side panel opens.
+
+Try: “Make me a bot called Travel that plans trips, keeps answers short, and never books without asking.” The assistant can create the Bot with its job description and selected model, save private or shared memories, and send another Bot a request with just the relevant context. The specialist answers asynchronously in its own chat and returns a labeled reply to the requesting chat. Ask for a group with 2–8 existing Bots to work in a shared conversation; each member uses its own selected model. No extra Bots exist at first launch.
+
+Operations apply only after successful CLI completion. The app records messages as coming from Bots, never as human messages or approvals. Internal operations do not include external sending, purchases, approval, or Bot deletion. Only the user-facing sidebar Delete action deletes Bots. CLI and Composio permissions still govern external tools. Model cooperation is required; fixture tests establish routing and persistence, not how reliably a live model follows the protocol. Teamwork is limited to 8 operations per turn, 12 deliveries per chain and 4 hops.
 
 ## Chat and tools
 

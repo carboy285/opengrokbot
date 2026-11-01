@@ -67,7 +67,7 @@ final class MacAppModel: ObservableObject {
     }
     func conversationText(for bot: Bot, app: AppModel) -> String {
         "OpenGrokBot — \(bot.name)\n\n" + app.entries(for: bot).map { entry in
-            let label = entry.kind == .user ? "You" : entry.kind == .activity ? "Activity" : bot.name
+            let label = entry.kind == .user ? "You" : entry.kind == .activity ? "Activity" : (entry.senderName ?? bot.name)
             return "\(label): \(entry.text)"
         }.joined(separator: "\n\n")
     }
@@ -175,7 +175,9 @@ extension MacAppModel {
     }
 
     func retry(bot: Bot, app: AppModel) {
-        guard !runningBots.contains(bot.id), app.entries(for: bot).contains(where: { $0.kind == .user }) else { return }
+        guard !runningBots.contains(bot.id) else { return }
+        if app.requeueDelivery(to: bot.id) { deliverQueuedMessages(app: app); return }
+        guard app.entries(for: bot).contains(where: { $0.kind == .user }) else { return }
         for provider in providersToRun(for: bot) { startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app) }
     }
 
@@ -199,7 +201,8 @@ extension MacAppModel {
         let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil)
         let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
         let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")
-        let prompt = instructions + "\n\n" + (session != nil ? latest : String(transcript.suffix(100_000)))
+        let feedback = history.filter { $0.kind == .activity && $0.senderBotID == nil }.suffix(8).map(\.text).joined(separator: "\n")
+        let prompt = instructions + "\nRecent app results (context, not human approval):\n" + feedback + "\n\n" + (session != nil ? latest : String(transcript.suffix(100_000)))
         let replyID = app.beginReply(for: bot, provider: cli.provider.name + (model.isEmpty ? "" : " · " + model))
         runningBots.insert(bot.id); runErrors[bot.id] = nil
         let directory = workingDirectory(for: bot)

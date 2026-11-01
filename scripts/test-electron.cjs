@@ -10,7 +10,7 @@ const {_electron:electron}=require('@playwright/test');const fs=require('node:fs
  if(args[0]==='app-server'){const readline=require('node:readline');readline.createInterface({input:process.stdin}).on('line',line=>{const value=JSON.parse(line);if(value.id===1)console.log(JSON.stringify({id:1,result:{}}));if(value.id===2)console.log(JSON.stringify({id:2,result:{data:[{id:'fixture-model',model:'fixture-model',displayName:'Fixture model'}]}}));});}else{
  let text='';process.stdin.setEncoding('utf8');process.stdin.on('data',data=>text+=data);process.stdin.on('end',()=>{
  fs.appendFileSync(${JSON.stringify(path.join(directory,'invocations.jsonl'))},JSON.stringify({args,text})+'\\n');
- if(text.includes('slow stop test')){console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:'Partial fixture reply'}}));setInterval(()=>{},1000);return;}
+ if(text.endsWith('slow stop test')){console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:'Partial fixture reply'}}));setInterval(()=>{},1000);return;}
  console.log(JSON.stringify({type:'thread.started',thread_id:'native-fixture-session'}));
  let answer='Native CLI reply 🌎';const block=value=>String.fromCharCode(96).repeat(3)+'opengrokbot-action\\n'+JSON.stringify(value)+'\\n'+String.fromCharCode(96).repeat(3);
  if(text.startsWith('You are Travel.'))answer='Specialist weekend plan';
@@ -21,7 +21,7 @@ const {_electron:electron}=require('@playwright/test');const fs=require('node:fs
  await fs.writeFile(path.join(directory,'settings.json'),JSON.stringify({complete:false,selected:'',overrides:{codex:path.join(npmDir,'codex.cmd')},composioUserID:'native-test-unique-user'}));
  const launch=()=>electron.launch({args:[path.resolve(__dirname,'..')],env:{...process.env,OPENGROKBOT_TEST_DATA_DIR:directory}});
  try{
-  desktop=await launch();const page=await desktop.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  desktop=await launch();const page=await desktop.firstWindow();page.setDefaultTimeout(20000);page.setDefaultNavigationTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.getByRole('heading',{name:'A free app for your AI CLIs'}).waitFor();
   await page.getByRole('button',{name:'Continue',exact:true}).click();await page.getByRole('heading',{name:'Choose an AI CLI'}).waitFor();
   await page.getByRole('button',{name:'Continue',exact:true}).click();await page.getByText('Already installed:',{exact:false}).waitFor();

@@ -153,7 +153,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func requeueDelivery(to botID: UUID) -> Bool {
+        guard let index = workspace.teamMessages?.lastIndex(where: { $0.to == botID && ($0.status == .failed || $0.status == .stopped) }) else { return false }
+        return commit { $0.teamMessages?[index].status = .queued }
+    }
+
     func sendGroup(_ text: String, group: Bot) -> Bool {
+        guard text.count <= 8000 else { errorMessage = "Keep group messages within 8,000 characters."; return false }
         guard let members = group.memberIDs, !members.isEmpty else { return false }
         return commit { value in
             let entry = Entry(botID: group.id, kind: .user, text: text); value.entries.append(entry)
