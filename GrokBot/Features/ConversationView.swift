@@ -14,6 +14,14 @@ struct ConversationView: View {
     @FocusState private var composing: Bool
     private var draft: Binding<String> { Binding(get: { remote.drafts[bot.id] ?? "" }, set: { remote.drafts[bot.id] = $0 }) }
     private var canSend: Bool { remote.online && !sending && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var avatarColor: String { bot.appearance?.color ?? bot.color }
+    private var composerTint: Color {
+        bot.appearance == nil && bot.color == "white" ? .primary : AvatarArtwork.color(avatarColor)
+    }
+    private var composerInk: Color {
+        if bot.appearance == nil && bot.color == "white" { return Palette.background }
+        return ["white", "amber", "orange", "green", "teal", "gray"].contains(avatarColor) ? .black : .white
+    }
     private var transcript: String {
         model.entries(for: bot).map { "\($0.kind == .user ? "You" : $0.senderName ?? bot.name):\n\($0.text)" }.joined(separator: "\n\n")
     }
@@ -109,8 +117,9 @@ struct ConversationView: View {
                     Button("Bot details", systemImage: "info.circle") { info = true }
                 } label: {
                     Image(systemName: "plus").font(.system(size: 21, weight: .regular))
-                        .foregroundStyle(.secondary).frame(width: 36, height: 36)
-                        .background(.primary.opacity(0.06), in: Circle())
+                        .foregroundStyle(composerInk).frame(width: 36, height: 36)
+                        .background(composerTint, in: Circle())
+                        .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 1).allowsHitTesting(false))
                         .frame(width: 48, height: 48).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Message options")
                 TextField("Ask \(bot.name)", text: draft, axis: .vertical)
@@ -121,20 +130,21 @@ struct ConversationView: View {
                         Task { await remote.command(RemoteCommand(action: "stop", botID: bot.id)) }
                     } label: {
                         Image(systemName: "stop.fill").font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Palette.background).frame(width: 38, height: 38)
-                            .background(.primary, in: Circle())
+                            .foregroundStyle(composerInk).frame(width: 38, height: 38)
+                            .background(composerTint, in: Circle())
                             .frame(width: 48, height: 48).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!remote.online).accessibilityLabel("Stop response")
                 } else {
                     Button { send() } label: {
                         ZStack {
-                            Circle().fill(canSend || sending ? Color.primary : Color.primary.opacity(0.06))
+                            Circle().fill(composerTint.opacity(canSend || sending ? 1 : 0.22))
                                 .frame(width: 38, height: 38)
+                                .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 1).allowsHitTesting(false))
                             if sending {
-                                ProgressView().controlSize(.small).tint(Palette.background)
+                                ProgressView().controlSize(.small).tint(composerInk)
                             } else {
                                 Image(systemName: "arrow.up").font(.system(size: 21, weight: .semibold))
-                                    .foregroundStyle(canSend ? Palette.background : Color.secondary)
+                                    .foregroundStyle(canSend ? composerInk : Color.secondary)
                             }
                         }.frame(width: 48, height: 48).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!canSend).accessibilityLabel(sending ? "Sending message" : "Send message")
