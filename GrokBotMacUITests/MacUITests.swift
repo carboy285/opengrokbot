@@ -4,21 +4,12 @@ import XCTest
 final class MacUITests: XCTestCase {
     @MainActor
     private func application(setup: Bool) throws -> (XCUIApplication, URL) {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let executable = directory.appendingPathComponent("codex-fixture")
-        let script = """
-        #!/bin/sh
-        if [ "$1" = "--version" ]; then printf 'codex-cli fixture\\n'; exit 0; fi
-        if [ "$1" = "login" ]; then exit 0; fi
-        cat >/dev/null
-        printf '%s\\n' '{"type":"thread.started","thread_id":"ui-test-session"}'
-        printf '%s\\n' '{"type":"item.completed","item":{"id":"reply","type":"agent_message","text":"CLI fixture reply"}}'
-        """
-        try script.write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        // The UI runner is sandboxed; the application must not execute a fixture inside its container.
+        let directory = URL(fileURLWithPath: "/tmp/opengrokbot-app-ui-" + UUID().uuidString)
+        let executable = try XCTUnwrap(Bundle(for: MacUITests.self).url(forResource: "codex-fixture", withExtension: "sh"))
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: executable.path))
         let app = XCUIApplication()
-        app.launchArguments = ["-localCLISetupComplete", setup ? "NO" : "YES", "--opengrokbot-test-cli", executable.path, "--opengrokbot-test-data", directory.appendingPathComponent("data").path, "--opengrokbot-test-setup", setup ? "1" : "0"]
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO", "-localCLISetupComplete", setup ? "NO" : "YES", "--opengrokbot-test-cli", executable.path, "--opengrokbot-test-data", directory.appendingPathComponent("data").path, "--opengrokbot-test-setup", setup ? "1" : "0"]
         app.launchEnvironment = ["OPENGROKBOT_TEST_SETUP":setup ? "1" : "0", "OPENGROKBOT_TEST_CODEX_PATH":executable.path, "OPENGROKBOT_TEST_WORKSPACE_DIR":directory.appendingPathComponent("data").path]
         return (app, directory)
     }
@@ -28,7 +19,6 @@ final class MacUITests: XCTestCase {
         let (app, directory) = try application(setup: false)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
-        defer { dumpLaunchDiagnostics() }
         XCTAssertTrue(app.buttons["Search Bots"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Soccer'")).firstMatch.exists)
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "conversation-message").count, 0)
@@ -61,7 +51,6 @@ final class MacUITests: XCTestCase {
         let (app, directory) = try application(setup: true)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
-        defer { dumpLaunchDiagnostics() }
         XCTAssertTrue(app.staticTexts["A free app for your AI CLIs"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, name: "macos-setup")
         app.buttons["Continue"].click()
@@ -77,13 +66,6 @@ final class MacUITests: XCTestCase {
         app.buttons["Continue to chat"].click()
         app.buttons["Start chatting"].click()
         XCTAssertTrue(app.buttons["Search Bots"].waitForExistence(timeout: 5))
-    }
-
-    private func dumpLaunchDiagnostics() {
-        let files = (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: "/tmp"), includingPropertiesForKeys: nil)) ?? []
-        for file in files where file.lastPathComponent.hasPrefix("opengrokbot-ui-") {
-            print("LAUNCH DIAGNOSTICS: \((try? String(contentsOf: file, encoding: .utf8)) ?? "unreadable")")
-        }
     }
 
     @MainActor

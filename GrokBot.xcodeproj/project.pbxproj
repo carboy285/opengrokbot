@@ -972,6 +972,7 @@
 			"isa" = "PBXGroup";
 			"children" = (
 				"9191838EB4A9BBA6CD268179",
+				"2304AD9F662975F4898DC716",
 			);
 			"name" = "GrokBotMacUITests";
 			"sourceTree" = "<group>";
@@ -1044,6 +1045,7 @@
 			"buildPhases" = (
 				"EB07C8000A39E79C96F068CC",
 				"41F6544FD3BF31F7FC5E9305",
+				"D4C2298B8D0148EAABD9A179",
 			);
 			"buildRules" = (
 			);
@@ -1298,6 +1300,24 @@
 		"EC93B56BDEE035C7E39628B2" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "11D870A7BD5197C7470C28BF";
+		};
+		"2304AD9F662975F4898DC716" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.script.sh";
+			"path" = "GrokBotMacUITests/Fixtures/codex-fixture.sh";
+			"sourceTree" = "<group>";
+		};
+		"63F05B0C92E0837B19F50E92" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2304AD9F662975F4898DC716";
+		};
+		"D4C2298B8D0148EAABD9A179" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+				"63F05B0C92E0837B19F50E92",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";

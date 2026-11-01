@@ -80,12 +80,14 @@ objects[test_id]={'isa':'PBXNativeTarget','buildConfigurationList':test_configs,
 ui_id = uid('mac-ui-target')
 ui_path = 'GrokBotMacUITests/MacUITests.swift'
 reference(ui_path)
+ui_fixture = 'GrokBotMacUITests/Fixtures/codex-fixture.sh'
+reference(ui_fixture, 'text.script.sh')
 ui_product = add('mac-ui-product',isa='PBXFileReference',explicitFileType='wrapper.cfbundle',includeInIndex='0',path='GrokBotMacUITests.xctest',sourceTree='BUILT_PRODUCTS_DIR')
 add_to_group(uid('products'),[ui_product])
-ui_group = add('mac-ui-group',isa='PBXGroup',children=[uid(ui_path)],name='GrokBotMacUITests',sourceTree='<group>')
+ui_group = add('mac-ui-group',isa='PBXGroup',children=[uid(ui_path),uid(ui_fixture)],name='GrokBotMacUITests',sourceTree='<group>')
 add_to_group(uid('main'),[ui_group])
 ui_configs = configs('mac-ui',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac.uitests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_TARGET_NAME':'GrokBotMac'})
-objects[ui_id]={'isa':'PBXNativeTarget','buildConfigurationList':ui_configs,'buildPhases':[phase('mac-ui-sources',[ui_path],'PBXSourcesBuildPhase'),phase('mac-ui-frameworks',[],'PBXFrameworksBuildPhase')],'buildRules':[],'dependencies':[dep],'name':'GrokBotMacUITests','productName':'GrokBotMacUITests','productReference':ui_product,'productType':'com.apple.product-type.bundle.ui-testing'}
+objects[ui_id]={'isa':'PBXNativeTarget','buildConfigurationList':ui_configs,'buildPhases':[phase('mac-ui-sources',[ui_path],'PBXSourcesBuildPhase'),phase('mac-ui-frameworks',[],'PBXFrameworksBuildPhase'),phase('mac-ui-resources',[ui_fixture],'PBXResourcesBuildPhase')],'buildRules':[],'dependencies':[dep],'name':'GrokBotMacUITests','productName':'GrokBotMacUITests','productReference':ui_product,'productType':'com.apple.product-type.bundle.ui-testing'}
 # Package a native stdio MCP helper; no shell or extra runtime is required on macOS.
 helper_id = uid('composio-helper-target')
 helper_path = 'ComposioBridge/main.swift'
