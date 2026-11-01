@@ -40,6 +40,18 @@ final class LocalCLIRun: @unchecked Sendable {
         }
     }
 
+    /// FileHandle.read(upToCount:) can fill its requested buffer before returning on Darwin.
+    /// One POSIX read delivers each available pipe chunk, so partial replies and stop remain responsive.
+    private func readChunk(_ handle: FileHandle) throws -> Data? {
+        var buffer = [UInt8](repeating: 0, count: 16_384)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count) }
+            if count > 0 { return Data(buffer.prefix(count)) }
+            if count == 0 { return nil }
+            if errno != EINTR { throw CLIError.invalidOutput }
+        }
+    }
+
     private func execute(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String?, continuation: AsyncThrowingStream<CLIEvent, Error>.Continuation) {
         var promptFile: URL?
         do {
@@ -81,7 +93,7 @@ final class LocalCLIRun: @unchecked Sendable {
                 if !command.input.isEmpty { try? input.fileHandleForWriting.write(contentsOf: Data(command.input.utf8)) }
             }
             var pending = Data(), parser = CLIEventParser(), total = 0, protocolFailed = false
-            while let bytes = try output.fileHandleForReading.read(upToCount: 16_384), !bytes.isEmpty {
+            while let bytes = try readChunk(output.fileHandleForReading) {
                 total += bytes.count
                 guard total <= 32 * 1024 * 1024 else { cancel(); throw CLIError.invalidOutput }
                 pending.append(bytes)
