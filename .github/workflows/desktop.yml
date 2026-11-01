@@ -31,23 +31,16 @@ jobs:
         run: >-
           xcodebuild -project GrokBot.xcodeproj -scheme GrokBotMac
           -configuration Debug -destination 'platform=macOS'
+          -derivedDataPath artifacts/macos-debug
           -resultBundlePath artifacts/macos-tests.xcresult
           -only-testing:GrokBotMacTests
           CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
-      - name: Build universal app and DMG
-        run: ./scripts/build-macos.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: OpenGrokBot-macOS
-          path: |
-            artifacts/macos/*.dmg
-            artifacts/macos/*.sha256
-          if-no-files-found: error
       - name: Capture and verify real application windows
         timeout-minutes: 8
         run: >-
           xcodebuild -project GrokBot.xcodeproj -scheme GrokBotMac
           -configuration Debug -destination 'platform=macOS'
+          -derivedDataPath artifacts/macos-debug
           -resultBundlePath artifacts/macos-ui-tests.xcresult
           -only-testing:GrokBotMacUITests
           CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
@@ -72,6 +65,15 @@ jobs:
           name: OpenGrokBot-macOS-test-results
           path: artifacts/*.xcresult
           if-no-files-found: warn
+      - name: Build universal app and DMG
+        run: ./scripts/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenGrokBot-macOS
+          path: |
+            artifacts/macos/*.dmg
+            artifacts/macos/*.sha256
+          if-no-files-found: error
 
   windows:
     runs-on: windows-latest
