@@ -1,28 +1,26 @@
-# Development downloads · Mac/iOS 0.6.0
+# Development downloads · Mac/iOS 0.6.1
 
-Runtime source commit: `bcdf5c7a5d596bead5cf38d5451ee519c6f48ba5`. [Desktop build/tests](https://github.com/carboy285/opengrokbot/actions/runs/41270461498) passed: **34 Mac unit tests, 2 actual-window UI tests, universal DMG packaging, database isolation/queue checks and the existing Windows checks**.
+[Release and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.6.1).
 
 | Download | Contents |
 | --- | --- |
-| [Mac universal installer](https://github.com/carboy285/opengrokbot/actions/runs/41270461498/artifacts/13069375751) | ZIP containing **`OpenGrokBot-0.6.0-mac-universal.dmg`** and SHA-256; Apple Silicon/Intel, macOS 14+ |
-| [Xcode source](https://github.com/carboy285/opengrokbot/archive/refs/heads/codex/macos-client.zip) | Full repository. Open **`GrokBot.xcodeproj`**, choose **GrokBot** for iOS or **GrokBotMac** for Mac |
-| [Native Mac screenshots](https://github.com/carboy285/opengrokbot/actions/runs/41270461498/artifacts/13069595125) | Actual account setup, chat, bot side panel, CLI/Composio setup and settings |
-| [Mac test results](https://github.com/carboy285/opengrokbot/actions/runs/41270461498/artifacts/13069335811) | Unit and actual-window XCTest bundles |
-| [Windows 0.5.0 installer](https://github.com/carboy285/opengrokbot/actions/runs/41270461498/artifacts/13068629042) | Existing Electron/NSIS app; **does not support the new iOS account connection yet** |
-| [Source review](https://github.com/carboy285/opengrokbot/pull/1) | Draft PR with application, backend migration, packaging and setup documentation |
+| [Mac universal installer](https://github.com/carboy285/opengrokbot/releases/download/v0.6.1/OpenGrokBot-0.6.1-mac-universal.dmg) | `OpenGrokBot-0.6.1-mac-universal.dmg`; Apple Silicon/Intel, macOS 14+ |
+| [Matching Xcode source ZIP](https://github.com/carboy285/opengrokbot/releases/download/v0.6.1/OpenGrokBot-0.6.1-Xcode.zip) | Complete repository. Open `GrokBot.xcodeproj`, choose **GrokBot** for iPhone or **GrokBotMac** for Mac |
+| [DMG checksum](https://github.com/carboy285/opengrokbot/releases/download/v0.6.1/OpenGrokBot-0.6.1-mac-universal.dmg.sha256) | SHA-256 checksum; this file is not an installer |
 
-GitHub may require sign-in for Actions downloads. Artifacts have 90-day retention; the source can recreate the installers. The Mac file to open is the **`.dmg`**. The `.sha256` file is a checksum, not an installer.
+## This update
 
-Mac DMG SHA-256:
+- The phone finds the available Mac even when older offline installations remain registered. An available saved Mac is preferred.
+- Phone access starts on Mac sign-in unless previously turned off. The Mac prompts for approval when a new phone requests access; iOS displays the phone fingerprint and approval instructions until approved.
+- The Mac refreshes its device list before handling a newly registered phone's first request.
+- Click a Bot's avatar in its Mac side panel, or tap it in iPhone Bot details, to select a shape/color, generate a random look, upload an image, or reset it. Save the avatar to update both devices.
 
-```text
-cb6f2465b1c6d8c44338aa1bffe4bb2df7e61c56174d6755f9ebca80b0369435
-```
+Install the new Mac DMG and rebuild the iPhone app from the matching ZIP. In Xcode, select your signing team and physical iPhone, then run the **GrokBot** scheme. Sign into the same account on both devices, compare the phone fingerprint, and approve it on the Mac. Keep the Mac awake with OpenGrokBot running. If **Allow phone access** was previously turned off, enable it in **Mac Settings → Computer**.
 
-## Connect your phone
+See [iPhone installation](DEVICE_SETUP.md) and [Remote access](REMOTE_ACCESS.md).
 
-Create/confirm an email account in **Mac Settings → Computer**, sign in, and turn on **Allow phone access**. Sign into the same account in the iOS app, compare its fingerprint with the Mac's phone entry, approve the phone on the Mac, and select your Mac. Supabase replaces Tailscale/pairing URLs on Apple platforms; the Mac runs all AI work. See [Remote access](REMOTE_ACCESS.md) and [iPhone installation](DEVICE_SETUP.md).
+## Build status
 
-Email authentication is enabled in the connected Supabase project. Its default SMTP sends only to project-team addresses; configure custom SMTP for broader signup. Google and GitHub are deferred; their buttons appear when enabled in Supabase. Live email delivery, provider OAuth and physical-device roaming remain unverified. The final [iOS simulator run](https://github.com/carboy285/opengrokbot/actions/runs/41270461442) passed all **27 tests**, including encrypted control, reconnect and token refresh.
+Runtime source commit: `49304b6967685bcdf392dc2cac37d421dc21b3ac`. [Packaging run](https://github.com/carboy285/opengrokbot/actions/runs/41318915250) compiled the universal Mac app and packaged the DMG and matching source archive. Tests and additional checks were skipped at the user's request. Physical Mac/iPhone behavior remains unverified for this update; previous test results in [Verification](VERIFICATION.md) apply to the earlier version.
 
-The Mac package is ad-hoc signed and not notarized; the iPhone requires your own Xcode signing. The app is free. AI providers, Composio and Supabase/mail providers have their own quotas and plans. [Verification](VERIFICATION.md) distinguishes fixtures, native builds, deployed database checks and untested live account flows.
+The Mac package is ad-hoc signed and not notarized; the iPhone requires your own Xcode signing. The app is free. AI providers, Composio, Supabase, and mail providers have their own quotas and plans.
