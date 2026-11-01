@@ -1,4 +1,6 @@
-# Desktop workspace · 0.7.0
+# Desktop workspace · 0.7
+
+For the current update, see [0.7.1 fixes, scheduling, hosted browser setup and remote workspace switching](BUGFIX_0_7_1.md). The original 0.7.0 changes below are retained as release history; pins now sync through the account server in 0.7.1.
 
 ## What changed
 

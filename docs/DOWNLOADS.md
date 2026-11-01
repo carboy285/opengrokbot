@@ -1,4 +1,33 @@
-# Downloads · 0.7.0
+# Downloads · 0.7.1
+
+[0.7.1 release](https://github.com/carboy285/opengrokbot/releases/tag/v0.7.1)
+
+| Download | Contents |
+| --- | --- |
+| [Mac universal DMG](https://github.com/carboy285/opengrokbot/releases/download/v0.7.1/OpenGrokBot-0.7.1-mac-universal.dmg) | Apple Silicon and Intel; macOS 14+ |
+| [Windows Setup EXE](https://github.com/carboy285/opengrokbot/releases/download/v0.7.1/OpenGrokBot-0.7.1-Windows-x64-Setup.exe) | Windows x64 |
+| [iPhone Xcode project and matching sources](https://github.com/carboy285/opengrokbot/releases/download/v0.7.1/OpenGrokBot-0.7.1-Source.zip) | Open `GrokBot.xcodeproj`, choose **GrokBot**, keep your signing team/bundle ID, then run on your iPhone |
+| [DMG checksum](https://github.com/carboy285/opengrokbot/releases/download/v0.7.1/OpenGrokBot-0.7.1-mac-universal.dmg.sha256) | SHA-256 |
+
+Runtime commit: `b6edab6109d78b41b1f61c9207d89533e9bbd3ab`.
+Packaging: [GitHub Actions run](https://github.com/carboy285/opengrokbot/actions/runs/41356220965).
+The packaging run successfully compiled the universal Mac app and iPhone sources, built both desktop installers, and published the downloads above. No tests were run.
+
+Update both phone and desktop to **0.7.1 (build 9)** for account-synced pins. [Changes, setup and limits](BUGFIX_0_7_1.md) · [iPhone installation](../INSTALL-IOS-0.7.1.md).
+
+On your server computer, sign in under Settings → Computer and enable remote/phone access. On your personal computer, sign into that account, click **This computer**, select the server and approve the viewing computer on the server after comparing its fingerprint. Choose the same server on iPhone. Your local workspace stays separate; all remote AI work runs on the server.
+
+Ask a Bot to schedule a one-time task or repeat hourly/daily/weekly. Tasks run while the desktop app is running, and missed timed runs catch up once. Incoming Bot messages are the available event trigger. View/cancel tasks in Bot details. Email, website-change and file events need separate integrations.
+
+For cloud page reading, create a Browserbase account and enter its API key/project UUID in the **server's** Settings → Computer. Each browsing request uses an isolated temporary hosted session. No local browser is launched; cookies/logins are not retained. This provider connection has not been exercised with live credentials.
+
+No automated tests, UI checks, database behavioral checks or physical-device validation were run, as requested. Compilation and installer packaging do not establish runtime correctness. The intermittent iPhone crash was not reproduced; this release fixes concrete crash/race paths identified in source.
+
+Development installers: Mac ad-hoc signed and not notarized; Windows unsigned. Trusted signatures require the owner's publisher credentials.
+
+---
+
+## Previous release · 0.7.0
 
 [Release notes and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.7.0).
 
@@ -13,39 +42,3 @@ Runtime source commit: `4f5c16e23ce65dbe266b37a0940e5c5f89f1c0bb`. The [packagin
 
 Development signatures: the Mac app is ad-hoc signed and not notarized; the Windows installer is unsigned. The release workflow supports trusted signatures after the owner configures publisher credentials. See [Desktop workspace 0.7](DESKTOP_0_7.md) for features, setup, and signing requirements.
 
-## Latest desktop and iPhone source
-
-[Download the latest source/Xcode project](https://github.com/carboy285/opengrokbot/archive/refs/heads/codex/macos-client.zip) for **0.7.0 (build 8)**. See [Desktop workspace 0.7](DESKTOP_0_7.md) for the Mac/Windows changes, phone connection setup, signing requirements, and verification limits.
-
-Windows now implements the account relay used by iPhone and Mac. Both desktops include persistent Bot pins/folders, drag ordering, avatar customization, draft recovery, better provider feedback, and update notifications. The iPhone retains the redesigned chat and roster, avatar-colored controls, corrected tap targets, and lower composer.
-
-For iPhone, open `GrokBot.xcodeproj`, choose **GrokBot** and your iPhone, keep your existing signing team and bundle identifier, and choose **Product → Run**. Confirm **Settings → App version: 0.7.0** afterward. For Mac, choose **GrokBotMac**; for Windows, use the desktop installer or build with `npm ci` and `npm run dist:windows`.
-
-Unit, UI, database, protocol-interoperability, and physical-device checks have not been run for this update, at the user's request. Build/package results will be recorded with published downloads. Trusted installer signing requires the owner’s certificates and credentials; development builds are labeled accordingly.
-
-## Previous Apple release · 0.6.1
-
-[Release and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.6.1).
-
-| Download | Contents |
-| --- | --- |
-| [Mac universal installer](https://github.com/carboy285/opengrokbot/releases/download/v0.6.1/OpenGrokBot-0.6.1-mac-universal.dmg) | `OpenGrokBot-0.6.1-mac-universal.dmg`; Apple Silicon/Intel, macOS 14+ |
-| [Matching Xcode source ZIP](https://github.com/carboy285/opengrokbot/releases/download/v0.6.1/OpenGrokBot-0.6.1-Xcode.zip) | Complete repository. Open `GrokBot.xcodeproj`, choose **GrokBot** for iPhone or **GrokBotMac** for Mac |
-| [DMG checksum](https://github.com/carboy285/opengrokbot/releases/download/v0.6.1/OpenGrokBot-0.6.1-mac-universal.dmg.sha256) | SHA-256 checksum; this file is not an installer |
-
-## This update
-
-- The phone finds the available Mac even when older offline installations remain registered. An available saved Mac is preferred.
-- Phone access starts on Mac sign-in unless previously turned off. The Mac prompts for approval when a new phone requests access; iOS displays the phone fingerprint and approval instructions until approved.
-- The Mac refreshes its device list before handling a newly registered phone's first request.
-- Click a Bot's avatar in its Mac side panel, or tap it in iPhone Bot details, to select a shape/color, generate a random look, upload an image, or reset it. Save the avatar to update both devices.
-
-Install the new Mac DMG and rebuild the iPhone app from the matching ZIP. In Xcode, select your signing team and physical iPhone, then run the **GrokBot** scheme. Sign into the same account on both devices, compare the phone fingerprint, and approve it on the Mac. Keep the Mac awake with OpenGrokBot running. If **Allow phone access** was previously turned off, enable it in **Mac Settings → Computer**.
-
-See [iPhone installation](DEVICE_SETUP.md) and [Remote access](REMOTE_ACCESS.md).
-
-## Build status
-
-Runtime source commit: `49304b6967685bcdf392dc2cac37d421dc21b3ac`. [Packaging run](https://github.com/carboy285/opengrokbot/actions/runs/41318915250) compiled the universal Mac app and packaged the DMG and matching source archive. Tests and additional checks were skipped at the user's request. Physical Mac/iPhone behavior remains unverified for this update; previous test results in [Verification](VERIFICATION.md) apply to the earlier version.
-
-The Mac package is ad-hoc signed and not notarized; the iPhone requires your own Xcode signing. The app is free. AI providers, Composio, Supabase, and mail providers have their own quotas and plans.

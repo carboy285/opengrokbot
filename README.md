@@ -36,7 +36,7 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
-The **0.7.0 desktop update** adds the account relay to Windows, persistent Bot organization, better draft/delivery handling, provider readiness, and update notifications. See [Desktop workspace 0.7](docs/DESKTOP_0_7.md) for setup, signing requirements, and verification limits.
+The **0.7.1 update** adds auto-scrolling chats, account-synced pins, iPhone edge-swipe back, scheduled tasks, optional cloud browsers, and a desktop workspace switcher for viewing another computer on your account. See [0.7.1 changes and setup](docs/BUGFIX_0_7_1.md) for details and limits.
 
 ## Bots, models and teamwork
 
