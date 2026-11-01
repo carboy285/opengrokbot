@@ -36,6 +36,15 @@ def add_to_group(group_id, children):
     group = objects[group_id]
     group['children'] = list(dict.fromkeys(group['children'] + children))
 
+# Shared controller contract/client and iOS controller sources.
+remote_shared = ['GrokBot/Core/RemoteProtocol.swift', 'GrokBot/Core/RemoteClient.swift']
+remote_ios = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBot/Remote').glob('*.swift'))
+for path in remote_shared + remote_ios:
+    key = reference(path)
+    build = add('build'+path, isa='PBXBuildFile', fileRef=key)
+    objects[uid('sources')]['files'] = list(dict.fromkeys(objects[uid('sources')]['files']+[build]))
+    add_to_group(uid('appgroup'),[key])
+
 # Add the shared glass source to the iOS target and source group.
 glass = 'GrokBot/Design/GlassChrome.swift'
 reference(glass)
@@ -57,10 +66,10 @@ reference(ios_entitlements, 'text.plist.entitlements')
 add_to_group(uid('appgroup'), [uid(ios_entitlements)])
 for configuration in ('Debug','Release'):
     objects[uid('app'+configuration)]['buildSettings']['CODE_SIGN_ENTITLEMENTS'] = ios_entitlements
-    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.4.0'
+    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.5.0'
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
-shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',team_shared,glass]
+shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',team_shared,glass]+remote_shared
 tests = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotTests').glob('*.swift'))
 add_to_group(uid('testgroup'), [reference(p) for p in tests])
 for path in tests:
@@ -76,7 +85,7 @@ add_to_group(uid('products'),[app_product,test_product])
 mac_group=add('mac-group',isa='PBXGroup',children=[uid(p) for p in mac_sources]+[uid('GrokBotMac/Resources/'+p) for p in ['Info.plist','GrokBotMac.entitlements','AppIcon.icns']],name='GrokBotMac',sourceTree='<group>')
 add_to_group(uid('main'),[mac_group])
 base={'SDKROOT':'macosx','MACOSX_DEPLOYMENT_TARGET':'14.0','SUPPORTED_PLATFORMS':'macosx','SWIFT_VERSION':'6.0','CODE_SIGN_STYLE':'Automatic','SWIFT_STRICT_CONCURRENCY':'complete','COMBINE_HIDPI_IMAGES':'YES'}
-app_configs=configs('mac-app',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac','PRODUCT_NAME':'OpenGrokBot','PRODUCT_MODULE_NAME':'GrokBotMac','INFOPLIST_FILE':'GrokBotMac/Resources/Info.plist','GENERATE_INFOPLIST_FILE':'NO','CURRENT_PROJECT_VERSION':'2','MARKETING_VERSION':'0.4.0','CODE_SIGN_ENTITLEMENTS':'GrokBotMac/Resources/GrokBotMac.entitlements','ENABLE_HARDENED_RUNTIME':'YES','ENABLE_APP_SANDBOX':'NO','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks']})
+app_configs=configs('mac-app',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac','PRODUCT_NAME':'OpenGrokBot','PRODUCT_MODULE_NAME':'GrokBotMac','INFOPLIST_FILE':'GrokBotMac/Resources/Info.plist','GENERATE_INFOPLIST_FILE':'NO','CURRENT_PROJECT_VERSION':'2','MARKETING_VERSION':'0.5.0','CODE_SIGN_ENTITLEMENTS':'GrokBotMac/Resources/GrokBotMac.entitlements','ENABLE_HARDENED_RUNTIME':'YES','ENABLE_APP_SANDBOX':'NO','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks']})
 test_configs=configs('mac-test',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac.tests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_HOST':'$(BUILT_PRODUCTS_DIR)/OpenGrokBot.app/Contents/MacOS/OpenGrokBot','BUNDLE_LOADER':'$(TEST_HOST)','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks','@loader_path/../Frameworks']})
 proxy=add('mac-proxy',isa='PBXContainerItemProxy',containerPortal=project['rootObject'],proxyType='1',remoteGlobalIDString=mac_id,remoteInfo='GrokBotMac')
 dep=add('mac-dependency',isa='PBXTargetDependency',target=mac_id,targetProxy=proxy)

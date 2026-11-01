@@ -2,27 +2,36 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var remote: RemoteController
     @State private var settings = false
     @State private var createBot = false
 
     var body: some View {
         NavigationStack {
             Group {
-                roster
+                if remote.hasSnapshot { roster }
+                else {
+                    VStack(spacing: 22) {
+                        BotAvatar(size: 88)
+                        Text("Your desktop, in your pocket").font(.title2.weight(.medium))
+                        Text(remote.status).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Button("Connect Desktop") { remote.showPairing = true }.buttonStyle(.borderedProminent)
+                    }.padding(28).frame(maxWidth: .infinity,maxHeight: .infinity)
+                }
             }
             .background(Palette.background)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     RoundButton(symbol: "person.crop.circle", label: "Settings") { settings = true }
                 }
-                if model.previewEnabled {
+                if remote.hasSnapshot {
                     ToolbarItem(placement: .topBarTrailing) {
                         RoundButton(symbol: "plus", label: "Create a Bot") { createBot = true }
                     }
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear { if !model.previewEnabled { model.enterPreview() } }
+
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $createBot) { CreateBotView() }
             .navigationDestination(for: Bot.self) { bot in ConversationView(bot: bot) }
@@ -31,7 +40,7 @@ struct RootView: View {
 
     private var roster: some View {
         VStack(spacing: 0) {
-            PreviewBanner()
+            RemoteConnectionBanner()
             List {
                 if model.search.isEmpty, let first = model.workspace.bots.first {
                     NavigationLink(value: first) {
@@ -58,7 +67,7 @@ struct RootView: View {
                     }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                    .swipeActions { if bot.isMain != true { Button("Delete", role: .destructive) { model.removeBot(bot) } } }
+                    .swipeActions { if bot.isMain != true { Button("Delete", role: .destructive) { Task { await remote.command(RemoteCommand(action: "delete_bot", botID: bot.id)) } } } }
                 }
             }
             .listStyle(.plain)
@@ -76,6 +85,8 @@ struct RootView: View {
 struct CreateBotView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var remote: RemoteController
+    @State private var saving = false
     @State private var name = ""
     @State private var purpose = ""
     @State private var color = "purple"
@@ -92,7 +103,7 @@ struct CreateBotView: View {
                         Text("Rose").tag("pink")
                         Text("Amber").tag("ochre")
                     }
-                } footer: { Text("Creates a separate local conversation. Chat on iPhone requires a desktop host connection.") }
+                } footer: { Text("Creates a Bot in your connected desktop workspace.") }
             }
             .navigationTitle("New Bot")
             .navigationBarTitleDisplayMode(.inline)
@@ -100,8 +111,9 @@ struct CreateBotView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
-                        if model.addBot(name: name, purpose: purpose, color: color) { dismiss() }
-                    }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        saving = true
+                        Task { if await remote.command(RemoteCommand(action: "create_bot", name: name, purpose: purpose, color: color)) { dismiss() }; saving = false }
+                    }.disabled(saving || !remote.online || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

@@ -31,15 +31,17 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func applyRemoteSnapshot(_ snapshot: Workspace) { workspace = snapshot; previewEnabled = true; loadFailed = false }
+
     func leavePreview() { previewEnabled = false; search = "" }
     func entries(for bot: Bot) -> [Entry] { workspace.entries.filter { $0.botID == bot.id } }
     func latest(for bot: Bot) -> String { entries(for: bot).last?.text ?? bot.purpose }
 
     @discardableResult
-    func addNote(_ text: String, to bot: Bot) -> Bool {
+    func addNote(_ text: String, to bot: Bot, id: UUID? = nil) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard previewEnabled, !trimmed.isEmpty, workspace.bots.contains(where: { $0.id == bot.id }) else { return false }
-        return commit { $0.entries.append(Entry(botID: bot.id, kind: .user, text: trimmed)) }
+        return commit { $0.entries.append(Entry(botID: bot.id, kind: .user, text: trimmed, id: id ?? UUID())) }
     }
 
     @discardableResult
@@ -160,11 +162,11 @@ final class AppModel: ObservableObject {
         return commit { $0.teamMessages?[index].status = .queued }
     }
 
-    func sendGroup(_ text: String, group: Bot) -> Bool {
+    func sendGroup(_ text: String, group: Bot, id: UUID? = nil) -> Bool {
         guard text.count <= 8000 else { errorMessage = "Keep group messages within 8,000 characters."; return false }
         guard let members = group.memberIDs, !members.isEmpty else { return false }
         return commit { value in
-            let entry = Entry(botID: group.id, kind: .user, text: text); value.entries.append(entry)
+            let entry = Entry(botID: group.id, kind: .user, text: text, id: id ?? UUID()); value.entries.append(entry)
             if value.teamMessages == nil { value.teamMessages = [] }
             for member in members where value.bots.contains(where: { $0.id == member }) {
                 value.teamMessages?.append(TeamMessage(id: UUID(), rootID: entry.id, from: group.id, to: member, text: text, depth: 1))

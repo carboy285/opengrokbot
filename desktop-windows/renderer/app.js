@@ -238,11 +238,31 @@ function showSettings(tab = 'General') {
     for (const [value,label] of [['system','Follow System'],['dark','Dark'],['light','Light']]) { const option=node('option','',label); option.value=value; select.append(option); } select.value=localStorage.getItem('appearance') || 'dark'; select.addEventListener('change',()=>applyTheme(select.value));
     append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),node('span','muted','Bot color')),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
     append(page,promo,node('p','settings-label','Account'),account,node('p','settings-label','Appearance'),appearance,button('Reset conversations…',()=>confirmReset()));
-  } else if (tab === 'Computer') page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot. Their model settings and account configuration remain with the CLI.'));
+  } else if (tab === 'Computer') { page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); }
   else if (tab === 'Permissions') page.append(unavailable('CLI tool permissions', 'Codex runs with read-only workspace access. Other CLIs retain their own permissions. The app does not add approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
-  else if (tab === 'Updates') append(page,unavailable('OpenGrokBot 0.4.0','Install a new build from the project’s release artifacts. This app does not update the official Grok Bot application.'),button('Open project ↗',()=>bridge.openDocs('https://github.com/carboy285/opengrokbot')));
+  else if (tab === 'Updates') append(page,unavailable('OpenGrokBot 0.5.0','Install a new build from the project’s release artifacts. This app does not update the official Grok Bot application.'),button('Open project ↗',()=>bridge.openDocs('https://github.com/carboy285/opengrokbot')));
   else if (tab === 'Vault') renderVault(page);
+}
+async function renderRemoteAccess(page){
+ const body=node('section','composio-settings');page.append(body);
+ if(!bridge.remoteStatus){body.append(node('p','muted','Remote control is available in the installed desktop app.'));return;}
+ const draw=async()=>{
+  let status;try{status=await result(bridge.remoteStatus());}catch(error){body.textContent=error.message;return;}body.replaceChildren();
+  append(body,node('h2','','iPhone remote control'),node('p','','Your phone controls this computer’s Bots, chats, models and running work. No separate phone workspace is created.'));
+  const modes=[['tailscale','Tailscale · private'],['funnel','Tailscale Funnel · public HTTPS'],['wifi','Wi-Fi / private IP'],['proxy','My HTTPS proxy']];
+  const select=node('select','field');select.setAttribute('aria-label','Remote connection mode');for(const [value,label] of modes){const option=node('option','',label);option.value=value;select.append(option);}select.value=status.mode;select.disabled=status.enabled||status.busy;
+  const address=node('input','field');address.value=status.address;address.placeholder='https://my-pc.tailnet.ts.net:8443';address.setAttribute('aria-label','Desktop remote address');
+  select.addEventListener('change',()=>address.value='');
+  const note=node('p','muted');const explain=()=>{note.textContent=select.value==='wifi'?'Use a private IP on trusted Wi-Fi or your Tailscale IP. Direct Wi-Fi HTTP is unencrypted. Use HTTPS when away from home.':select.value==='funnel'?'Public HTTPS protected by your pairing key. The phone does not need Tailscale. Funnel must be authorized in your tailnet.':select.value==='proxy'?'Forward your HTTPS proxy to http://127.0.0.1:48291 and enter its HTTPS base address.':'Install Tailscale on this computer and your iPhone, join the same tailnet, and keep it connected for private HTTPS access wherever you go.';};select.addEventListener('change',explain);explain();
+  const run=async operation=>{try{for(const control of body.querySelectorAll('button'))control.disabled=true;await result(operation);await draw();}catch(error){toast(error.message);await draw();}};
+  append(body,select,note,address,button(status.enabled?'Disable remote access':'Enable remote access',()=>run(status.enabled?bridge.remoteDisable():bridge.remoteEnable(select.value,address.value))));
+  if(status.enabled){
+   append(body,button('Save address',()=>run(bridge.remoteAddress(address.value))),button('Copy pairing link',async()=>{try{const link=await result(bridge.remoteLink());await navigator.clipboard.writeText(link);toast('Pairing link copied. Treat it like a workspace password.');}catch(error){toast(error.message);}}),button('Revoke phones / new key',()=>run(bridge.remoteRotate())));
+   if(['tailscale','funnel'].includes(status.mode)){const command=`tailscale ${status.mode==='funnel'?'funnel':'serve'} --bg --https=8443 http://127.0.0.1:48291`;append(body,node('pre','',command),button('Copy command',()=>navigator.clipboard.writeText(command)));}
+  }
+  append(body,node('p','muted',status.feedback),node('p','muted','Open the pairing link on your iPhone or paste it into Connect Desktop. Keep it private. The host must be awake with OpenGrokBot running. When remote access is enabled, closing this window keeps the app in the system tray; use its Quit menu to stop the host.'),button('Get Tailscale ↗',()=>bridge.openDocs('https://tailscale.com/download')));
+ };await draw();
 }
 async function renderVault(page) {
   append(page,node('h2','','Device vault'),node('p','muted','Encrypted with Windows data protection. This local vault is not synced or accessible to Grok Bot.'));

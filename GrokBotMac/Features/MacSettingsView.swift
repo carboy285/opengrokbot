@@ -25,7 +25,7 @@ struct MacSettingsView: View {
                     }.buttonStyle(.plain).accessibilityAddTraits(desktop.settingsTab == tab ? [.isSelected] : [])
                 }
                 Spacer()
-                Text("OpenGrokBot 0.4.0").font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
+                Text("OpenGrokBot 0.5.0").font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
             }
             .padding(16).padding(.top, 6).frame(width: 238).background(MacTheme.sidebar)
             Rectangle().fill(MacTheme.line).frame(width: 1)
@@ -114,6 +114,7 @@ struct MacSettingsView: View {
     private var computer: some View {
         Group {
             unavailable(title: "AI runs from this Mac", detail: "This app launches the installed CLI on this Mac. Each Bot has a separate working folder and saved CLI session. Cloud computer control is not part of this local version.", icon: "desktopcomputer")
+            MacRemoteAccessView(remote: desktop.remote)
             section("This Mac") {
                 VStack(spacing: 0) {
                     settingRow("Time zone") { Text(TimeZone.current.identifier).foregroundStyle(MacTheme.secondary) }
@@ -125,7 +126,7 @@ struct MacSettingsView: View {
 
     private var updates: some View {
         VStack(alignment: .leading, spacing: 20) {
-            unavailable(title: "OpenGrokBot 0.4.0", detail: "Install a new build from this project’s release artifacts. This build does not modify or update the official Grok Bot application.", icon: "arrow.down.circle")
+            unavailable(title: "OpenGrokBot 0.5.0", detail: "Install a new build from this project’s release artifacts. This build does not modify or update the official Grok Bot application.", icon: "arrow.down.circle")
             MacPillButton(title: "Open project") { openDocumentation("https://github.com/carboy285/opengrokbot") }
         }
     }

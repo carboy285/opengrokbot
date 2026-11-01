@@ -1,5 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
+  remoteStatus:()=>ipcRenderer.invoke('remote:status'),
+  remoteEnable:(mode,address)=>ipcRenderer.invoke('remote:enable',mode,address),
+  remoteDisable:()=>ipcRenderer.invoke('remote:disable'),
+  remoteAddress:address=>ipcRenderer.invoke('remote:address',address),
+  remoteLink:()=>ipcRenderer.invoke('remote:link'),
+  remoteRotate:()=>ipcRenderer.invoke('remote:rotate'),
   configureBot:(id,value)=>ipcRenderer.invoke('bot:configure',id,value),
   listModels:provider=>ipcRenderer.invoke('models:list',provider),
   listFiles:id=>ipcRenderer.invoke('files:list',id),

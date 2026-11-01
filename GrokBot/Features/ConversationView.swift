@@ -3,13 +3,15 @@ import SwiftUI
 struct ConversationView: View {
     let bot: Bot
     @EnvironmentObject private var model: AppModel
-    @State private var draft = ""
+    @EnvironmentObject private var remote: RemoteController
+    @State private var sending = false
+    private var draft: Binding<String> { Binding(get: { remote.drafts[bot.id] ?? "" }, set: { remote.drafts[bot.id] = $0 }) }
     @FocusState private var composing: Bool
     @State private var info = false
 
     var body: some View {
         VStack(spacing: 0) {
-            PreviewBanner()
+            RemoteConnectionBanner()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 20) {
@@ -17,7 +19,7 @@ struct ConversationView: View {
                             VStack(spacing: 16) {
                                 BotAvatar(color: bot.color, size: 70)
                                 Text("A fresh conversation").font(.title2.weight(.medium))
-                                Text("Set up an AI CLI in the Mac or Windows app. A desktop host connection is required for iPhone chat.")
+                                Text("Send a message to this Bot on \(remote.hostName).")
                                     .foregroundStyle(.secondary).multilineTextAlignment(.center)
                             }.frame(maxWidth: .infinity).padding(.vertical, 60)
                         }
@@ -45,14 +47,7 @@ struct ConversationView: View {
         }
         .sheet(isPresented: $info) {
             NavigationStack {
-                VStack(spacing: 24) {
-                    BotAvatar(color: bot.color, size: 80)
-                    Text(bot.name).font(.title)
-                    Text(bot.purpose).foregroundStyle(.secondary)
-                    StatusCard(title: "Desktop host needed", detail: "iOS cannot run desktop AI CLIs. This build does not yet include the host connection needed to relay messages from your iPhone.", symbol: "desktopcomputer")
-                    NavigationLink("Desktop setup guide") { IntegrationView() }
-                    Spacer()
-                }.padding(24).padding(.top, 30)
+                RemoteBotDetailView(botID: bot.id)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { info = false } } }
             }.presentationDetents([.medium, .large])
         }
@@ -61,13 +56,32 @@ struct ConversationView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .bottom, spacing: 12) {
-                Text("Connect a desktop host to chat").foregroundStyle(.secondary).padding(.vertical, 12)
-                Spacer()
-                Button { info = true } label: { Image(systemName: "desktopcomputer").frame(width: 44, height: 44) }.accessibilityLabel("Desktop setup guide")
-            }.padding(8).padding(.leading, 14).glassChrome(in: RoundedRectangle(cornerRadius: 28))
-            Text("Use the Mac or Windows app for local CLI chat").font(.caption2).foregroundStyle(.secondary).frame(maxWidth: .infinity)
-        }.padding(.horizontal, 16).padding(.vertical, 10).background(Palette.background)
+                TextField("Message \(bot.name)", text: draft, axis: .vertical)
+                    .lineLimit(1...7).focused($composing).padding(.vertical, 12)
+                    .accessibilityIdentifier("remote-chat-input")
+                if remote.running.contains(bot.id) {
+                    Button { Task { await remote.command(RemoteCommand(action: "stop", botID: bot.id)) } } label: { Image(systemName: "stop.fill").frame(width:44,height:44) }
+                        .disabled(!remote.online).accessibilityLabel("Stop response")
+                } else {
+                    Button { send() } label: { Image(systemName: "arrow.up").font(.system(size:20,weight:.semibold)).foregroundStyle(.black).frame(width:38,height:38).background(.white,in:Circle()) }
+                        .disabled(!remote.online || sending || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel("Send message")
+                }
+            }.padding(8).padding(.leading,14).glassChrome(in:RoundedRectangle(cornerRadius:28))
+            if model.entries(for:bot).last?.state == .failed {
+                Button("Retry response") { Task { await remote.command(RemoteCommand(action:"retry",botID:bot.id)) } }.font(.caption).disabled(!remote.online)
+            }
+            Text("Runs on \(remote.hostName)").font(.caption2).foregroundStyle(.secondary).frame(maxWidth:.infinity)
+        }.padding(.horizontal,16).padding(.vertical,10).background(Palette.background)
     }
+    private func send() {
+        let text = draft.wrappedValue.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !text.isEmpty, !sending else { return }; sending = true
+        Task {
+            if await remote.send(text,bot:bot), draft.wrappedValue.trimmingCharacters(in:.whitespacesAndNewlines) == text { draft.wrappedValue = "" }
+            sending = false
+        }
+    }
+
 }
 
 private struct MessageRow: View {

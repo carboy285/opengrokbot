@@ -24,8 +24,8 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var senderName: String? = nil
     let date: Date
 
-    init(botID: UUID, kind: Kind, text: String) {
-        id = UUID()
+    init(botID: UUID, kind: Kind, text: String, id: UUID = UUID()) {
+        self.id = id
         self.botID = botID
         self.kind = kind
         self.text = text

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Tray, Menu } = require('electron');
 const { readFile, writeFile, mkdir, rename, readdir, lstat } = require('node:fs/promises');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
@@ -10,13 +10,15 @@ if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userD
 const cli=require('./local-cli.cjs');
 const composio=require('./composio.cjs');
 const teamwork=require('./teamwork.cjs');
+const remoteAPI=require('./remote-host.cjs'),tailscale=require('./tailscale.cjs');
+const remote=new remoteAPI.RemoteHost();let remoteConfig,remoteFeedback='',remoteBusy=false,remoteRoute,remoteTray,quitting=false,revision=randomUUID();
 class PublicError extends Error {}
 let state,settings,installed=[],composioConfiguration,connectedTools=[],composioBusy=false;
 const active=new Map(),pendingBots=new Set();
 let initialization;
 let window;
 const rendererFile = path.resolve(__dirname, '../renderer/index.html');
-const documentation = new Set(['https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
+const documentation = new Set(['https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://tailscale.com/download','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
 let writeQueue = Promise.resolve();
 function file(name) { return path.join(app.getPath('userData'), name); }
 function authorized(event) {
@@ -69,18 +71,18 @@ function saveSettings(){return atomicJSON('settings.json',settings);}
 function selectedCLI(){return installed.find(x=>x.id===settings?.selected);}
 function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete};}
 function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
-function notify(){if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
+function notify(){revision=randomUUID();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
 function botDirectory(id){return file(path.join('Conversations',id));}
 function configuredProviders(bot){
  const fallback=selectedCLI();const config=bot.aiConfiguration||{providers:fallback?[{provider:fallback.provider,model:''}]:[],activeProvider:fallback?.provider,replyMode:'one'};
  const choices=[config.providers.find(x=>x.provider===config.activeProvider)||config.providers[0]].filter(Boolean);
  return choices.map(choice=>({choice,installation:installed.find(x=>x.provider===choice.provider)}));
 }
-async function startChat(botID,text,delivery){
+async function startChat(botID,text,delivery,requestID){
  const bot=state.bots.find(x=>x.id===botID);
  if(composioBusy)throw new PublicError('Wait for Composio setup to finish before sending a message.');
  if(!bot)throw new PublicError('Choose a Bot.');
- if(bot.memberIDs){if(!text||text.length>8000||!bot.memberIDs.length)throw new PublicError('Send a group message of up to 8,000 characters to a group with members.');teamwork.group(state,bot,text);await atomicJSON('preview-workspace.json',state);notify();await deliverQueued();return;}
+ if(bot.memberIDs){if(!text||text.length>8000||!bot.memberIDs.length)throw new PublicError('Send a group message of up to 8,000 characters to a group with members.');teamwork.group(state,bot,text,requestID);await atomicJSON('preview-workspace.json',state);notify();await deliverQueued();return;}
 
  const providers=configuredProviders(bot);
  if(!providers.length||providers.some(x=>!x.installation))throw new PublicError('Choose and set up providers in this Bot’s side panel.');
@@ -88,7 +90,7 @@ async function startChat(botID,text,delivery){
  if(!text&&!delivery&&!state.entries.some(x=>x.botID===botID&&x.kind==='user'))throw new PublicError('Send your first message first.');
  pendingBots.add(botID);
  try{
-  if(delivery)teamwork.begin(state,delivery);else if(text)state.entries.push({id:randomUUID(),botID,kind:'user',text});
+  if(delivery)teamwork.begin(state,delivery);else if(text)state.entries.push({id:requestID||randomUUID(),botID,kind:'user',text,date:new Date().toISOString()});
   await atomicJSON('preview-workspace.json',state);
   const history=state.entries.filter(x=>x.botID===botID&&!['failed','stopped'].includes(x.state)&&x.text).slice(-30);
   const runs=new Set();active.set(botID,runs);
@@ -122,7 +124,53 @@ async function deliverQueued(){
  }
 }
 
+function remoteStatus(){return {enabled:remote.active,mode:remoteConfig?.mode||'tailscale',address:remoteConfig?.address||'',feedback:remoteFeedback,busy:remoteBusy,port:48291};}
+async function saveRemote(){requireVault();await atomicJSON('remote.encrypted.json',{encrypted:safeStorage.encryptString(JSON.stringify(remoteConfig)).toString('base64')});}
+function showHost(){if(window&&!window.isDestroyed()){window.show();if(window.isMinimized())window.restore();}}
+function remoteTrayUpdate(){if(remote.active&&!remoteTray){remoteTray=new Tray(path.join(__dirname,'icon.ico'));remoteTray.setToolTip('OpenGrokBot · remote access on');remoteTray.setContextMenu(Menu.buildFromTemplate([{label:'Open OpenGrokBot',click:showHost},{label:'Quit and stop host',click:()=>{quitting=true;app.quit();}}]));remoteTray.on('double-click',showHost);}else if(!remote.active&&remoteTray){remoteTray.destroy();remoteTray=null;showHost();}}
+function remoteSnapshot(){const {sessions,version,...workspace}=state;return {protocolVersion:1,hostName:require('node:os').hostname(),revision,workspace:{...workspace,schemaVersion:2,bots:workspace.bots.map(x=>({...x,symbol:x.symbol||'sparkles'})),entries:workspace.entries.map(x=>({...x,date:(x.date||'2001-01-01T00:00:00Z').replace(/\.\d+Z$/,'Z')}))},running:[...active.keys()],providers:installed.map(x=>({provider:x.provider,version:x.version})),defaultProvider:selectedCLI()?.provider};}
+async function remoteFiles(id){if(!state.bots.some(x=>x.id.toLowerCase()===String(id).toLowerCase()))throw new Error('Unknown Bot');let values;try{values=await readdir(botDirectory(state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase()).id),{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}return values.filter(x=>!x.name.startsWith('.')&&x.isFile()).slice(0,500).map(x=>({name:x.name}));}
+async function remoteCommand(command){
+ if(state.entries.some(x=>x.id.toLowerCase()===command.requestID.toLowerCase()))return;
+ const bot=state.bots.find(x=>x.id.toLowerCase()===String(command.botID).toLowerCase());
+ if(command.action==='send'){if(!bot||typeof command.text!=='string'||!command.text.trim()||command.text.length>100000)throw new Error('Invalid message');await startChat(bot.id,command.text,undefined,command.requestID);return;}
+ if(command.action==='stop'){if(!bot)throw new Error('Unknown Bot');for(const run of active.get(bot.id)||[])run.cancel();return;}
+ if(command.action==='retry'){if(!bot)throw new Error('Unknown Bot');const message=state.teamMessages?.findLast(x=>x.to===bot.id&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(bot.id);return;}
+ if(command.action==='create_bot'){
+  if(typeof command.name!=='string'||!command.name.trim()||command.name.length>200||typeof command.purpose!=='string'||command.purpose.length>2000||!['white','purple','pink','ochre'].includes(command.color)||state.bots.length>=100||state.bots.some(x=>x.name.toLowerCase()===command.name.trim().toLowerCase()))throw new Error('Invalid Bot');
+  state.bots.push({id:randomUUID(),name:command.name.trim(),purpose:command.purpose,color:command.color});
+ }else if(command.action==='delete_bot'){
+  if(!bot||bot.isMain||active.has(bot.id)||pendingBots.has(bot.id))throw new Error('Stop the Bot first');state.bots=state.bots.filter(x=>x.id!==bot.id);state.entries=state.entries.filter(x=>x.botID!==bot.id);state.teamMessages=state.teamMessages?.filter(x=>x.from!==bot.id&&x.to!==bot.id);for(const member of state.bots)if(member.memberIDs)member.memberIDs=member.memberIDs.filter(x=>x!==bot.id);
+ }else if(command.action==='configure_bot'){
+  if(!bot||active.has(bot.id)||pendingBots.has(bot.id))throw new Error('Stop the Bot first');const configuration={...command.configuration,replyMode:'one'};const updated={...bot,aiConfiguration:configuration};validateWorkspace({...state,bots:state.bots.map(x=>x.id===bot.id?updated:x)});bot.aiConfiguration=configuration;
+ }else throw new Error('Unsupported command');
+ await atomicJSON('preview-workspace.json',state);notify();
+}
+async function enableRemote(){
+ await remote.start({token:remoteConfig.token,lan:remoteConfig.mode==='wifi',snapshot:remoteSnapshot,execute:remoteCommand,models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];},files:remoteFiles});
+ remoteConfig.enabled=true;await saveRemote();remoteTrayUpdate();
+ if(['tailscale','funnel'].includes(remoteConfig.mode)){
+  const address=await tailscale.configure(48291,remoteConfig.mode==='funnel');
+  if(address){remoteConfig.address=address;remoteRoute={address,funnel:remoteConfig.mode==='funnel'};await saveRemote();remoteFeedback='Tailscale HTTPS is ready. Copy the pairing link to your phone.';}
+  else remoteFeedback='Tailscale needs setup or port 8443 is already in use. Use the command below, then enter its HTTPS address. Existing routes are not overwritten.';
+ }else remoteFeedback='Remote access is on. Copy the pairing link to your phone.';
+}
 function configureIPC() {
+ handle('remote:status',async()=>{await ensureState();return remoteStatus();});
+ handle('remote:enable',async(mode,address)=>{
+  await ensureState();requireVault();if(remote.active||remoteBusy||!['tailscale','funnel','wifi','proxy'].includes(mode))throw new PublicError('Disable remote access before changing connection modes.');
+  remoteBusy=true;try{
+   const token=remoteConfig?.token||require('node:crypto').randomBytes(32).toString('hex');
+   if(mode==='wifi'&&!address){const candidate=Object.values(require('node:os').networkInterfaces()).flat().find(x=>x&&!x.internal&&x.family==='IPv4'&&remoteAPI.localHost(x.address));address=`http://${candidate?.address||'your-pc.local'}:48291`;}
+   if(['wifi','proxy'].includes(mode)){remoteAPI.pairing(address,token);if(mode==='proxy'&&new URL(address).protocol!=='https:')throw new PublicError('Use an HTTPS proxy address.');}
+   remoteConfig={enabled:false,mode,address:address||'',token};await enableRemote();return remoteStatus();
+  }finally{remoteBusy=false;}
+ });
+ handle('remote:disable',async()=>{await remote.stop();remoteTrayUpdate();if(remoteConfig){remoteConfig.enabled=false;await saveRemote();}if(remoteRoute){const removed=await tailscale.remove(48291,remoteRoute.address,remoteRoute.funnel);if(removed)remoteRoute=null;else remoteFeedback='The app server is off. Remove its port 8443 Tailscale route before changing modes.';}else remoteFeedback='Remote access is off.';return remoteStatus();});
+ handle('remote:address',async address=>{if(!remoteConfig||!remote.active)throw new Error('Enable remote access first');remoteAPI.pairing(address,remoteConfig.token);if(remoteConfig.mode!=='wifi'&&new URL(address).protocol!=='https:')throw new PublicError('Use an HTTPS address.');remoteConfig.address=address;await saveRemote();return remoteStatus();});
+ handle('remote:link',async()=>{if(!remoteConfig||!remote.active)throw new Error('Enable remote access first');return remoteAPI.pairing(remoteConfig.address,remoteConfig.token);});
+ handle('remote:rotate',async()=>{if(!remoteConfig)throw new Error('Enable remote access first');remoteConfig.token=require('node:crypto').randomBytes(32).toString('hex');remote.token=remoteConfig.token;remote.receipts.clear();await saveRemote();return remoteStatus();});
+
   handle('workspace:load', async () => {await ensureState();return state;});
   handle('workspace:save', async value => {
     await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before changing Bots.');
@@ -222,10 +270,12 @@ function configureIPC() {
 app.whenReady().then(() => {
   configureIPC();
   window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, frame: false, backgroundColor: '#111111', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  window.on('close',event=>{if(remote.active&&!quitting){event.preventDefault();window.hide();}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.loadFile(rendererFile);
+  (async()=>{try{await ensureState();const stored=await loadJSON('remote.encrypted.json',null);if(stored){requireVault();remoteConfig=JSON.parse(safeStorage.decryptString(Buffer.from(stored.encrypted,'base64')));if(remoteConfig.enabled){installed=await cli.discover(settings.overrides);await enableRemote();}}}catch{remoteFeedback='Remote access could not be restored. Unlock Windows and enable it in Settings.';}})();
 });
-app.on('before-quit',()=>{for(const runs of active.values())for(const run of runs)run.cancel(true);});
-app.on('window-all-closed', () => app.quit());
+app.on('before-quit',()=>{quitting=true;remote.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
+app.on('window-all-closed', () => {if(!remote.active)app.quit();});

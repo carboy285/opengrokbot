@@ -25,6 +25,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 @MainActor
 final class MacAppModel: ObservableObject {
     let composio = ComposioModel()
+    let remote = MacRemoteHost()
     @Published var selectedID: UUID?
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
@@ -161,15 +162,15 @@ extension MacAppModel {
     }
 
     @discardableResult
-    func send(_ text: String, to bot: Bot, app: AppModel) -> Bool {
+    func send(_ text: String, to bot: Bot, app: AppModel, requestID: UUID? = nil) -> Bool {
         if bot.memberIDs != nil {
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app.sendGroup(text, group: bot) else { return false }
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app.sendGroup(text, group: bot, id: requestID) else { return false }
             deliverQueuedMessages(app: app); return true
         }
         let providers = providersToRun(for: bot)
         guard !providers.isEmpty else { showBotInspector = true; return false }
         guard !runningBots.contains(bot.id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        guard app.addNote(text, to: bot) else { return false }
+        guard app.addNote(text, to: bot, id: requestID) else { return false }
         for provider in providers { startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app) }
         return true
     }

@@ -32,6 +32,8 @@ The development Mac build is ad-hoc signed and not notarized. The Windows build 
 
 Click the Bot’s name at the top of a conversation to open its side panel. **Details** contains provider and model controls; **Library** lists real files in its working folder; **Computer** shows its local runtime. Enable providers you want available, then choose **one active provider** and its model. Only that selected model answers for that Bot. Codex and OpenCode can load their local model catalogs; exact model IDs can also be entered. A blank model uses the CLI’s default.
 
+![Native Mac Bot side panel](docs/screenshots/macos-bot-details.png)
+
 Press **Enter** to send; **Shift+Enter** adds a line break. Your unsent draft stays in place when the side panel opens.
 
 Try: “Make me a bot called Travel that plans trips, keeps answers short, and never books without asking.” The assistant can create the Bot with its job description and selected model, save private or shared memories, and send another Bot a request with just the relevant context. The specialist answers asynchronously in its own chat and returns a labeled reply to the requesting chat. Ask for a group with 2–8 existing Bots to work in a shared conversation; each member uses its own selected model. No extra Bots exist at first launch.

@@ -18,6 +18,7 @@ struct GrokBotMacApp: App {
                 .background(WindowConfigurator())
                 .onAppear {
                     if !app.previewEnabled { app.enterPreview() }
+                    desktop.remote.attach(app: app, desktop: desktop)
                     desktop.selectFirst(in: app)
                     desktop.refreshCLIs()
                     #if DEBUG
