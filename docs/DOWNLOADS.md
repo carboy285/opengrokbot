@@ -1,4 +1,30 @@
-# Downloads · 0.7.1
+# Downloads · 0.7.2
+
+[Release and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.7.2)
+
+| Download | Contents |
+| --- | --- |
+| [Mac universal DMG](https://github.com/carboy285/opengrokbot/releases/download/v0.7.2/OpenGrokBot-0.7.2-mac-universal.dmg) | Apple Silicon and Intel; macOS 14+ |
+| [Windows Setup EXE](https://github.com/carboy285/opengrokbot/releases/download/v0.7.2/OpenGrokBot-0.7.2-Windows-x64-Setup.exe) | Windows x64 |
+| [Matching iPhone Xcode project and sources](https://github.com/carboy285/opengrokbot/releases/download/v0.7.2/OpenGrokBot-0.7.2-Source.zip) | Open GrokBot.xcodeproj; select GrokBot for iPhone |
+| [Mac checksum](https://github.com/carboy285/opengrokbot/releases/download/v0.7.2/OpenGrokBot-0.7.2-mac-universal.dmg.sha256) | SHA-256 |
+
+Runtime commit: `ca2fb49eb97a41bdecf6cafdbad241231fecd55f`. [Packaging run](https://github.com/carboy285/opengrokbot/actions/runs/41359536522).
+The packaging run successfully compiled the iPhone sources and universal Mac app, built the Mac/Windows installers, and published the downloads above. No automated tests were run.
+
+Quit older copies and update the **hosting computer and viewing devices** to **0.7.2 (build 10)**. Enable Allow phone access on the host. Select the host through **This computer** on Windows or **Connect Desktop** on iPhone; compare fingerprints and approve the viewing device on the host. Windows includes **Reconnect**. The phone views desktop Bots; it does not host Bots for a PC.
+
+Unpinned Bots now sort by recent chat use and messages; pinned order stays in place. Each Bot has its own visible **local browser** with persistent cookie/login storage. No Browserbase account is needed. Approved Mac, Windows and iPhone viewers can watch browser and VM images refresh roughly every three seconds. Use Browser / VM view after selecting the host. These views do not send keyboard/mouse input. On a hosting Mac, enable per-Bot VM viewing and grant macOS Screen Recording access.
+
+Bot details also includes **Linux VM** setup. Download/install UTM on Mac or VirtualBox 7.2+ on Windows through the provided links, then select a Linux guest asset: a matching-architecture `.utm` template on Mac, or an Ubuntu 24.04 ISO/Linux OVA on Windows. The app imports/provisions a per-Bot VM and opens its local console. Optional guest commands require guest tools and the owner's enable switch; the AI CLI remains on the host.
+
+[Remote loading fixes, browser/VM setup and limits](REMOTE_0_7_2.md) · [iPhone installation](../INSTALL-IOS-0.7.2.md).
+
+No automated tests or physical-device validation were run, as requested. Existing relay logs were inspected; compilation and installer packaging do not confirm runtime interoperability. The reported hang was not reproduced locally. Development installers remain Mac ad-hoc signed/not notarized and Windows unsigned.
+
+---
+
+## Previous release · 0.7.1
 
 [0.7.1 release](https://github.com/carboy285/opengrokbot/releases/tag/v0.7.1)
 
@@ -24,21 +50,4 @@ For cloud page reading, create a Browserbase account and enter its API key/proje
 No automated tests, UI checks, database behavioral checks or physical-device validation were run, as requested. Compilation and installer packaging do not establish runtime correctness. The intermittent iPhone crash was not reproduced; this release fixes concrete crash/race paths identified in source.
 
 Development installers: Mac ad-hoc signed and not notarized; Windows unsigned. Trusted signatures require the owner's publisher credentials.
-
----
-
-## Previous release · 0.7.0
-
-[Release notes and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.7.0).
-
-| Download | Contents |
-| --- | --- |
-| [Mac universal installer](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-mac-universal.dmg) | Native Apple Silicon/Intel app; macOS 14+ |
-| [Windows installer](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-Windows-x64-Setup.exe) | Windows x64 Setup EXE |
-| [Matching source and Xcode project](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-Source.zip) | Open `GrokBot.xcodeproj`; **GrokBot** for iPhone, **GrokBotMac** for Mac; also includes Windows sources |
-| [Mac DMG checksum](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-mac-universal.dmg.sha256) | SHA-256 checksum; not an installer |
-
-Runtime source commit: `4f5c16e23ce65dbe266b37a0940e5c5f89f1c0bb`. The [packaging run](https://github.com/carboy285/opengrokbot/actions/runs/41336381049) compiled the universal Mac app, created both desktop installers, and published the matching source ZIP. Unit tests, UI tests, database checks, protocol interoperability, and physical-device behavior were not tested, as requested. Compilation and installer packaging do not verify runtime behavior.
-
-Development signatures: the Mac app is ad-hoc signed and not notarized; the Windows installer is unsigned. The release workflow supports trusted signatures after the owner configures publisher credentials. See [Desktop workspace 0.7](DESKTOP_0_7.md) for features, setup, and signing requirements.
 

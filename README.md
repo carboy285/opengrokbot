@@ -36,7 +36,7 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
-The **0.7.1 update** adds auto-scrolling chats, account-synced pins, iPhone edge-swipe back, scheduled tasks, optional cloud browsers, and a desktop workspace switcher for viewing another computer on your account. See [0.7.1 changes and setup](docs/BUGFIX_0_7_1.md) for details and limits.
+The **0.7.2 update** improves remote bot loading between Windows, Mac and iPhone with a smaller initial roster, compatible workspace replies, reconnect controls and visible errors. It also adds recent-use sorting for unpinned Bots, visible local Bot browsers and Linux VM setup through UTM/VirtualBox. See [0.7.2 remote setup and limits](docs/REMOTE_0_7_2.md). It retains [0.7.1 features](docs/BUGFIX_0_7_1.md), including shared pins and scheduled tasks. Local browser profiles replace the cloud-browser requirement.
 
 ## Bots, models and teamwork
 
