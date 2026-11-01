@@ -20,6 +20,12 @@ struct WorkspaceStore {
     }
 
     #if DEBUG && os(macOS)
+    static func recordLaunchDiagnostic(_ key: String, _ value: String) {
+        let file = URL(fileURLWithPath: "/tmp/opengrokbot-ui-\(ProcessInfo.processInfo.processIdentifier).json")
+        var values = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file))) as? [String:String] ?? [:]
+        values[key] = value
+        if let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]) { try? data.write(to: file, options: .atomic) }
+    }
     static func testArgument(_ key: String) -> String? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: key), index + 1 < arguments.count else { return nil }

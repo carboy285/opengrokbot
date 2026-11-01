@@ -28,6 +28,7 @@ final class MacUITests: XCTestCase {
         let (app, directory) = try application(setup: false)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
+        defer { dumpLaunchDiagnostics() }
         XCTAssertTrue(app.buttons["Search Bots"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Soccer'")).firstMatch.exists)
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "conversation-message").count, 0)
@@ -60,6 +61,7 @@ final class MacUITests: XCTestCase {
         let (app, directory) = try application(setup: true)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
+        defer { dumpLaunchDiagnostics() }
         XCTAssertTrue(app.staticTexts["A free app for your AI CLIs"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, name: "macos-setup")
         app.buttons["Continue"].click()
@@ -75,6 +77,13 @@ final class MacUITests: XCTestCase {
         app.buttons["Continue to chat"].click()
         app.buttons["Start chatting"].click()
         XCTAssertTrue(app.buttons["Search Bots"].waitForExistence(timeout: 5))
+    }
+
+    private func dumpLaunchDiagnostics() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: "/tmp"), includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.lastPathComponent.hasPrefix("opengrokbot-ui-") {
+            print("LAUNCH DIAGNOSTICS: \((try? String(contentsOf: file, encoding: .utf8)) ?? "unreadable")")
+        }
     }
 
     @MainActor

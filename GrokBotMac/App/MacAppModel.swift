@@ -76,10 +76,16 @@ extension MacAppModel {
         scanningCLIs = true
         var overrides = cliOverrides
         #if DEBUG
+        WorkspaceStore.recordLaunchDiagnostic("cliEnv", ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_CODEX_PATH"] ?? "missing")
+        WorkspaceStore.recordLaunchDiagnostic("cliArg", WorkspaceStore.testArgument("--opengrokbot-test-cli") ?? "missing")
         if let path = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_CODEX_PATH"] ?? WorkspaceStore.testArgument("--opengrokbot-test-cli") { overrides["codex"] = path }
         #endif
         Task {
             let found = await Task.detached { [overrides] in CLIInstallationScanner.scan(overrides: overrides) }.value
+            #if DEBUG
+            WorkspaceStore.recordLaunchDiagnostic("found", found.map(\.path).joined(separator: " | "))
+            WorkspaceStore.recordLaunchDiagnostic("overrides", overrides.description)
+            #endif
             installedCLIs = found
             if !found.contains(where: { $0.id == selectedCLIID }) { selectedCLIID = found.first?.id ?? "" }
             scanningCLIs = false

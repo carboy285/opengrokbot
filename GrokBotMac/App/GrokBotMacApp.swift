@@ -21,6 +21,9 @@ struct GrokBotMacApp: App {
                     desktop.selectFirst(in: app)
                     desktop.refreshCLIs()
                     #if DEBUG
+                    WorkspaceStore.recordLaunchDiagnostic("setupEnv", ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_SETUP"] ?? "missing")
+                    WorkspaceStore.recordLaunchDiagnostic("setupArg", WorkspaceStore.testArgument("--opengrokbot-test-setup") ?? "missing")
+                    WorkspaceStore.recordLaunchDiagnostic("bundle", Bundle.main.bundleURL.path)
                     if let setup = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_SETUP"] ?? WorkspaceStore.testArgument("--opengrokbot-test-setup") { desktop.panel = setup == "1" ? .setup : nil }
                     else if !UserDefaults.standard.bool(forKey: "localCLISetupComplete") { desktop.panel = .setup }
                     #else
