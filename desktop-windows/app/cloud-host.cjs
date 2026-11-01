@@ -44,7 +44,7 @@ function open(local, peer, owner, packet) {
 class CloudHost {
   constructor({ load, save, snapshot, execute, models, files, changed = () => {}, fetchImpl = fetch }) {
     Object.assign(this, { load, save, snapshot, execute, models, files, changed, fetchImpl });
-    this.data = { identities: {}, approvals: {}, receipts: [] }; this.devices = []; this.phase = 'signed-out'; this.feedback = 'Sign in with the same account as your iPhone.'; this.generation = 0; this.enabled = false; this.refreshing = null; this.saveQueue = Promise.resolve();
+    this.data = { identities: {}, approvals: {}, receipts: [] }; this.devices = []; this.phase = 'signed-out'; this.feedback = 'Sign in with the same account as your iPhone.'; this.generation = 0; this.accountGeneration = 0; this.enabled = false; this.refreshing = null; this.saveQueue = Promise.resolve();
   }
   get active() { return this.enabled && !!this.data.session; }
   get local() { return this.data.identities[lower(this.data.session?.user.id)]; }
@@ -72,23 +72,23 @@ class CloudHost {
     const session = this.data.session; if (!session) throw new Error('Sign in first.');
     if (session.expires_at > Date.now() / 1000 + 90) return session.access_token;
     if (!this.refreshing) {
-      const generation = this.generation;
-      this.refreshing = (async () => { const next = await this.raw('/auth/v1/token?grant_type=refresh_token', { body: { refresh_token: session.refresh_token } }); if (generation !== this.generation || this.data.session?.user.id !== session.user.id) throw new Error('The account changed.'); next.expires_at ||= Date.now() / 1000 + (next.expires_in || 3600); this.data.session = next; await this.persist(); return next.access_token; })().finally(() => { this.refreshing = null; });
+      const generation = this.accountGeneration;
+      this.refreshing = (async () => { const next = await this.raw('/auth/v1/token?grant_type=refresh_token', { body: { refresh_token: session.refresh_token } }); if (generation !== this.accountGeneration || this.data.session?.user.id !== session.user.id) throw new Error('The account changed.'); next.expires_at ||= Date.now() / 1000 + (next.expires_in || 3600); this.data.session = next; await this.persist(); return next.access_token; })().finally(() => { this.refreshing = null; });
     }
     return this.refreshing;
   }
-  async request(path, body, method = 'POST') { const generation = this.generation, signal = this.abort?.signal; const token = await this.token(); const result = await this.raw(path, { body, method, token, signal }); if (generation !== this.generation) throw new Error('The account changed.'); return result; }
+  async request(path, body, method = 'POST') { const generation = this.accountGeneration, signal = this.abort?.signal; const token = await this.token(); const result = await this.raw(path, { body, method, token, signal }); if (generation !== this.accountGeneration) throw new Error('The account changed.'); return result; }
   async signIn(email, password, create = false) {
     if (typeof email !== 'string' || !email.includes('@') || email.length > 320 || typeof password !== 'string' || !password || password.length > 4096) throw new Error('Enter your email and password.');
-    const generation = this.generation;
+    const generation = this.accountGeneration;
     const session = await this.raw(create ? '/auth/v1/signup' : '/auth/v1/token?grant_type=password', { body: { email: email.trim(), password } });
-    if (generation !== this.generation) throw new Error('The account changed. Try signing in again.');
+    if (generation !== this.accountGeneration) throw new Error('The account changed. Try signing in again.');
     if (!session?.access_token) { this.transition('confirm-email', 'Check your email to confirm the account, then sign in.'); return this.status(); }
-    this.abort?.abort(); this.generation++; this.data.session = session; session.expires_at ||= Date.now() / 1000 + (session.expires_in || 3600);
+    this.abort?.abort(); this.generation++; this.accountGeneration++; this.refreshing = null; this.data.session = session; session.expires_at ||= Date.now() / 1000 + (session.expires_in || 3600);
     const owner = lower(session.user.id); this.data.identities[owner] ||= identity(); this.data.approvals[owner] ||= {}; this.devices = []; this.data.enabled = true; await this.persist(); this.start(); return this.status();
   }
   async signOut() {
-    const old = this.data.session; this.abort?.abort(); this.generation++; this.enabled = false; this.devices = []; this.data.session = null; this.data.enabled = false; await this.persist(); this.transition('signed-out', 'Signed out on this computer.');
+    const old = this.data.session; this.abort?.abort(); this.generation++; this.accountGeneration++; this.refreshing = null; this.enabled = false; this.devices = []; this.data.session = null; this.data.enabled = false; await this.persist(); this.transition('signed-out', 'Signed out on this computer.');
     if (old) this.raw('/auth/v1/logout?scope=local', { body: {}, token: old.access_token }).catch(() => {}); return this.status();
   }
   async setEnabled(value) {
