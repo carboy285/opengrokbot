@@ -15,8 +15,8 @@ final class RemoteController: ObservableObject {
     @Published var busy = false
     @Published var drafts: [UUID:String] = [:]
     @Published var error: String?
-    private let client = RemoteHTTPClient()
-    private let secrets = KeychainSecretStore(service: "org.opengrokbot.ios.remote")
+    private let client: RemoteHTTPClient
+    private let secrets: KeychainSecretStore
     private var connection: RemotePairing?
     private var polling: Task<Void,Never>?
     private var revision: String?
@@ -24,6 +24,8 @@ final class RemoteController: ObservableObject {
     private var appliedSequence = 0
     private weak var model: AppModel?
     private var pendingSends: [UUID:(String,UUID)] = [:]
+
+    init(client: RemoteHTTPClient = RemoteHTTPClient(), secrets: KeychainSecretStore = KeychainSecretStore(service: "org.opengrokbot.ios.remote")) { self.client = client; self.secrets = secrets }
 
     func attach(_ model: AppModel) {
         guard self.model == nil else { return }; self.model = model

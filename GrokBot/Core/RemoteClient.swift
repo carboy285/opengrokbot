@@ -3,9 +3,9 @@ import Foundation
 /// Shared with Mac contract tests. No cookies, redirects, or credentials cross hosts.
 final class RemoteHTTPClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private var session: URLSession!
-    override init() {
+    override convenience init() { self.init(configuration: .ephemeral) }
+    init(configuration config: URLSessionConfiguration) {
         super.init()
-        let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 25
         config.httpShouldSetCookies = false; config.urlCache = nil
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
