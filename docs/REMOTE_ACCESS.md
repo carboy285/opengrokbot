@@ -1,57 +1,46 @@
-# Control your desktop from iPhone
+# Connect iPhone to Mac with one account
 
-The iPhone app is a controller for your Mac or Windows app. Bots, chat history, memories, model settings, working files, credentials, CLI sessions and running work stay on the desktop. The phone reads the host’s state and sends commands to that same workspace. It does not create an independent local Bot workspace.
+Use the **0.6.0 Mac app and iOS sources together**. The iPhone controls the Mac's existing workspace: Bots, chats, models, memory and running CLI tasks. It never creates or saves a separate phone workspace. The Windows 0.5.0 host uses the older pairing protocol and is not compatible with this account-based controller yet.
 
-Use the 0.5.0 desktop and iOS sources together. Older 0.4.0 installers do not include the remote host.
+## Connect
 
-## Pair
+1. Finish the Mac's AI CLI setup. Optional Composio accounts and credentials stay on the Mac.
+2. Open **Mac Settings → Computer → iPhone remote control**. Create an email/password account, confirm the email, and sign in. You can use the same account on your phone; don't create two separate accounts.
+3. Turn on **Allow phone access**. Keep the Mac awake with OpenGrokBot running.
+4. On the iPhone, open **Connect Desktop**, sign into the same account, and find your Mac.
+5. Compare **This phone's fingerprint** on the phone with its entry in Mac Settings → Computer. Click **Approve phone** on the Mac. Verify the Mac's fingerprint on the phone too.
+6. Select the Mac on your phone. Its actual Bots and chat history appear. A single registered host is found automatically after sign-in; multiple hosts can be selected from the list.
 
-1. Finish AI CLI setup in the desktop app. Optional Composio accounts are connected on the host and remain available to its Bots when you chat from the phone.
-2. Open desktop **Settings → Computer → iPhone remote control**.
-3. Choose a connection method below and select **Enable remote access**.
-4. Select **Copy pairing link**. Privately transfer it to your iPhone. Open the link on the phone, or paste it into **Connect Desktop** in the iOS app, then select **Connect to desktop**.
-5. Allow local-network access on your devices if using Wi-Fi. The phone shows the actual host name after a successful authenticated connection.
-
-Treat the pairing link like a password: it controls your desktop workspace. The host stores its random pairing key in macOS Keychain or Windows encrypted device storage; the iPhone stores its connection in device-only Keychain. The key is in the pairing link’s fragment, not an HTTP URL query or access log. Every API request requires its bearer key. **Revoke phones / new key** invalidates existing phones; copy a new link to pair again.
-
-## Tailscale private access
-
-Install Tailscale on both devices and join the same tailnet. Leave it connected on your iPhone so the same HTTPS address works on Wi-Fi and cellular. The desktop app attempts to configure an unused dedicated HTTPS port, **8443**, forwarding to its loopback host on **48291**. It checks existing routes and refuses to overwrite another service.
-
-If setup requires authorization or the CLI cannot be found, the app shows a command to run in Terminal:
-
-```text
-tailscale serve --bg --https=8443 http://127.0.0.1:48291
-```
-
-Complete Tailscale’s setup and enter the resulting `https://your-computer.your-tailnet.ts.net:8443` base address in the desktop app. Select **Save address**, then copy the pairing link. Use the host’s real address, not this example. If port 8443 already hosts another service, configure a separate HTTPS proxy yourself and choose **My HTTPS proxy**; do not replace that service.
-
-See [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve). Its background configuration persists across Tailscale restarts. The app removes only the port route that still points at its own local service when you disable it; it never resets all Serve configuration.
-
-## Tailscale Funnel
-
-Funnel provides public HTTPS, still protected by the app’s pairing key. The phone does not need Tailscale. The host needs a compatible Tailscale installation and permission to use Funnel; on Mac, Tailscale documents the need for an open-source application variant rather than the Mac App Store build.
-
-```text
-tailscale funnel --bg --https=8443 http://127.0.0.1:48291
-```
-
-Follow Tailscale’s authorization flow if asked. Do not manually convert unrelated services to Funnel. See [Funnel requirements and limitations](https://tailscale.com/docs/features/tailscale-funnel), including supported ports, HTTPS, tailnet policy, and bandwidth limits. Actual tailnet/Funnel access depends on your account and network and has not been exercised with a user account in this implementation workspace.
-
-## Wi-Fi or private IP
-
-Choose **Wi-Fi / private IP** and enable access. The host suggests a private IPv4 address on port 48291; replace it with the correct address if the computer has multiple network interfaces. Both devices must be able to reach that address, and the desktop firewall must allow the app on the trusted local network. Guest Wi-Fi often isolates devices.
-
-Direct HTTP over Wi-Fi is unencrypted. Use only a trusted network. The client accepts direct HTTP only for private/local addresses, including Tailscale’s address range; public hosts require HTTPS. Private IP addresses may change with DHCP, so Tailscale or a stable HTTPS proxy is preferable for roaming. The iOS transport settings permit local names and private IP ranges, rather than disabling HTTPS requirements globally; [Apple documents the IP/CIDR exceptions](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsexceptiondomains).
-
-## Your own HTTPS proxy
-
-Forward your proxy’s root to `http://127.0.0.1:48291`, preserve the Authorization header, and enter its HTTPS base address. The proxy must present a trusted certificate matching its host. Certificate validation stays enabled, and the client refuses redirects so the pairing key cannot be forwarded to another host. Subpath deployments are not supported in this version.
+This works over Wi-Fi or cellular through Supabase HTTPS. No Tailscale app, Funnel, pairing URL, public IP, port forwarding or local-network permission is required. The Mac no longer starts a local HTTP listener.
 
 ## While away
 
-The host must be awake, online, and running OpenGrokBot. Closing or backgrounding the iPhone does not stop desktop work. The phone reconnects and loads the latest host state when reopened or when its network returns; stale chats remain visible during a temporary outage, with commands disabled until reconnected. Retrying a send whose acknowledgment was lost reuses its request ID to avoid duplicating the user message.
+The phone reconnects when reopened or when its network returns. During an outage, already loaded chats remain visible and commands are disabled. Sending retries reuse a command ID so an uncertain acknowledgment does not duplicate a user message. The host records recent command receipts across restarts. Work continues on the Mac when you background, disconnect or sign out of the phone.
 
-With remote access enabled on Windows, closing the app window hides it in the system tray and keeps hosting. Use the tray’s **Quit and stop host** to quit. On Mac, leave the app running; quitting it stops the host and its owned CLI processes. Disconnecting the phone leaves all desktop data in place. Disable remote access on the desktop to stop the API, or rotate its key to revoke phones.
+**Disconnect this iPhone** clears the displayed workspace and host selection; it leaves the Mac's data and work in place. **Revoke** beside a phone on the Mac blocks further control until you approve it again. Turning off **Allow phone access**, signing out on the Mac, sleeping it, or quitting the app makes it unavailable. Disabling access does not stop already running desktop AI work; quitting does.
 
-The phone can send/stop/retry, create/delete additional Bots, select a Bot’s active provider/model, inspect memory, and list its real working files. Initial CLI installation/sign-in, Composio project setup, and device vault management stay on the desktop. Voice, file attachment upload, remote screen sharing, and power/wake management are not implemented.
+Closing a Mac window leaves the app running. Reopen its window from the Dock. The app does not keep a sleeping computer awake or wake it remotely.
+
+## Accounts and service configuration
+
+The supplied Apple builds point at the connected Supabase project `kiaenmbtsgoxvfsijzzc`. Email/password authentication is enabled with email confirmation. Google and GitHub buttons appear only when those providers are enabled in Supabase; they use browser sign-in with PKCE. Provider credentials are deliberately left for later configuration.
+
+Supabase's default email service restricts delivery to project-team addresses and has a low send quota. Configure custom SMTP in **Authentication → Email** before offering signup to other people. A third-party SMTP provider may offer a free tier. Do not disable email verification to work around mail delivery restrictions. Supabase and mail/provider limits apply independently of this free app.
+
+For your own deployment, apply `supabase/migrations/202611010001_account_relay.sql`, change the public URL/publishable key in `GrokBot/Core/CloudProtocol.swift`, and add `opengrokbot://auth/callback` to Auth's redirect allowlist. Never embed a service-role key. The migration uses isolated `opengrok_*` tables/functions and preserves other applications' schemas and Auth settings. The existing `luma://auth/callback` was preserved in the connected project. Google/GitHub OAuth app callbacks go to your Supabase project's `/auth/v1/callback`, not directly to the native app.
+
+## What crosses the service
+
+Supabase Auth holds the email account. The device registry holds owner ID, device ID, name, role, public encryption key, availability and heartbeat. Row-level security isolates each account; anonymous users cannot read the registry or execute relay functions. Device keys cannot be replaced through the registration function.
+
+Each installation keeps a Curve25519 private key, approved peer keys, and refresh tokens in device-only Keychain. The Mac must approve each phone locally after fingerprint comparison. Phone requests and Mac replies use Curve25519 key agreement, HKDF-SHA256 and AES-GCM. Routing IDs, direction, account and protocol are authenticated, and an encrypted expiry prevents the relay extending a message's lifetime. Device discovery requires trusting the first fingerprint; later key changes are rejected.
+
+The database sees routing metadata and bounded ciphertext, not chat plaintext, CLI sessions or provider credentials. Packets expire after 90 seconds and are deleted when acknowledged or on subsequent queue activity; expired data is never returned. Queue limits are 40 packets/32 MB per account, 32 registered devices and approximately 5.9 MB of plaintext per encrypted packet. State updates transfer changed entries. This is a polling relay, usually updating within a few seconds; it is not remote screen sharing or a background iOS service.
+
+Only the host can run AI, install/sign into CLIs, configure Composio or manage the local vault. The controller can send/stop/retry, create/delete additional Bots, choose a provider/model, inspect memory and list working files. Voice, file upload, screen sharing, schedules and wake management remain unavailable. The Mac's CLI and Composio permissions still apply to actions initiated from the phone.
+
+## Upgrading from 0.5.0
+
+Account sign-in replaces pairing keys on Apple platforms. Sign in again and approve your phone; old pairing links are not imported. The new Mac build does not invoke Tailscale or change your existing Tailscale configuration. If you enabled a Serve/Funnel route with 0.5.0, disable it from that version before upgrading, or remove that specific app route in Tailscale. Other Tailscale services must be preserved.
+
+For physical iPhone installation, see [Device setup](DEVICE_SETUP.md). Physical-device roaming and live email delivery require your accounts and have not been verified by the automated fixtures; see [Verification](VERIFICATION.md).

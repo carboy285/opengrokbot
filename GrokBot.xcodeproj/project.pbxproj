@@ -162,14 +162,13 @@
 				"166CBFC81A4D508FABCD3858",
 				"672A68E0A56F346BBEEAB71B",
 				"57D47A83BF7AF4203F32E830",
-				"D06DBC8B0B8FEE6DEB854342",
-				"FCB9E901D996F6739F931193",
 				"6ADAD7FBF5C36E458EA39204",
 				"35A4C4962B0B42D99D747BB8",
 				"46BB3F728CC290CB04A45929",
 				"38A439DE0A445C3B10B2B9FA",
 				"E0FC1E484C090BFDBCCE76C3",
 				"C70D5527CC0F95D1C60DF358",
+				"35D22794E78229FEA5456DF4",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -211,9 +210,9 @@
 				"B77E8610D6612A1CC14A85C8",
 				"6A647BA6FF201D320BA911C1",
 				"8C0E5D565AFA439BB0B57C88",
-				"AA4BCE97CB1CDF6AB82CBC9B",
 				"74A7246F72026DCE3DF0E607",
 				"7B1C3D4F5CF7A817B11A6B39",
+				"3C973D5F702B9B920211D005",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -442,14 +441,13 @@
 				"FC06DDBD68E8C2F0988AA290",
 				"EC2FA14A15172FE096EBAEBF",
 				"3EC45F48509FCBB3CAFCCE7C",
-				"3DD55C27F0E49F596F8374DA",
-				"DF00EA5349CBB6626747DE73",
 				"46495D23D4A3398F192CA200",
 				"F3A7BAA384189ECB80186D64",
 				"C755E5E72524819FB32A1070",
 				"BF24BDD99AE8D9F7ECA8ED1E",
 				"7113A784E29C7A915DC2A1AB",
 				"F01633AA68E2CD8C20D6AB72",
+				"BF5FE8C9D8030D27C1B8CD41",
 			);
 			"name" = "GrokBot";
 			"sourceTree" = "<group>";
@@ -466,9 +464,9 @@
 				"11D870A7BD5197C7470C28BF",
 				"A8D6D5FE4D963584760C4748",
 				"25695E05473B546209A5645E",
-				"E2867CB36EA999F4EEF74337",
 				"30A9DB59419819CB84737FA0",
 				"5D8E6986D447D2640BB25A84",
+				"2610A66E7C1BDB2C4B1E3728",
 			);
 			"name" = "GrokBotTests";
 			"sourceTree" = "<group>";
@@ -890,7 +888,6 @@
 				"9375AF7961EB4B5B9FF800D0",
 				"F46FB84C7BA32BCF20016587",
 				"BF06AE98855DD3672035AF5E",
-				"F9FFA29EBDF843A0C5E66A91",
 				"1859F51FFB6A30A3019EB6F5",
 				"EFB723CD8A0EE926445879EA",
 				"50F902313210107038020C67",
@@ -960,6 +957,7 @@
 				"C8F0B97E774109CCB65823EB",
 				"2F791D952BE703581D221B6C",
 				"2E960B70C54D42052F60F97B",
+				"3B858A0273AB7F1C2261FFFE",
 				"B3C24660A316644D2435C1F5",
 				"28C6BBB4D6021F6DB62AB59D",
 				"0126694C861E25269C743807",
@@ -968,7 +966,6 @@
 				"0CA84F3F6CAD3C302EABB46E",
 				"CABA21E860827AEDC2F53D27",
 				"1C8A428177FFEC3112760792",
-				"1CFFF7044FC951B673B5C515",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -1438,26 +1435,6 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "3EC45F48509FCBB3CAFCCE7C";
 		};
-		"3DD55C27F0E49F596F8374DA" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "GrokBot/Core/RemoteClient.swift";
-			"sourceTree" = "<group>";
-		};
-		"D06DBC8B0B8FEE6DEB854342" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "3DD55C27F0E49F596F8374DA";
-		};
-		"DF00EA5349CBB6626747DE73" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "GrokBot/Remote/PairDesktopView.swift";
-			"sourceTree" = "<group>";
-		};
-		"FCB9E901D996F6739F931193" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "DF00EA5349CBB6626747DE73";
-		};
 		"46495D23D4A3398F192CA200" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -1502,33 +1479,15 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "3EC45F48509FCBB3CAFCCE7C";
 		};
-		"F9FFA29EBDF843A0C5E66A91" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "3DD55C27F0E49F596F8374DA";
-		};
 		"25695E05473B546209A5645E" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
 			"path" = "GrokBotTests/MacRemoteHostTests.swift";
 			"sourceTree" = "<group>";
 		};
-		"E2867CB36EA999F4EEF74337" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "GrokBotTests/RemoteProtocolTests.swift";
-			"sourceTree" = "<group>";
-		};
-		"AA4BCE97CB1CDF6AB82CBC9B" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E2867CB36EA999F4EEF74337";
-		};
 		"0CA84F3F6CAD3C302EABB46E" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "25695E05473B546209A5645E";
-		};
-		"1CFFF7044FC951B673B5C515" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E2867CB36EA999F4EEF74337";
 		};
 		"30A9DB59419819CB84737FA0" = {
 			"isa" = "PBXFileReference";
@@ -1613,6 +1572,30 @@
 		"B3C24660A316644D2435C1F5" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "5D8E6986D447D2640BB25A84";
+		};
+		"2610A66E7C1BDB2C4B1E3728" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotTests/CloudAuthTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"3C973D5F702B9B920211D005" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2610A66E7C1BDB2C4B1E3728";
+		};
+		"3B858A0273AB7F1C2261FFFE" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2610A66E7C1BDB2C4B1E3728";
+		};
+		"BF5FE8C9D8030D27C1B8CD41" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBot/Remote/ConnectDesktopView.swift";
+			"sourceTree" = "<group>";
+		};
+		"35D22794E78229FEA5456DF4" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "BF5FE8C9D8030D27C1B8CD41";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";

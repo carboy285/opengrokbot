@@ -51,6 +51,6 @@ The application is free and open source. AI inference and Composio usage follow 
 
 ## iPhone
 
-iOS controls the desktop app instead of running a separate assistant. In desktop **Settings → Computer → iPhone remote control**, choose Tailscale, Funnel, Wi-Fi/private IP, or your HTTPS proxy; enable access and copy the pairing link. Open it on your iPhone, or paste it into **Connect Desktop**. Allow local-network access when using Wi-Fi.
+iOS controls your Mac's existing workspace. In Mac **Settings → Computer**, create and confirm an email account, sign in, and enable **Allow phone access**. Sign into the same account on your phone. Compare its fingerprint on both devices and choose **Approve phone** on your Mac, then select the Mac on the phone. No VPN or pairing link is needed.
 
-The desktop keeps its Bots, models, memories, files and work; the phone shows that same state and sends control commands. Keep the host awake with OpenGrokBot running. Work continues while the phone is disconnected, and the phone reconnects when reopened or its network returns. See [Remote access](REMOTE_ACCESS.md) for the full connection guide, transport choices, key revocation and troubleshooting.
+Keep the Mac awake with OpenGrokBot running. Work continues if the phone disconnects. See [Remote access](REMOTE_ACCESS.md) for accounts, SMTP requirements, device revocation and encrypted relay details. Use matching Mac/iOS 0.6.0 versions; Windows 0.5.0 does not support this account flow yet.

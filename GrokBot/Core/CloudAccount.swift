@@ -58,7 +58,7 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     func signIn(email: String, password: String, create: Bool) async {
         guard !busy else { return }; busy = true; error = nil; notice = nil; defer { busy = false }
         do {
-            let data = try await request(path: create ? "/auth/v1/signup" : "/auth/v1/token?grant_type=password", body: ["email": email.trimmingCharacters(in: .whitespacesAndNewlines), "password": password], authenticated: false)
+            let data = try await request(path: create ? "/auth/v1/signup?redirect_to=opengrokbot%3A%2F%2Fauth%2Fcallback" : "/auth/v1/token?grant_type=password", body: ["email": email.trimmingCharacters(in: .whitespacesAndNewlines), "password": password], authenticated: false)
             if let value = try? JSONDecoder().decode(CloudSession.self, from: data) { try save(value) }
             else if create { notice = "Check your email to confirm your account, then return here and sign in." }
             else { throw CloudError.message("Sign-in did not return a session. Try again.") }
@@ -88,7 +88,7 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
                 if !web.start() { continuation.resume(throwing:CloudError.message("Could not open the sign-in browser.")) }
             }
             let result = URLComponents(url:callback,resolvingAgainstBaseURL:false)
-            guard callback.host == "auth", let code = result?.queryItems?.first(where:{$0.name == "code"})?.value else { throw CloudError.message("Sign-in was cancelled or the provider is not configured.") }
+            guard callback.host == "auth", callback.path == "/callback", let code = result?.queryItems?.first(where:{$0.name == "code"})?.value else { throw CloudError.message("Sign-in was cancelled or the provider is not configured.") }
             let data = try await request(path:"/auth/v1/token?grant_type=pkce",body:["auth_code":code,"code_verifier":verifier],authenticated:false)
             try save(JSONDecoder().decode(CloudSession.self,from:data))
         } catch { self.error = error.localizedDescription }

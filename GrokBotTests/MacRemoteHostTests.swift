@@ -24,8 +24,8 @@ final class MacRemoteHostTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:executable.path)
         desktop.installedCLIs=[InstalledCLI(provider:.codex,path:executable.path,version:"fixture")];desktop.selectedCLIID=desktop.installedCLIs[0].id
         host.attach(app:app,desktop:desktop)
-        func call(_ command: RemoteCommand? = nil, target: String = "/v1/state") async throws -> HostHTTPResponse {
-            await host.dispatch(HostHTTPRequest(method:command == nil ? "GET":"POST",target:command == nil ? target:"/v1/command",headers:[:],body:try command.map { try JSONEncoder().encode($0) } ?? Data()))
+        func call(_ command: RemoteCommand? = nil, target: String = "/v1/state") async throws -> RemoteHostResponse {
+            await host.dispatch(RemoteHostRequest(method:command == nil ? "GET":"POST",target:command == nil ? target:"/v1/command",body:try command.map { try JSONEncoder().encode($0) } ?? Data()))
         }
         let first = try CloudCoding.decoder().decode(RemoteSnapshot.self,from:await call().body)
         XCTAssertEqual(first.workspace.bots.count,1);XCTAssertTrue(first.workspace.entries.isEmpty);XCTAssertTrue((first.workspace.sessions ?? [:]).isEmpty)

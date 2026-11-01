@@ -15,7 +15,7 @@ struct RootView: View {
                         BotAvatar(size: 88)
                         Text("Your desktop, in your pocket").font(.title2.weight(.medium))
                         Text(remote.status).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                        Button("Connect Desktop") { remote.showPairing = true }.buttonStyle(.borderedProminent)
+                        Button("Connect Desktop") { remote.showConnection = true }.buttonStyle(.borderedProminent)
                     }.padding(28).frame(maxWidth: .infinity,maxHeight: .infinity)
                 }
             }

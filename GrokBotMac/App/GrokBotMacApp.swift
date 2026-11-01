@@ -28,6 +28,9 @@ struct GrokBotMacApp: App {
                     if !UserDefaults.standard.bool(forKey: "localCLISetupComplete") { desktop.panel = .setup }
                     #endif
                 }
+                .onOpenURL { url in
+                    if url.scheme == "opengrokbot", url.host == "auth" { desktop.openSettings(.computer) }
+                }
                 .onChange(of: desktop.installedCLIs) { _, _ in desktop.deliverQueuedMessages(app: app) }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in desktop.stopAll(immediately: true) }
                 .alert("Couldn’t complete that action", isPresented: Binding(get: { app.errorMessage != nil }, set: { if !$0 { app.errorMessage = nil } })) {

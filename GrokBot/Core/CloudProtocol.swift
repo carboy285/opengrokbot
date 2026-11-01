@@ -41,16 +41,23 @@ struct CloudIdentity: Codable, Sendable {
         let peers = [id.uuidString, peer.id.uuidString].sorted().joined(separator: "|").lowercased()
         return shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data(owner.uuidString.lowercased().utf8), sharedInfo: Data(("OpenGrokBot/relay/v1|" + peers).utf8), outputByteCount: 32)
     }
-    func seal(_ data: Data, to peer: CloudDevice, owner: UUID, id: UUID, kind: String) throws -> CloudPacket {
-        guard data.count <= 6_000_000 else { throw CloudError.message("This workspace is too large to transfer. Export older conversations on the desktop first.") }
-        let box = try AES.GCM.seal(data, using: sharedKey(peer: peer, owner: owner), authenticating: context(owner: owner, sender: self.id, recipient: peer.id, id: id, kind: kind))
+    func seal(_ data: Data, to peer: CloudDevice, owner: UUID, id: UUID, kind: String, now: Date = Date()) throws -> CloudPacket {
+        guard data.count <= 5_900_000 else { throw CloudError.message("This workspace is too large to transfer. Export older conversations on the desktop first.") }
+        // Expiry is inside the authenticated ciphertext; the relay cannot extend replay lifetime.
+        let expiry = UInt64(now.addingTimeInterval(90).timeIntervalSince1970)
+        let envelope = Data((0..<8).reversed().map { UInt8(truncatingIfNeeded: expiry >> ($0 * 8)) }) + data
+        let box = try AES.GCM.seal(envelope, using: sharedKey(peer: peer, owner: owner), authenticating: context(owner: owner, sender: self.id, recipient: peer.id, id: id, kind: kind))
         guard let combined = box.combined else { throw CloudError.invalidPacket }
-        return CloudPacket(id: id, sender: self.id, recipient: peer.id, kind: kind, ciphertext: combined.base64EncodedString(), created_at: Date())
+        return CloudPacket(id: id, sender: self.id, recipient: peer.id, kind: kind, ciphertext: combined.base64EncodedString(), created_at: now)
     }
-    func open(_ packet: CloudPacket, from peer: CloudDevice, owner: UUID) throws -> Data {
-        guard packet.sender == peer.id, packet.recipient == id, ["request","response"].contains(packet.kind), abs(packet.created_at.timeIntervalSinceNow) < 120,
-              let bytes = Data(base64Encoded: packet.ciphertext), bytes.count <= 6_000_028 else { throw CloudError.invalidPacket }
-        return try AES.GCM.open(AES.GCM.SealedBox(combined: bytes), using: sharedKey(peer: peer, owner: owner), authenticating: context(owner: owner, sender: peer.id, recipient: id, id: packet.id, kind: packet.kind))
+    func open(_ packet: CloudPacket, from peer: CloudDevice, owner: UUID, now: Date = Date()) throws -> Data {
+        guard packet.sender == peer.id, packet.recipient == id, ["request","response"].contains(packet.kind), abs(packet.created_at.timeIntervalSince(now)) < 120,
+              let bytes = Data(base64Encoded: packet.ciphertext), bytes.count <= 6_000_036 else { throw CloudError.invalidPacket }
+        let envelope = try AES.GCM.open(AES.GCM.SealedBox(combined: bytes), using: sharedKey(peer: peer, owner: owner), authenticating: context(owner: owner, sender: peer.id, recipient: id, id: packet.id, kind: packet.kind))
+        guard envelope.count >= 8 else { throw CloudError.invalidPacket }
+        let expiry = envelope.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        guard Double(expiry) > now.timeIntervalSince1970, Double(expiry) < now.timeIntervalSince1970 + 120 else { throw CloudError.invalidPacket }
+        return Data(envelope.dropFirst(8))
     }
 }
 struct CloudPacket: Codable, Sendable {

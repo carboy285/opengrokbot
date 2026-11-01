@@ -19,6 +19,7 @@ final class MacRemoteHost: ObservableObject {
     private var owner: UUID?
     init(preferences: UserDefaults = .standard, account: CloudAccount = CloudAccount(kind: "host")) {
         self.preferences = preferences; self.account = account
+        receipts = Set((preferences.stringArray(forKey:"cloudCommandReceipts") ?? []).compactMap(UUID.init(uuidString:)))
         account.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
     }
     func attach(app: AppModel, desktop: MacAppModel) {
@@ -47,7 +48,12 @@ final class MacRemoteHost: ObservableObject {
                     let packets = try await self.account.poll()
                     for packet in packets {
                         try Task.checkCancellation()
-                        guard let peer = self.account.controllers.first(where: { $0.id == packet.sender }), self.account.approved(peer) else { try? await self.account.acknowledge(packet); continue }
+                        guard let peer = self.account.controllers.first(where: { $0.id == packet.sender }) else { try? await self.account.acknowledge(packet); continue }
+                        if !self.account.approved(peer) {
+                            let denied = RemoteHostResponse.error(403,"Approve this phone in Mac Settings → Computer. Compare its fingerprint before approving.")
+                            try? await self.account.send(CloudCoding.encoder().encode(CloudResponse(status:denied.status,body:denied.body)),to:peer,id:packet.id,kind:"response")
+                            try? await self.account.acknowledge(packet); continue
+                        }
                         do {
                             let data = try self.account.decrypt(packet,peer:peer)
                             guard packet.kind == "request" else { throw CloudError.invalidPacket }
@@ -77,7 +83,7 @@ final class MacRemoteHost: ObservableObject {
         enabled = false; polling?.cancel(); polling = nil; baselines = [:]; replies = [:]
         preferences.set(false,forKey:"cloudHostEnabled"); feedback = "Phone access is off."
         // The registered host expires as offline even if this update cannot reach the network.
-        Task { if account.signedIn { try? await account.sync(available:false) } }
+        Task { if !enabled, account.signedIn { try? await account.sync(available:false) } }
     }
     func approve(_ device: CloudDevice, allowed: Bool) {
         do { try account.approve(device,allowed:allowed); baselines[device.id] = nil; replies = [:] }
@@ -94,7 +100,7 @@ final class MacRemoteHost: ObservableObject {
                 return CloudResponse(status:200,body:data)
             } catch { return CloudResponse(status:500,body:Data()) }
         }
-        let response = await dispatch(HostHTTPRequest(method:request.method,target:request.target,headers:[:],body:request.body))
+        let response = await dispatch(RemoteHostRequest(method:request.method,target:request.target,body:request.body))
         return CloudResponse(status:response.status,body:response.body)
     }
     private func snapshot() -> RemoteSnapshot? {
@@ -102,12 +108,12 @@ final class MacRemoteHost: ObservableObject {
         var workspace = app.workspace; workspace.sessions = nil
         return RemoteSnapshot(hostName: Host.current().localizedName ?? "Mac", revision: revision, workspace: workspace, running: Array(desktop.runningBots), providers: desktop.installedCLIs.map { RemoteProvider(provider: $0.provider, version: $0.version) }, defaultProvider: desktop.selectedCLI?.provider)
     }
-    func dispatch(_ request: HostHTTPRequest) async -> HostHTTPResponse {
+    func dispatch(_ request: RemoteHostRequest) async -> RemoteHostResponse {
         guard let parts = URLComponents(string: request.target), let app, let desktop else { return .error(400, "Invalid request") }
         func query(_ name: String) -> String? { parts.queryItems?.first { $0.name == name }?.value }
         do {
             if request.method == "GET", parts.path == "/v1/state", let snapshot = snapshot() {
-                return query("since") == revision ? HostHTTPResponse(status: 204) : try .json(snapshot)
+                return query("since") == revision ? RemoteHostResponse(status: 204) : try .json(snapshot)
             }
             if request.method == "GET", parts.path == "/v1/models", let provider = query("provider").flatMap(CLIProvider.init(rawValue:)), let cli = desktop.installedCLIs.first(where: { $0.provider == provider }) {
                 let models = await Task.detached { CLIModelCatalog.models(for: cli) }.value
@@ -135,6 +141,7 @@ final class MacRemoteHost: ObservableObject {
             default: return .error(400,"Unsupported command")
             }
             if receipts.count >= 256 { receipts.removeAll() }; receipts.insert(command.requestID)
+            preferences.set(receipts.map(\.uuidString),forKey:"cloudCommandReceipts")
             revision = UUID().uuidString
             return try .json(["accepted":true])
         } catch { return .error(400,"The request could not be completed") }

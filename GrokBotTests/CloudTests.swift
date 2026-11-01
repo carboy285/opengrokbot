@@ -21,6 +21,9 @@ final class CloudTests: XCTestCase {
         tampered = packet; tampered.kind = "response"; XCTAssertThrowsError(try host.open(tampered,from:controller,owner:owner))
         tampered = packet; tampered.recipient = UUID(); XCTAssertThrowsError(try host.open(tampered,from:controller,owner:owner))
         tampered = packet; tampered.created_at = Date().addingTimeInterval(-130); XCTAssertThrowsError(try host.open(tampered,from:controller,owner:owner))
+        var expired = try phone.seal(plain,to:desktop,owner:owner,id:UUID(),kind:"request",now:Date().addingTimeInterval(-130))
+        expired.created_at = Date() // A relay changing its timestamp cannot extend encrypted expiry.
+        XCTAssertThrowsError(try host.open(expired,from:controller,owner:owner))
         let reply = try host.seal(Data("result".utf8),to:controller,owner:owner,id:id,kind:"response")
         XCTAssertEqual(try phone.open(reply,from:desktop,owner:owner),Data("result".utf8))
     }

@@ -1,6 +1,6 @@
 # Install on a physical iPhone
 
-This installs the native iOS remote controller. AI CLIs run on your Mac or Windows host; pair the phone to that host to control the same Bots, conversations, models and running work. Physical-device installation has not been tested; simulator results are listed in [Verification](VERIFICATION.md).
+This installs the native iOS remote controller. AI CLIs run on your Mac host; sign into the same account on both devices to control the same Bots, conversations, models and running work. Physical-device installation has not been tested; simulator results are listed in [Verification](VERIFICATION.md).
 
 ## Prerequisites
 
@@ -17,12 +17,13 @@ This installs the native iOS remote controller. AI CLIs run on your Mac or Windo
 5. On the phone, open **Settings > Privacy & Security > Developer Mode**, enable it, and restart when prompted. After restart, unlock the phone and confirm **Turn On**. The setting may appear only after Xcode has paired with the phone.
 6. In Xcode, select the **GrokBot** scheme and your physical iPhone as the run destination. Choose **Product > Run** (Command-R). Resolve any signing errors using Xcode's team/profile controls.
 7. If iOS asks you to trust your developer identity, review the profile in **Settings > General > VPN & Device Management** and trust your own development identity. Keep the phone unlocked while Xcode installs and launches the build.
-8. Open **OpenGrokBot**. In the 0.5.0 desktop app, enable **Settings → Computer → iPhone remote control** and copy its pairing link. Open the link on the phone or paste it into **Connect Desktop**, then connect. Allow local-network access if using Wi-Fi. The host’s Bots and chats appear after authentication; no separate phone Bot is seeded. See [Remote access](REMOTE_ACCESS.md).
+8. Open **OpenGrokBot**. In Mac 0.6.0 **Settings → Computer**, create and confirm an email account, sign in, and turn on **Allow phone access**. Sign into the same account in the iPhone's **Connect Desktop** screen. Match its fingerprint on both screens, choose **Approve phone** on the Mac, and select your Mac on the iPhone. See [Remote access](REMOTE_ACCESS.md).
+
 
 Apple references: [Developer Mode](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device) and [running on a device](https://developer.apple.com/documentation/xcode/running-your-app-in-simulator-or-on-a-device).
 
 ## Verify the interface on the phone
 
-The roster should match your desktop, starting with only Grok Bot if the host is new. Send a message and verify its reply appears on both screens. Change the active model, create a specialist, stop a response, and confirm both screens update. Disconnect the phone while a desktop task runs, then reconnect and verify work continued. Revoke the pairing key on desktop and verify the phone must pair again. No chat reply is simulated. Check VoiceOver, larger text, dark/light appearance, and reduced motion.
+The roster should match your desktop, starting with only Grok Bot if the host is new. Send a message and verify its reply appears on both screens. Change the active model, create a specialist, stop a response, and confirm both screens update. Disconnect the phone while a desktop task runs, then reconnect and verify work continued. Revoke the phone on the Mac and verify it loses control until approved again. No chat reply is simulated. Check VoiceOver, larger text, dark/light appearance, and reduced motion.
 
-For unit tests select an installed iPhone simulator and choose **Product > Test**. The test target includes persistence, migration, structured CLI events, and Keychain checks. Passing simulator and contract tests is separate from physical-device signing and live Tailscale/Funnel or Wi-Fi roaming checks.
+For unit tests select an installed iPhone simulator and choose **Product > Test**. The test target includes persistence, migration, structured CLI events, and Keychain checks. Passing simulator and contract tests is separate from physical-device signing and live email delivery and physical-phone Wi-Fi/cellular roaming checks.

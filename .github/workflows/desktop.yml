@@ -84,6 +84,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - run: npm run test:cloud
       - run: npm run test:desktop
       - run: node scripts/test-electron.cjs
       - run: npm run dist:windows

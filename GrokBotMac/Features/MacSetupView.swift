@@ -138,6 +138,7 @@ struct MacSetupView: View {
             Text("Grok Bot starts with an empty conversation. Add other Bots only when you choose to. Each Bot keeps a separate session with the selected CLI.")
                 .font(.system(size: 18)).lineSpacing(6)
             if let installation { Label("\(installation.provider.name) on this Mac", systemImage: "terminal").font(.headline) }
+            info("Use your iPhone", "In Settings → Computer, sign into your OpenGrokBot account and enable phone access. Use the same account on your phone, compare its fingerprint, and approve it on this Mac.", icon: "iphone")
             info("You stay in control", "The app does not add approval-bypass flags. Codex uses read-only workspace access; other CLIs keep their own permission settings. You can stop a response at any time.", icon: "hand.raised")
         }
     }

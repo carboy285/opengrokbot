@@ -37,7 +37,7 @@ def add_to_group(group_id, children):
     group['children'] = list(dict.fromkeys(group['children'] + children))
 
 # Shared controller contract/client and iOS controller sources.
-remote_shared = ['GrokBot/Core/RemoteProtocol.swift', 'GrokBot/Core/RemoteClient.swift'] + sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBot/Core').glob('Cloud*.swift'))
+remote_shared = ['GrokBot/Core/RemoteProtocol.swift'] + sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBot/Core').glob('Cloud*.swift'))
 remote_ios = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBot/Remote').glob('*.swift'))
 for path in remote_shared + remote_ios:
     key = reference(path)

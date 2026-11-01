@@ -65,6 +65,12 @@ final class MacUITests: XCTestCase {
         app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.staticTexts["Account"].waitForExistence(timeout: 5))
         capture(app, name: "macos-settings")
+        app.buttons["Computer"].click()
+        XCTAssertTrue(app.staticTexts["iPhone remote control"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["cloud-email"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.secureTextFields["cloud-password"].exists)
+        XCTAssertFalse(app.buttons["cloud-sign-in"].isEnabled)
+        capture(app, name: "macos-account-setup")
     }
 
     @MainActor

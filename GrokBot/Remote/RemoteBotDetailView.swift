@@ -61,7 +61,7 @@ struct RemoteBotDetailView: View {
                         Label(remote.hostName,systemImage:"desktopcomputer").font(.headline)
                         Text(remote.status).foregroundStyle(.secondary)
                         Text("This iPhone is a controller. CLI sessions, files and work stay on the desktop and continue when the phone disconnects.").font(.footnote).foregroundStyle(.secondary)
-                        Button("Connection settings") { dismiss(); Task { try? await Task.sleep(for:.milliseconds(500)); remote.showPairing = true } }
+                        Button("Connection settings") { dismiss(); Task { try? await Task.sleep(for:.milliseconds(500)); remote.showConnection = true } }
                     }
                 } else { Text("This Bot was removed on the desktop.").foregroundStyle(.secondary) }
             }.padding(24)

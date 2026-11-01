@@ -81,11 +81,13 @@ struct MacSettingsView: View {
                         .frame(width: 56, height: 56).background(MacTheme.raised, in: Circle())
                     VStack(alignment: .leading, spacing: 6) {
                         TextField("Display name", text: $profileName).textFieldStyle(.plain).font(.system(size: 17))
-                        Text("Local profile · CLI handles sign-in").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+                        Text("Display name on this Mac").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
                     }
                     Spacer()
                     MacPillButton(title: "AI CLI setup") { desktop.panel = .setup }
                 }.padding(20)
+                Divider()
+                CloudSignInView(account:desktop.remote.account).padding(20)
             }
             section("Appearance") {
                 VStack(spacing: 0) {

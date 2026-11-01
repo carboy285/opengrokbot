@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct PairDesktopView: View {
+struct ConnectDesktopView: View {
     @EnvironmentObject private var remote: RemoteController
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -40,7 +40,7 @@ struct PairDesktopView: View {
 struct RemoteConnectionBanner: View {
     @EnvironmentObject private var remote: RemoteController
     var body: some View {
-        Button { remote.showPairing = true } label: {
+        Button { remote.showConnection = true } label: {
             HStack(spacing:7) { Circle().fill(remote.online ? .green:.orange).frame(width:5,height:5); Text(remote.status).font(.caption).lineLimit(2); Spacer(); Image(systemName:"desktopcomputer") }.foregroundStyle(.secondary).padding(.horizontal,20).padding(.vertical,8)
         }.buttonStyle(.plain)
     }

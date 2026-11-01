@@ -12,7 +12,7 @@ final class RemoteController: ObservableObject {
     @Published private(set) var running: Set<UUID> = []
     @Published private(set) var providers: [RemoteProvider] = []
     @Published private(set) var defaultProvider: CLIProvider?
-    @Published var showPairing = false
+    @Published var showConnection = false
     @Published var busy = false
     @Published var drafts: [UUID:String] = [:]
     @Published var error: String?
@@ -38,17 +38,17 @@ final class RemoteController: ObservableObject {
         }.store(in:&subscriptions)
         startPolling()
     }
-    func receive(_ url: URL) { if url.host == "auth" { showPairing = true } }
+    func receive(_ url: URL) { if url.host == "auth" { showConnection = true } }
     func select(_ device: CloudDevice) {
         do {
             try account.pin(device)
             guard let owner = account.session?.user.id else { throw CloudError.signedOut }
             try secrets.save(Data(device.id.uuidString.utf8),account:owner.uuidString)
-            clearState(); connection = device; hostName = device.name; showPairing = false; startPolling()
+            clearState(); connection = device; hostName = device.name; startPolling()
         } catch { self.error = error.localizedDescription }
     }
     func disconnect() {
-        if let owner = account.session?.user.id { try? secrets.delete(account:owner.uuidString) }
+        if let owner = account.session?.user.id { try? secrets.save(Data("disconnected".utf8),account:owner.uuidString) }
         clearState(); status = "Choose your desktop"; startPolling(autoSelect:false)
     }
     private func clearState() {
@@ -72,9 +72,12 @@ final class RemoteController: ObservableObject {
                     if ticks % 10 == 0 {
                         try await account.sync()
                         if connection == nil, autoSelect, let owner = account.session?.user.id {
-                            let saved = try secrets.read(account:owner.uuidString).flatMap { String(data:$0,encoding:.utf8) }.flatMap(UUID.init(uuidString:))
-                            if let device = account.hosts.first(where:{$0.id == saved}) ?? (saved == nil && account.hosts.count == 1 ? account.hosts.first:nil) {
-                                try account.pin(device); connection = device; hostName = device.name
+                            let selection = try secrets.read(account:owner.uuidString).flatMap { String(data:$0,encoding:.utf8) }
+                            let saved = selection.flatMap(UUID.init(uuidString:))
+                            if let device = account.hosts.first(where:{$0.id == saved}) ?? (selection == nil && account.hosts.count == 1 ? account.hosts.first:nil) {
+                                try account.pin(device)
+                                try secrets.save(Data(device.id.uuidString.utf8),account:owner.uuidString)
+                                connection = device; hostName = device.name
                             }
                         }
                     }
@@ -101,7 +104,7 @@ final class RemoteController: ObservableObject {
                 guard snapshot.protocolVersion == 1 else { throw RemoteError.incompatible }
                 state = snapshot; hostName = snapshot.hostName; running = Set(snapshot.running)
                 providers = snapshot.providers; defaultProvider = snapshot.defaultProvider
-                model?.applyRemoteSnapshot(snapshot.workspace); hasSnapshot = true
+                model?.applyRemoteSnapshot(snapshot.workspace); if !hasSnapshot { showConnection = false }; hasSnapshot = true
             } catch { state = nil; throw error }
         }
         online = true; status = "Connected to \(hostName)"

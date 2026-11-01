@@ -1,6 +1,6 @@
 # OpenGrokBot
 
-A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS app remotely controls the same desktop workspace through authenticated Tailscale, Funnel, Wi-Fi/private IP, or your own HTTPS proxy.
+A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS app signs into the same Supabase account as your Mac and controls its existing workspace through an encrypted device relay.
 
 Start with **one empty assistant named Grok Bot**. There are no seeded conversations or extra Bots. Ask Grok Bot to create specialists, or add your own Bots when you want separate conversations.
 
@@ -24,15 +24,17 @@ The app is free. AI providers, local model configurations, and Composio have the
 | --- | --- | --- |
 | macOS 14+ | Native SwiftUI/AppKit; Liquid Glass on macOS 26, material fallback earlier | Universal `.app` in a drag-to-Applications `.dmg` |
 | Windows x64 | Electron with an isolated, sandboxed renderer | NSIS Setup `.exe` |
-| iOS 18+ | Native SwiftUI remote controller for the desktop’s Bots/chats/models | Xcode project; pair through a desktop connection link |
+| iOS 18+ | Native SwiftUI remote controller for the desktop’s Bots/chats/models | Xcode project; shared sign-in and locally approved Mac access |
 
 The development Mac build is ad-hoc signed and not notarized. The Windows build is unsigned. iPhone device installation requires your own signing team. See the [Mac](docs/MACOS.md), [Windows](docs/WINDOWS.md), and [iPhone](docs/DEVICE_SETUP.md) guides.
 
 ## iPhone remote control
 
-In desktop **Settings → Computer → iPhone remote control**, choose private Tailscale, public Funnel HTTPS, trusted Wi-Fi/private IP, or your own HTTPS proxy. Enable access and copy its pairing link. Open the link on the iPhone or paste it into **Connect Desktop** in the iOS app. Tailscale private access needs both devices on your tailnet; Funnel works without Tailscale on the phone. Keep the host awake with OpenGrokBot running.
+In Mac **Settings → Computer → iPhone remote control**, create an email account, confirm the email, sign in and enable **Allow phone access**. Sign into the same account on your iPhone. Compare its device fingerprint and select **Approve phone** on the Mac, then choose your Mac on the phone. No VPN, pairing URL or router setup is required.
 
-The phone controls the same Bots, chats, memories, active models and running tasks; it does not save an independent local workspace. Work continues when the phone disconnects. The controller reconnects after network changes and suppresses duplicate sends after a lost acknowledgment. Every request needs a revocable random pairing key, stored in Keychain/Windows device encryption. Direct Wi-Fi HTTP is an explicit unencrypted option for trusted private networks; the controller requires HTTPS for public addresses. See the [connection guide](docs/REMOTE_ACCESS.md).
+The phone controls the same Bots, chats, memories, active models and running tasks without saving an independent workspace. Supabase handles accounts, device discovery and encrypted temporary packets; the Mac runs all AI CLIs. Revoke individual phones on the Mac. Google/GitHub buttons appear after their providers are configured in Supabase. Default Supabase email delivery is restricted to project-team addresses; custom SMTP is needed for general signup. See the [connection guide](docs/REMOTE_ACCESS.md).
+
+The account connection is available in **Mac/iOS 0.6.0**. Windows 0.5.0 retains its earlier connection implementation and does not connect to the new iOS account controller yet.
 
 ## Bots, models and teamwork
 
@@ -94,12 +96,13 @@ python3 scripts/check_project.py
 python3 -m unittest discover -s scripts -p 'test_*.py' -v
 npm ci
 npm run test:desktop
+npm run test:cloud
 CHROMIUM_PATH=/path/to/chromium npm run test:ui
 ```
 
 Native CI compiles Apple targets, runs XCTest, builds the universal DMG, captures actual Mac windows, and builds/tests the Windows app and installer. Tests include real fixture subprocesses, saved-session resumption, Unicode replies, Composio request contracts, MCP JSON/SSE transport, secret redaction, persistence, and encryption. Test fixtures are separate from production replies.
 
-Live model inference and Composio OAuth/tool execution require configured user accounts. A Composio project key was not supplied during implementation, so live authorization and tool execution are unverified. Voice, file attachments, a built-in cloud computer, remote screen sharing, and power/wake management are not implemented. Actual user-account Tailscale/Funnel and physical-phone roaming have not been exercised in this implementation environment. See [verification details](docs/VERIFICATION.md).
+Live model inference and Composio OAuth/tool execution require configured user accounts. A Composio project key was not supplied during implementation, so live authorization and tool execution are unverified. Voice, file attachments, a built-in cloud computer, remote screen sharing, and power/wake management are not implemented. Physical-phone roaming, live email delivery and OAuth provider sign-in have not been exercised with user accounts. See [verification details](docs/VERIFICATION.md).
 
 ## License
 
