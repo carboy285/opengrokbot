@@ -6,6 +6,9 @@ struct MacWorkspaceView: View {
     @EnvironmentObject private var desktop: MacAppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var deleting: Bot?
+    @State private var folderFilter: String? = nil
+    private var sidebarBots: [Bot] { app.visibleBots.filter { folderFilter == nil || ($0.folder ?? "") == folderFilter } }
+    private func pinned(_ bot: Bot) -> Bool { bot.isPinned ?? (bot.isMain == true) }
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -52,6 +55,7 @@ struct MacWorkspaceView: View {
             .background(MacTheme.canvas)
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
+        .onChange(of: desktop.showSearch) { _, visible in searchFocused = visible }
         .foregroundStyle(.primary.opacity(0.9))
         .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its local notes?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete Bot", role: .destructive) {
@@ -82,19 +86,29 @@ struct MacWorkspaceView: View {
                     if !app.search.isEmpty { Button { app.search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
                 }.padding(10).background(MacTheme.panel, in: Capsule()).padding(.horizontal, 18).padding(.top, 14)
             }
-            if let first = app.workspace.bots.first {
-                Button { desktop.selectedID = first.id } label: {
-                    VStack(spacing: 13) {
-                        MacBotAvatar(color: first.color, size: 76, starred: true, appearance: first.appearance)
-                        Text("Grok Bot").font(.system(size: 16))
-                    }
-                    .padding(.vertical, 16).frame(width: 126)
-                    .background(desktop.selected(in: app)?.id == first.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
-                }.buttonStyle(.plain).padding(.top, 30).padding(.bottom, 22)
+            Picker("Bot folder", selection: $folderFilter) {
+                Text("All Bots").tag(Optional<String>.none)
+                Text("Unfiled").tag(Optional(""))
+                ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in Text(folder).tag(Optional(folder)) }
+            }.labelsHidden().padding(.horizontal, 18).padding(.top, 16)
+            if sidebarBots.contains(where: { pinned($0) }) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 12) {
+                        ForEach(sidebarBots.filter { pinned($0) }) { bot in
+                            Button { desktop.selectedID = bot.id } label: {
+                                VStack(spacing: 12) {
+                                    MacBotAvatar(color: bot.color, size: 64, starred: true, appearance: bot.appearance)
+                                    Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2)
+                                }.padding(14).frame(width: 118).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
+                            }.buttonStyle(.plain).contextMenu { organizationActions(bot) }.draggable(bot.id.uuidString)
+                                .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
+                        }
+                    }.padding(.horizontal, 18).padding(.vertical, 20)
+                }.scrollIndicators(.hidden)
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    ForEach(app.visibleBots.filter { $0.id != app.workspace.bots.first?.id || !app.search.isEmpty }) { bot in
+                    ForEach(sidebarBots.filter { !pinned($0) }) { bot in
                         Button { desktop.selectedID = bot.id } label: {
                             HStack(spacing: 16) {
                                 MacBotAvatar(color: bot.color, size: 39, appearance: bot.appearance)
@@ -109,7 +123,10 @@ struct MacWorkspaceView: View {
                             .contentShape(RoundedRectangle(cornerRadius: 14))
                         }
                         .buttonStyle(.plain)
+                        .draggable(bot.id.uuidString)
+                        .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
                         .contextMenu {
+                            organizationActions(bot)
                             Button("Export Conversation…") { desktop.exportConversation(bot, app: app) }
                             if bot.isMain != true { Button("Delete Bot…", role: .destructive) { deleting = bot } }
                         }
@@ -128,7 +145,7 @@ struct MacWorkspaceView: View {
             }.buttonStyle(.plain).padding(.bottom, 14)
             HStack(spacing: 10) {
                 Button { desktop.openSettings() } label: {
-                    Text("LP").font(.system(size: 15)).frame(width: 42, height: 42).glassChrome(in: Circle())
+                    Text(desktop.updates.available ? "↓" : "You").font(.system(size: 15)).frame(width: 42, height: 42).glassChrome(in: Circle())
                 }.buttonStyle(.plain).help("Settings")
                 Button { desktop.panel = .apps } label: {
                     HStack(spacing: 9) {
@@ -142,6 +159,19 @@ struct MacWorkspaceView: View {
                 }.buttonStyle(.plain).accessibilityLabel("Connect apps")
             }.padding(.horizontal, 14).padding(.bottom, 15)
         }.background(MacTheme.sidebar)
+    }
+
+    @ViewBuilder
+    private func organizationActions(_ bot: Bot) -> some View {
+        Button(pinned(bot) ? "Unpin Bot" : "Pin to top") { _ = app.organize(bot, pinned: !pinned(bot)) }
+        Button("Bot details") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
+        Menu("Move to folder") {
+            Button("Unfiled") { _ = app.organize(bot, folder: "") }
+            ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in
+                Button(folder) { _ = app.organize(bot, folder: folder) }
+            }
+            Button("New folder…") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
+        }
     }
 
     private func appChip(_ name: String, color: Color) -> some View {

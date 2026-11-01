@@ -15,6 +15,7 @@ struct MacBotInspectorView: View {
     @State private var files: [URL] = []
     @State private var fileError: String?
     @State private var editingAvatar = false
+    @State private var folderDraft = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,11 +63,18 @@ struct MacBotInspectorView: View {
         }
         .frame(maxHeight: .infinity).background(MacTheme.canvas)
         .onChange(of: desktop.runningBots) { _, running in if !running.contains(bot.id), tab == .library { refreshFiles() } }
-        .onChange(of: bot.id) { _, _ in editingAvatar = false }
+        .onAppear { folderDraft = bot.folder ?? "" }
+        .onChange(of: bot.id) { _, _ in editingAvatar = false; folderDraft = bot.folder ?? "" }
     }
 
     private var details: some View {
         VStack(spacing: 28) {
+            VStack(alignment: .leading, spacing: 14) {
+                Button((bot.isPinned ?? (bot.isMain == true)) ? "Unpin Bot" : "Pin to top") { _ = app.organize(bot, pinned: !(bot.isPinned ?? (bot.isMain == true))) }
+                TextField("Folder · blank for Unfiled", text: $folderDraft).textFieldStyle(.roundedBorder)
+                Button("Save folder") { _ = app.organize(bot, folder: folderDraft) }.disabled(folderDraft.count > 80)
+                Text("Drag Bots in the sidebar to change their order.").font(.caption).foregroundStyle(.secondary)
+            }
             if let members = bot.memberIDs {
                 Text("Group members").font(.headline)
                 ForEach(app.workspace.bots.filter { members.contains($0.id) }) { member in

@@ -46,7 +46,7 @@ struct MacBotAvatar: View {
             if let appearance { CustomBotAvatar(appearance: appearance, size: size) }
             else { ZStack {
                 if color == "white" {
-                    Circle().fill(.white)
+                    Circle().fill(.primary)
                 } else if color == "pink" {
                     Circle().fill(MacTheme.botColor(color))
                 } else {
@@ -58,7 +58,7 @@ struct MacBotAvatar: View {
                     Capsule().frame(width: size * 0.08, height: size * 0.23).offset(y: -size * 0.09)
                 }
                 .rotationEffect(.degrees(-26))
-                .foregroundStyle(Color(hex: 0x111111))
+                .foregroundStyle(color == "white" ? MacTheme.canvas : Color.white)
                 .offset(x: size * 0.10, y: -size * 0.12)
             } }
             }

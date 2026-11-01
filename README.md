@@ -1,6 +1,6 @@
 # OpenGrokBot
 
-A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS app signs into the same Supabase account as your Mac and controls its existing workspace through an encrypted device relay.
+A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS app signs into the same Supabase account as your Mac or Windows desktop and controls its existing workspace through an encrypted device relay.
 
 Start with **one empty assistant named Grok Bot**. There are no seeded conversations or extra Bots. Ask Grok Bot to create specialists, or add your own Bots when you want separate conversations.
 
@@ -36,7 +36,7 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
-The account connection is available in **Mac/iOS 0.6.0**. Windows 0.5.0 retains its earlier connection implementation and does not connect to the new iOS account controller yet.
+The **0.7.0 desktop update** adds the account relay to Windows, persistent Bot organization, better draft/delivery handling, provider readiness, and update notifications. See [Desktop workspace 0.7](docs/DESKTOP_0_7.md) for setup, signing requirements, and verification limits.
 
 ## Bots, models and teamwork
 

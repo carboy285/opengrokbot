@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MacRemoteAccessView: View {
     @ObservedObject var remote: MacRemoteHost
@@ -7,6 +8,7 @@ struct MacRemoteAccessView: View {
             Text("iPhone remote control").font(.system(size:20,weight:.medium))
             Text("Sign in on both devices. Your iPhone controls this Mac’s Bots, chats and models wherever you go.").foregroundStyle(MacTheme.secondary)
             CloudSignInView(account:remote.account)
+            Label(remote.connectionState, systemImage: remote.enabled ? "antenna.radiowaves.left.and.right" : "iphone.slash").font(.headline)
             if remote.account.signedIn {
                 Toggle("Allow phone access",isOn:Binding(get:{remote.enabled},set: { $0 ? remote.start():remote.stop() }))
                     .accessibilityIdentifier("remote-access-toggle")
@@ -26,6 +28,11 @@ struct MacRemoteAccessView: View {
                     }.padding(.vertical,8)
                 }
                 if let feedback = remote.feedback { Text(feedback).font(.callout).foregroundStyle(.secondary) }
+                HStack {
+                    Button("Reconnect now") { remote.reconnect() }
+                    Button("Copy diagnostics") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(remote.diagnostics, forType: .string) }
+                }
+                if let date = remote.lastHeartbeat { Text("Last reached the account service \(date.formatted(date: .omitted, time: .standard)).").font(.caption).foregroundStyle(.secondary) }
             }
             Text("Keep this Mac awake with OpenGrokBot running. Work continues if the phone disconnects. Commands and replies are encrypted between approved devices; Supabase relays them temporarily.").font(.callout).foregroundStyle(MacTheme.secondary)
         }

@@ -21,6 +21,7 @@ struct GrokBotMacApp: App {
                     desktop.remote.attach(app: app, desktop: desktop)
                     desktop.selectFirst(in: app)
                     desktop.refreshCLIs()
+                    Task { await desktop.updates.check(automatically: true) }
                     #if DEBUG
                     if let setup = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_SETUP"] ?? WorkspaceStore.testArgument("--opengrokbot-test-setup") { desktop.panel = setup == "1" ? .setup : nil }
                     else if !UserDefaults.standard.bool(forKey: "localCLISetupComplete") { desktop.panel = .setup }
@@ -32,7 +33,8 @@ struct GrokBotMacApp: App {
                     if url.scheme == "opengrokbot", url.host == "auth" { desktop.openSettings(.computer) }
                 }
                 .onChange(of: desktop.installedCLIs) { _, _ in desktop.deliverQueuedMessages(app: app) }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in desktop.stopAll(immediately: true) }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in desktop.flushDrafts(); desktop.stopAll(immediately: true) }
+                .onReceive(desktop.updates.objectWillChange) { _ in desktop.objectWillChange.send() }
                 .onReceive(desktop.remote.objectWillChange) { _ in desktop.objectWillChange.send() }
                 .alert("Allow this iPhone to use your Bots?", isPresented: Binding(
                     get: { desktop.remote.pendingPhoneApproval != nil },
@@ -59,6 +61,9 @@ struct GrokBotMacApp: App {
             }
             CommandGroup(after: .textEditing) {
                 Button("Search Bots") { desktop.showSearch.toggle() }.keyboardShortcut("f")
+                Button("Switch Bot…") { desktop.showSearch = true }.keyboardShortcut("k")
+                Button("Next Bot") { desktop.cycleBot(1, app: app) }.keyboardShortcut("]", modifiers: [.command, .shift])
+                Button("Previous Bot") { desktop.cycleBot(-1, app: app) }.keyboardShortcut("[", modifiers: [.command, .shift])
                 Button("Export Conversation…") {
                     if let bot = desktop.selected(in: app) { desktop.exportConversation(bot, app: app) }
                 }.keyboardShortcut("e", modifiers: [.command, .shift])

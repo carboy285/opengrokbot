@@ -13,7 +13,10 @@ final class AppModel: ObservableObject {
     init(store: WorkspaceStore = .application) { self.store = store }
 
     var visibleBots: [Bot] {
-        workspace.bots.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.purpose.localizedCaseInsensitiveContains(search) }
+        let matchingChats = search.isEmpty ? Set<UUID>() : Set(workspace.entries.filter { $0.text.localizedCaseInsensitiveContains(search) }.map(\.botID))
+        return workspace.bots.enumerated().filter {
+            search.isEmpty || $0.element.name.localizedCaseInsensitiveContains(search) || $0.element.purpose.localizedCaseInsensitiveContains(search) || matchingChats.contains($0.element.id)
+        }.sorted { ($0.element.sortOrder ?? $0.offset) < ($1.element.sortOrder ?? $1.offset) }.map(\.element)
     }
 
     func enterPreview() {
@@ -41,7 +44,8 @@ final class AppModel: ObservableObject {
     func addNote(_ text: String, to bot: Bot, id: UUID? = nil) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard previewEnabled, !trimmed.isEmpty, workspace.bots.contains(where: { $0.id == bot.id }) else { return false }
-        return commit { $0.entries.append(Entry(botID: bot.id, kind: .user, text: trimmed, id: id ?? UUID())) }
+        var entry = Entry(botID: bot.id, kind: .user, text: trimmed, id: id ?? UUID()); entry.delivery = "delivered"
+        return commit { $0.entries.append(entry) }
     }
 
     @discardableResult
@@ -59,6 +63,22 @@ final class AppModel: ObservableObject {
               configuration.providers.allSatisfy({ $0.model.count <= 200 && !$0.model.contains(where: { $0.isNewline }) }) else { return false }
         var selected = configuration; selected.replyMode = .one
         return commit { $0.bots[index].aiConfiguration = selected }
+    }
+
+    @discardableResult
+    func organize(_ bot: Bot, pinned: Bool? = nil, folder: String? = nil) -> Bool {
+        guard let index = workspace.bots.firstIndex(where: { $0.id == bot.id }), (folder?.count ?? 0) <= 80 else { return false }
+        return commit {
+            if let pinned { $0.bots[index].isPinned = pinned }
+            if let folder { $0.bots[index].folder = folder.trimmingCharacters(in: .whitespacesAndNewlines) }
+        }
+    }
+    @discardableResult
+    func moveBot(_ id: UUID, before target: UUID) -> Bool {
+        guard id != target, workspace.bots.contains(where: { $0.id == id }), workspace.bots.contains(where: { $0.id == target }) else { return false }
+        var ids = workspace.bots.enumerated().sorted { ($0.element.sortOrder ?? $0.offset) < ($1.element.sortOrder ?? $1.offset) }.map { $0.element.id }
+        ids.removeAll { $0 == id }; guard let index = ids.firstIndex(of: target) else { return false }; ids.insert(id, at: index)
+        return commit { value in for index in value.bots.indices { value.bots[index].sortOrder = ids.firstIndex(of: value.bots[index].id) } }
     }
 
     func removeBot(_ bot: Bot) {

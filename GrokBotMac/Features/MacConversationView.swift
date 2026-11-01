@@ -91,14 +91,10 @@ struct MacConversationView: View {
                     }.buttonStyle(.plain).disabled(bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty)
                         .help("Send message").accessibilityLabel("Send message")
                 } else {
-                    Image(systemName: "mic").font(.system(size: 21)).foregroundStyle(MacTheme.secondary)
-                        .frame(width: 36, height: 38).help("Voice input is not available in this version")
-                    Image(systemName: "waveform").font(.system(size: 21, weight: .bold)).foregroundStyle(.black)
-                        .frame(width: 38, height: 38).background(.white, in: Circle())
-                        .help("Voice chat is not available in this version")
+                    Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(MacTheme.secondary).frame(width: 38, height: 38)
                 }
             }
-            .padding(9).glassChrome(in: RoundedRectangle(cornerRadius: 31))
+            .padding(9).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
             HStack(spacing: 9) {
                 if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
                 if bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty {
@@ -111,8 +107,11 @@ struct MacConversationView: View {
                     Button("Stop") { desktop.stop(botID: bot.id) }.buttonStyle(.link)
                 } else { Text("Uses your selected AI account") }
             }.font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
+            if let feedback = desktop.sendFeedback[bot.id] {
+                HStack { Text(feedback).font(.caption); Button("AI CLI setup") { desktop.panel = .setup } }.foregroundStyle(.secondary)
+            }
             if let error = desktop.runErrors[bot.id] {
-                HStack { Text(error).font(.system(size: 11)); Spacer(); Button("Retry") { desktop.retry(bot: bot, app: app) } }.foregroundStyle(MacTheme.secondary)
+                HStack { Text(error).font(.system(size: 11)); Spacer(); Button("AI CLI setup") { desktop.panel = .setup }; Button("Retry") { desktop.retry(bot: bot, app: app) } }.foregroundStyle(MacTheme.secondary)
             }
         }.padding(.horizontal, 20).padding(.bottom, 12).padding(.top, 8)
     }
@@ -163,6 +162,7 @@ private struct MacMessageView: View {
                     }
                     .accessibilityIdentifier("conversation-message")
                     .accessibilityLabel("\(entry.kind == .user ? "You" : "AI reply"): \(entry.text)")
+                    if entry.kind == .user { Text("Delivered").font(.caption2).foregroundStyle(.secondary) }
                 }
                 if entry.kind == .bot { Spacer(minLength: 90) }
             }.frame(maxWidth: .infinity)

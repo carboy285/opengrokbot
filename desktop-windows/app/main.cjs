@@ -10,8 +10,9 @@ if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userD
 const cli=require('./local-cli.cjs');
 const composio=require('./composio.cjs');
 const teamwork=require('./teamwork.cjs');
-const remoteAPI=require('./remote-host.cjs'),tailscale=require('./tailscale.cjs');
-const remote=new remoteAPI.RemoteHost();let remoteConfig,remoteFeedback='',remoteBusy=false,remoteRoute,remoteTray,quitting=false,revision=randomUUID();
+const { CloudHost } = require('./cloud-host.cjs');
+const updates = require('./updates.cjs');
+let remoteTray, quitting = false, revision = randomUUID(), updateState;
 class PublicError extends Error {}
 let state,settings,installed=[],composioConfiguration,connectedTools=[],composioBusy=false;
 const active=new Map(),pendingBots=new Set();
@@ -69,7 +70,7 @@ async function initializeState(){
 }
 function saveSettings(){return atomicJSON('settings.json',settings);}
 function selectedCLI(){return installed.find(x=>x.id===settings?.selected);}
-function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete};}
+function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete,health:settings.providerHealth||{}};}
 function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
 function notify(){revision=randomUUID();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
 function botDirectory(id){return file(path.join('Conversations',id));}
@@ -101,15 +102,15 @@ async function startChat(botID,text,delivery,requestID){
    const prompt=teamwork.instructions(bot,state,!!delivery)+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='';
 
-   const reply={id:randomUUID(),botID,kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
+   const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
    const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
     if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notify();}
    }});
    runs.add(run);
-   run.done.then(()=>{teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');},error=>{reply.state=error.message==='Response stopped.'?'stopped':'failed';reply.error=error.message;if(!reply.text)reply.text=error.message;if(delivery)teamwork.finish(state,delivery,reply.state);}).finally(async()=>{
+   run.done.then(()=>{settings.providerHealth||={};settings.providerHealth[installation.provider]={state:'ready',detail:'Last message succeeded',at:new Date().toISOString()};teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');},error=>{reply.state=error.message==='Response stopped.'?'stopped':'failed';reply.error=error.message;settings.providerHealth||={};settings.providerHealth[installation.provider]={state:/sign.in|login|auth/i.test(error.message)?'needs-login':'error',detail:error.message,at:new Date().toISOString()};if(!reply.text)reply.text=error.message;if(delivery)teamwork.finish(state,delivery,reply.state);}).finally(async()=>{
     runs.delete(run);if(!runs.size)active.delete(botID);
-    try{await atomicJSON('preview-workspace.json',state);}catch{reply.state='failed';reply.error='The response could not be saved. Check available storage.';}
+    try{await atomicJSON('preview-workspace.json',state);await saveSettings();}catch{reply.state='failed';reply.error='The response could not be saved. Check available storage.';}
     notify();await deliverQueued();
    });
   }
@@ -124,10 +125,19 @@ async function deliverQueued(){
  }
 }
 
-function remoteStatus(){return {enabled:remote.active,mode:remoteConfig?.mode||'tailscale',address:remoteConfig?.address||'',feedback:remoteFeedback,busy:remoteBusy,needsCleanup:!!remoteRoute&&!remote.active,port:48291};}
-async function saveRemote(){requireVault();await atomicJSON('remote.encrypted.json',{encrypted:safeStorage.encryptString(JSON.stringify(remoteConfig)).toString('base64')});}
 function showHost(){if(window&&!window.isDestroyed()){window.show();if(window.isMinimized())window.restore();}}
-function remoteTrayUpdate(){if(remote.active&&!remoteTray){remoteTray=new Tray(path.join(__dirname,'icon.ico'));remoteTray.setToolTip('OpenGrokBot · remote access on');remoteTray.setContextMenu(Menu.buildFromTemplate([{label:'Open OpenGrokBot',click:showHost},{label:'Quit and stop host',click:()=>{quitting=true;app.quit();}}]));remoteTray.on('double-click',showHost);}else if(!remote.active&&remoteTray){remoteTray.destroy();remoteTray=null;showHost();}}
+function remoteTrayUpdate(){
+ if(cloud.active&&!remoteTray){remoteTray=new Tray(path.join(__dirname,'icon.ico'));remoteTray.setToolTip('OpenGrokBot · phone access on');remoteTray.setContextMenu(Menu.buildFromTemplate([{label:'Open OpenGrokBot',click:showHost},{label:'Quit and stop host',click:()=>{quitting=true;app.quit();}}]));remoteTray.on('double-click',showHost);}
+ else if(!cloud.active&&remoteTray){remoteTray.destroy();remoteTray=null;showHost();}
+}
+const cloud = new CloudHost({
+ load: async()=>{const value=await loadJSON('cloud-account.encrypted.json',null);if(!value)return null;requireVault();const decrypted=await safeStorage.decryptStringAsync(Buffer.from(value.encrypted,'base64'));return JSON.parse(decrypted.result);},
+ save: async value=>{requireVault();const bytes=await safeStorage.encryptStringAsync(JSON.stringify(value));await atomicJSON('cloud-account.encrypted.json',{encrypted:bytes.toString('base64')});},
+ snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
+ models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
+ changed:status=>{remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
+});
+async function cloudAction(operation){await ensureState();try{return await operation();}catch(error){throw new PublicError(error.message);}}
 function remoteSnapshot(){const {sessions,version,...workspace}=state;return {protocolVersion:1,hostName:require('node:os').hostname(),revision,workspace:{...workspace,schemaVersion:2,bots:workspace.bots.map(x=>({...x,symbol:x.symbol||'sparkles'})),entries:workspace.entries.map(x=>({...x,date:(x.date||'2001-01-01T00:00:00Z').replace(/\.\d+Z$/,'Z')}))},running:[...active.keys()],providers:installed.map(x=>({provider:x.provider,version:x.version})),defaultProvider:selectedCLI()?.provider};}
 async function remoteFiles(id){if(!state.bots.some(x=>x.id.toLowerCase()===String(id).toLowerCase()))throw new Error('Unknown Bot');let values;try{values=await readdir(botDirectory(state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase()).id),{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}return values.filter(x=>!x.name.startsWith('.')&&x.isFile()).slice(0,500).map(x=>({name:x.name}));}
 async function remoteCommand(command){
@@ -143,34 +153,27 @@ async function remoteCommand(command){
   if(!bot||bot.isMain||active.has(bot.id)||pendingBots.has(bot.id))throw new Error('Stop the Bot first');state.bots=state.bots.filter(x=>x.id!==bot.id);state.entries=state.entries.filter(x=>x.botID!==bot.id);state.teamMessages=state.teamMessages?.filter(x=>x.from!==bot.id&&x.to!==bot.id);for(const member of state.bots)if(member.memberIDs)member.memberIDs=member.memberIDs.filter(x=>x!==bot.id);
  }else if(command.action==='configure_bot'){
   if(!bot||active.has(bot.id)||pendingBots.has(bot.id))throw new Error('Stop the Bot first');const configuration={...command.configuration,replyMode:'one'};const updated={...bot,aiConfiguration:configuration};validateWorkspace({...state,bots:state.bots.map(x=>x.id===bot.id?updated:x)});bot.aiConfiguration=configuration;
+ }else if(command.action==='update_avatar'){if(!bot)throw new Error('Unknown Bot');const appearance=command.appearance||null;const updated={...bot,appearance,color:appearance?.color||(bot.isMain?'white':'purple')};validateWorkspace({...state,bots:state.bots.map(x=>x.id===bot.id?updated:x)});Object.assign(bot,updated);
  }else throw new Error('Unsupported command');
  await atomicJSON('preview-workspace.json',state);notify();
 }
-async function enableRemote(){
- await remote.start({token:remoteConfig.token,lan:remoteConfig.mode==='wifi',snapshot:remoteSnapshot,execute:remoteCommand,models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];},files:remoteFiles});
- remoteConfig.enabled=true;await saveRemote();remoteTrayUpdate();
- if(['tailscale','funnel'].includes(remoteConfig.mode)){
-  const address=await tailscale.configure(48291,remoteConfig.mode==='funnel');
-  if(address){remoteConfig.address=address;remoteRoute={address,funnel:remoteConfig.mode==='funnel'};remoteConfig.route=remoteRoute;await saveRemote();remoteFeedback='Tailscale HTTPS is ready. Copy the pairing link to your phone.';}
-  else remoteFeedback='Tailscale needs setup or port 8443 is already in use. Use the command below, then enter its HTTPS address. Existing routes are not overwritten.';
- }else remoteFeedback='Remote access is on. Copy the pairing link to your phone.';
-}
 function configureIPC() {
- handle('remote:status',async()=>{await ensureState();return remoteStatus();});
- handle('remote:enable',async(mode,address)=>{
-  await ensureState();requireVault();if(remote.active||remoteBusy||remoteRoute||!['tailscale','funnel','wifi','proxy'].includes(mode))throw new PublicError('Disable remote access before changing connection modes.');
-  remoteBusy=true;try{
-   const token=remoteConfig?.token||require('node:crypto').randomBytes(32).toString('hex');
-   if(mode==='wifi'&&!address){const candidate=Object.values(require('node:os').networkInterfaces()).flat().find(x=>x&&!x.internal&&x.family==='IPv4'&&remoteAPI.localHost(x.address));address=`http://${candidate?.address||'your-pc.local'}:48291`;}
-   if(['wifi','proxy'].includes(mode)){remoteAPI.pairing(address,token);if(mode==='proxy'&&new URL(address).protocol!=='https:')throw new PublicError('Use an HTTPS proxy address.');}
-   remoteConfig={enabled:false,mode,address:address||'',token};await enableRemote();return remoteStatus();
-  }catch(error){await remote.stop();remoteTrayUpdate();if(remoteConfig)remoteConfig.enabled=false;throw error;}finally{remoteBusy=false;}
+ handle('cloud:status',()=>cloud.status());
+ handle('cloud:sign-in',(email,password,create)=>cloudAction(()=>cloud.signIn(email,password,create===true)));
+ handle('cloud:sign-out',()=>cloudAction(()=>cloud.signOut()));
+ handle('cloud:enabled',value=>cloudAction(()=>cloud.setEnabled(value===true)));
+ handle('cloud:approve',(id,allowed)=>cloudAction(()=>cloud.approve(id,allowed===true)));
+ handle('cloud:reconnect',()=>cloudAction(async()=>{if(!cloud.data.session)throw new Error('Sign in first.');await cloud.setEnabled(true);return cloud.status();}));
+ handle('updates:check',async()=>{try{updateState=await updates.check(app.getVersion());return updateState;}catch(error){throw new PublicError(error.message);}});
+ handle('updates:open',async url=>{if(!updates.trusted(url))throw new PublicError('Use the official project release page.');await shell.openExternal(url);});
+ handle('bot:organize',async(id,changes)=>{
+  await ensureState();const bot=state.bots.find(x=>x.id===id);if(!bot||!changes||typeof changes!=='object')throw new PublicError('Choose a Bot.');
+  const next={...bot,...Object.fromEntries(['isPinned','folder','sortOrder','appearance','color'].filter(key=>Object.hasOwn(changes,key)).map(key=>[key,changes[key]]))};
+  validateWorkspace({...state,bots:state.bots.map(x=>x.id===id?next:x)});state.bots=state.bots.map(x=>x.id===id?next:x);await atomicJSON('preview-workspace.json',state);notify();return state;
  });
- handle('remote:disable',async()=>{await remote.stop();remoteTrayUpdate();if(remoteConfig){remoteConfig.enabled=false;await saveRemote();}if(remoteRoute){const removed=await tailscale.remove(48291,remoteRoute.address,remoteRoute.funnel);if(removed){remoteRoute=null;remoteConfig.route=null;await saveRemote();}else remoteFeedback='The app server is off. Remove its port 8443 Tailscale route before changing modes.';}else remoteFeedback='Remote access is off.';return remoteStatus();});
- handle('remote:address',async address=>{if(!remoteConfig||!remote.active)throw new Error('Enable remote access first');remoteAPI.pairing(address,remoteConfig.token);if(remoteConfig.mode!=='wifi'&&new URL(address).protocol!=='https:')throw new PublicError('Use an HTTPS address.');remoteConfig.address=address;if(['tailscale','funnel'].includes(remoteConfig.mode)){remoteRoute={address,funnel:remoteConfig.mode==='funnel'};remoteConfig.route=remoteRoute;}await saveRemote();return remoteStatus();});
- handle('remote:link',async()=>{if(!remoteConfig||!remote.active)throw new Error('Enable remote access first');return remoteAPI.pairing(remoteConfig.address,remoteConfig.token);});
- handle('remote:rotate',async()=>{if(!remoteConfig)throw new Error('Enable remote access first');remoteConfig.token=require('node:crypto').randomBytes(32).toString('hex');remote.token=remoteConfig.token;remote.receipts.clear();await saveRemote();return remoteStatus();});
-
+ handle('bots:reorder',async ids=>{await ensureState();if(!Array.isArray(ids)||ids.length!==state.bots.length||new Set(ids).size!==ids.length||ids.some(id=>!state.bots.some(x=>x.id===id)))throw new PublicError('Use the current Bot list.');for(const bot of state.bots)bot.sortOrder=ids.indexOf(bot.id);await atomicJSON('preview-workspace.json',state);notify();return state;});
+ handle('drafts:load',async()=>{await ensureState();return loadJSON('drafts.json',{});});
+ handle('drafts:save',async drafts=>{if(!drafts||typeof drafts!=='object'||Array.isArray(drafts)||Object.keys(drafts).length>100||Object.entries(drafts).some(([id,text])=>!state?.bots.some(x=>x.id===id)||typeof text!=='string'||text.length>100000))throw new PublicError('Drafts are too large.');await atomicJSON('drafts.json',drafts);});
   handle('workspace:load', async () => {await ensureState();return state;});
   handle('workspace:save', async value => {
     await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before changing Bots.');
@@ -205,9 +208,17 @@ function configureIPC() {
     if(!choice.canceled){settings.overrides[provider]=choice.filePaths[0];await saveSettings();}
     return true;
   });
-  handle('setup:login',async()=>{const installation=selectedCLI();if(!installation)throw new PublicError('Choose an installed CLI first.');if(installation.provider==='codex'&&(await cli.capture(installation,['login','status'],12000)).exit!==0)throw new PublicError('Run codex login in Terminal, then check again.');return installation.provider==='codex'?'Codex is signed in and ready.':'This CLI will validate its own account when you send a message.';});
+  handle('setup:login',async()=>{
+    const installation=selectedCLI();if(!installation)throw new PublicError('Choose an installed CLI first.');settings.providerHealth||={};
+    if(installation.provider==='codex'){
+      const signedIn=(await cli.capture(installation,['login','status'],12000)).exit===0;
+      settings.providerHealth[installation.provider]={state:signedIn?'ready':'needs-login',detail:signedIn?'Signed in':'Run codex login in Terminal, then check again.',at:new Date().toISOString()};await saveSettings();
+      if(!signedIn)throw new PublicError('Run codex login in Terminal, then check again.');return 'Codex is signed in and ready.';
+    }
+    settings.providerHealth[installation.provider]={state:'configured',detail:'CLI detected. Authentication is verified by its next message.',at:new Date().toISOString()};await saveSettings();return settings.providerHealth[installation.provider].detail;
+  });
   handle('setup:complete',async()=>{if(!selectedCLI())throw new PublicError('Choose an installed CLI first.');settings.complete=true;await saveSettings();});
-  handle('chat:send',async(botID,text)=>{await ensureState();if(typeof text!=='string'||!text.trim()||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');await startChat(botID,text);return state;});
+  handle('chat:send',async(botID,text,requestID)=>{await ensureState();if(typeof text!=='string'||!text.trim()||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');if(requestID&&!/^[0-9a-f-]{36}$/i.test(requestID))throw new PublicError('Invalid delivery ID.');if(!requestID||!state.entries.some(x=>x.id.toLowerCase()===requestID.toLowerCase()))await startChat(botID,text,undefined,requestID);return state;});
   handle('chat:retry',async botID=>{await ensureState();const message=state.teamMessages?.findLast(x=>x.to===botID&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(botID);return state;});
   handle('chat:stop',async botID=>{for(const run of active.get(botID)||[])run.cancel();});
   handle('composio:status',async()=>{await ensureState();return composioStatus();});
@@ -270,12 +281,12 @@ function configureIPC() {
 app.whenReady().then(() => {
   configureIPC();
   window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, frame: false, backgroundColor: '#111111', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
-  window.on('close',event=>{if(remote.active&&!quitting){event.preventDefault();window.hide();}});
+  window.on('close',event=>{if(cloud.active&&!quitting){event.preventDefault();window.hide();}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.loadFile(rendererFile);
-  (async()=>{try{await ensureState();const stored=await loadJSON('remote.encrypted.json',null);if(stored){requireVault();remoteConfig=JSON.parse(safeStorage.decryptString(Buffer.from(stored.encrypted,'base64')));remoteRoute=remoteConfig.route;if(remoteConfig.enabled){installed=await cli.discover(settings.overrides);await enableRemote();}}}catch{await remote.stop();remoteTrayUpdate();remoteFeedback='Remote access could not be restored. Unlock Windows and enable it in Settings.';}})();
+  (async()=>{try{await ensureState();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
 });
-app.on('before-quit',()=>{quitting=true;remote.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
-app.on('window-all-closed', () => {if(!remote.active)app.quit();});
+app.on('before-quit',()=>{quitting=true;cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
+app.on('window-all-closed', () => {if(!cloud.active)app.quit();});

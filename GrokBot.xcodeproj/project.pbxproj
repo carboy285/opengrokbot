@@ -5,6 +5,16 @@
 	};
 	"objectVersion" = "56";
 	"objects" = {
+		"B997B958F0D7E9E66672246A" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/App/DesktopUpdates.swift";
+			"sourceTree" = "<group>";
+		};
+		"762EE8D0978829DB23FE4095" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B997B958F0D7E9E66672246A";
+		};
 		"A40BA7C4BC48268BE9A399F0" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -310,8 +320,8 @@
 				"INFOPLIST_FILE" = "GrokBot/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "7";
-				"MARKETING_VERSION" = "0.6.6";
+				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "0.7.0";
 				"TARGETED_DEVICE_FAMILY" = "1";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -333,8 +343,8 @@
 				"INFOPLIST_FILE" = "GrokBot/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "7";
-				"MARKETING_VERSION" = "0.6.6";
+				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "0.7.0";
 				"TARGETED_DEVICE_FAMILY" = "1";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -653,6 +663,7 @@
 		"C443DACDC7602DD178BF742C" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"B997B958F0D7E9E66672246A",
 				"D14958065752B19FA10F8D42",
 				"2A9A7D8DBAA316656F85483E",
 				"A50BC402CF247646CE168E58",
@@ -696,8 +707,8 @@
 				"PRODUCT_MODULE_NAME" = "GrokBotMac";
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
-				"CURRENT_PROJECT_VERSION" = "7";
-				"MARKETING_VERSION" = "0.6.6";
+				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "0.7.0";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
@@ -723,8 +734,8 @@
 				"PRODUCT_MODULE_NAME" = "GrokBotMac";
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
-				"CURRENT_PROJECT_VERSION" = "7";
-				"MARKETING_VERSION" = "0.6.6";
+				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "0.7.0";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
@@ -875,6 +886,7 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = "2147483647";
 			"files" = (
+				"762EE8D0978829DB23FE4095",
 				"F1C5F5DB241E31A5DC9B1DA8",
 				"8D954521084C130FAC759AFE",
 				"394DA17948BB29EDBFF7EF0E",

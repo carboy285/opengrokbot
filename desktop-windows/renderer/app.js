@@ -4,7 +4,23 @@ const $ = selector => document.querySelector(selector);
 const node = (tag, className = '', text = '') => { const value = document.createElement(tag); value.className = className; value.textContent = text; return value; };
 const button = (text, action, className = 'pill') => { const value = node('button', className, text); value.type = 'button'; value.addEventListener('click', action); return value; };
 const append = (parent, ...children) => { parent.append(...children.filter(Boolean)); return parent; };
-const avatar = (color = 'white', starred = false) => append(node('span', `avatar ${color}`), starred ? node('b', '', '★') : null);
+const avatarColors={white:'#ffffff',black:'#111111',purple:'#9355ff',pink:'#fa2a99',ochre:'#a46e39',red:'#ff2948',orange:'#ff7012',amber:'#f69a0a',green:'#10bf70',teal:'#15b6a5',blue:'#2385ff',gray:'#969696'};
+const avatarShapes=['circle','cloud','square','sparkle','flower','heart','clover','droplet','capsule','triangle','pebble','star','hexagon','fruit'];
+function avatar(value='white',starred=false){
+ const bot=typeof value==='object'?value:{color:value},appearance=bot.appearance||{color:bot.color,shape:bot.color==='white'||bot.color==='pink'?'circle':bot.color==='ochre'?'hexagon':'pebble'};
+ const face=node('span','avatar custom-avatar');face.style.setProperty('--avatar-color',avatarColors[appearance.color]||avatarColors.purple);face.setAttribute('aria-hidden','true');
+ if(appearance.imageData){const img=node('img');img.src='data:image/jpeg;base64,'+appearance.imageData;img.alt='';face.append(img);}
+ else{
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 100 100');
+  const path=document.createElementNS(svg.namespaceURI,'path');let d='';
+  if(appearance.shape==='heart')d='M50 94 C10 75 -10 55 4 30 C10 -2 40 1 50 22 C60 1 90 -2 96 30 C110 55 90 75 50 94 Z';
+  else if(appearance.shape==='square')d='M22 8 Q12 8 12 18 L12 82 Q12 92 22 92 L78 92 Q88 92 88 82 L88 18 Q88 8 78 8 Z';
+  else {for(let i=0;i<120;i++){const a=i/120*2*Math.PI-Math.PI/2;let r=.46;switch(appearance.shape){case'hexagon':r=.42/Math.cos((a+2*Math.PI)%(Math.PI/3)-Math.PI/6);break;case'cloud':r=.42+.055*Math.cos(7*a)+.025*Math.sin(3*a);break;case'flower':r=.41+.07*Math.cos(5*a);break;case'star':r=.37+.105*Math.cos(6*a);break;case'sparkle':r=.37+.11*Math.cos(4*a);break;case'clover':r=.4+.085*Math.cos(4*a+.6);break;case'triangle':r=.37+.105*Math.cos(3*a);break;case'droplet':r=.39+.08*Math.cos(a)+.055*Math.cos(3*a);break;case'pebble':r=.43+.035*Math.cos(3*a)+.025*Math.sin(2*a);break;case'capsule':r=.45;break;}d+=(i?'L':'M')+(50+100*r*Math.cos(a))+','+(50+100*r*Math.sin(a));}d+='Z';}
+  path.setAttribute('d',d);path.setAttribute('fill','var(--avatar-color)');if(appearance.shape==='square')path.setAttribute('transform','rotate(-20 50 50)');if(appearance.shape==='capsule')path.setAttribute('transform','translate(0 12) scale(1 .76)');svg.append(path);
+  for(const [x,y]of [[42,36],[63,32]]){const eye=document.createElementNS(svg.namespaceURI,'rect');for(const[k,v]of Object.entries({x,y,width:9,height:24,rx:4.5,fill:appearance.color==='white'?'#111':'#fff',transform:'rotate(-25 50 50)'}))eye.setAttribute(k,v);svg.append(eye);}face.append(svg);
+ }
+ if(starred)face.append(node('b','','★'));return face;
+}
 const result = async operation => { const response = await operation; if (!response.ok) throw new Error(response.error); return response.value; };
 const webPreview = {
   load: async () => { try { return { ok: true, value: JSON.parse(localStorage.getItem('workspace') || 'null') || structuredClone(preview) }; } catch { return { ok: false, error: 'Saved workspace could not be read. Existing storage was kept.' }; } },
@@ -27,6 +43,12 @@ let search = '';
 let toastTimer;
 let focusGeneration = 0;
 const drafts = new Map();
+const pendingSends=new Map();
+let folderFilter='*',draggedBot=null,draftTimer,displayedBot=null,cloudStatus=null;
+function persistDrafts(){clearTimeout(draftTimer);draftTimer=setTimeout(()=>{bridge.saveDrafts?.(Object.fromEntries(drafts)).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>toast('Your draft could not be saved.'));},400);}
+const isPinned=bot=>bot.isPinned??!!bot.isMain;
+const orderedBots=()=>workspace.bots.map((bot,index)=>({bot,index})).sort((a,b)=>(a.bot.sortOrder??a.index)-(b.bot.sortOrder??b.index)).map(x=>x.bot);
+async function organize(bot,changes){try{if(bridge.organizeBot)workspace=await result(bridge.organizeBot(bot.id,changes));else{const next=structuredClone(workspace);Object.assign(next.bots.find(x=>x.id===bot.id),changes);if(!await persist(next))return;}render();}catch(error){toast(error.message);}}
 const dialog = $('#panel');
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 5000); }
 function currentBot() { return workspace.bots.find(bot => bot.id === selected); }
@@ -43,41 +65,63 @@ async function persist(next) {
 }
 function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id; render(); }
 function render() {
-  const primary = $('#primary-bot'); primary.replaceChildren();
-  if (workspace.bots[0]) {
-    const first = workspace.bots[0];
-    primary.append(append(button('', () => selectBot(first.id), `primary-card ${selected === first.id ? 'selected' : ''}`), avatar('white', true), node('span', '', 'Grok Bot')));
+  const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
+  const matches=bot=>(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
+  const primary=$('#primary-bot');primary.replaceChildren();
+  for(const bot of orderedBots().filter(x=>isPinned(x)&&matches(x))){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});primary.append(tile);}
+  const list=$('#bot-list');list.replaceChildren();
+  const visible=orderedBots().filter(bot=>!isPinned(bot)&&matches(bot));
+  for(const bot of visible){
+    const row=button('',()=>selectBot(bot.id),`bot-row ${bot.id===selected?'selected':''}`);row.draggable=true;
+    const preview=entries(bot).at(-1)?.text||bot.purpose;
+    append(row,avatar(bot),append(node('span','details'),node('strong','',bot.name),node('small','',running.has(bot.id)?'Working…':preview)));
+    row.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});
+    row.addEventListener('dragstart',event=>{draggedBot=bot.id;event.dataTransfer.setData('text/plain',bot.id);event.dataTransfer.effectAllowed='move';});
+    row.addEventListener('dragend',()=>{draggedBot=null;});row.addEventListener('dragover',event=>{if(draggedBot)event.preventDefault();});
+    row.addEventListener('drop',async event=>{event.preventDefault();const from=draggedBot;draggedBot=null;if(!from||from===bot.id||!bridge.reorderBots)return;const ids=orderedBots().map(x=>x.id).filter(id=>id!==from);ids.splice(ids.indexOf(bot.id),0,from);try{workspace=await result(bridge.reorderBots(ids));render();}catch(error){toast(error.message);}});list.append(row);
   }
-  const list = $('#bot-list'); list.replaceChildren();
-  const visible = workspace.bots.filter((bot, index) => (index !== 0 || search) && `${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase()));
-  for (const bot of visible) {
-    const row = button('', () => selectBot(bot.id), `bot-row ${bot.id === selected ? 'selected' : ''}`);
-    append(row, avatar(bot.color), append(node('span', 'details'), node('strong', '', bot.name), node('small', '', entries(bot).at(-1)?.text || bot.purpose)));
-    row.addEventListener('contextmenu', event => { event.preventDefault(); showBotActions(bot); });
-    list.append(row);
-  }
-  if (search && !visible.length) list.append(node('p', 'empty', 'No Bots found.'));
+  if(!visible.length&&!primary.children.length)list.append(node('p','empty','No Bots found.'));
+  renderFolderFilter();
   const bot = currentBot();
-  $('#chat-heading').replaceChildren(); $('#messages').replaceChildren();
-  $('#draft').value = drafts.get(selected) || '';
-  $('#draft').disabled = !bot;
-  if (!bot) { $('#messages').append(node('div', 'empty', 'Create a Bot to start chatting.')); return; }
-  append($('#chat-heading'), avatar(bot.color), node('span', '', bot.name));
-  $('#draft').placeholder = `Message ${bot.name}`;
-  for (const entry of entries(bot)) {
-    if (entry.kind === 'activity') {
-      append($('#messages'), append(node('div', 'activity'), node('span', '', entry.text)));
-    } else {
-      const bubble = node('div', 'bubble', entry.text || (entry.state==='streaming'?'Thinking…':''));
-      bubble.setAttribute('aria-label', `${entry.kind === 'user' ? 'You' : 'AI reply'}: ${entry.text}`);
-      const body=node('div','message-body');if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.provider)body.append(node('small','muted',entry.provider));body.append(bubble);append($('#messages'), append(node('div', `message-row ${entry.kind}`), body));
-    }
-  }
-  if(entries(bot).at(-1)?.state==='failed')$('#messages').append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));
-  if(running.has(bot.id))$('#messages').append(button('Stop response',()=>bridge.stop(bot.id)));
+  $('#chat-heading').replaceChildren();
+  const draft=$('#draft');if(displayedBot!==selected||document.activeElement!==draft){draft.value=drafts.get(selected)||'';displayedBot=selected;}
+  draft.disabled=!bot;if(!bot){$('#messages').replaceChildren(node('div','empty','Create a Bot to start chatting.'));return;}
+  append($('#chat-heading'),avatar(bot),node('span','',bot.name));draft.placeholder=`Ask ${bot.name}`;
+  document.documentElement.style.setProperty('--bot-accent',avatarColors[bot.appearance?.color||bot.color]||'#9355ff');
+  renderMessages(bot);
   const activeCLI=setup.installed.find(x=>x.id===setup.selected);$('#status-button').textContent=activeCLI?`${activeCLI.name} · On this device`:'Set up an AI CLI';
-  if (!entries(bot).length) $('#messages').append(node('div', 'empty', 'Send your first message to start chatting with an AI CLI on this device.'));
+
   renderInspector();
+}
+function renderFolderFilter(){
+ let picker=$('#folder-filter');const values=[...new Set(workspace.bots.map(x=>x.folder).filter(Boolean))].sort();
+ if(!picker){picker=node('select','folder-filter');picker.id='folder-filter';picker.setAttribute('aria-label','Filter Bot folders');picker.addEventListener('change',()=>{folderFilter=picker.value;render();});$('#search-slot').before(picker);}
+ picker.replaceChildren();for(const[value,label]of [['*','All Bots'],['','Unfiled'],...values.map(x=>[x,x])]){const option=node('option','',label);option.value=value;picker.append(option);}if(!['*','',...values].includes(folderFilter))folderFilter='*';picker.value=folderFilter;
+}
+function renderMessages(bot){
+ const messages=$('#messages'),nearBottom=messages.scrollHeight-messages.scrollTop-messages.clientHeight<100,previousScroll=messages.scrollTop;
+ if(messages.dataset.bot!==bot.id){messages.replaceChildren();messages.dataset.bot=bot.id;}
+ for(const el of messages.querySelectorAll('[data-extra]'))el.remove();
+ const live=new Set();let index=0;
+ for(const entry of entries(bot)){
+  live.add(entry.id);let row=messages.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`);
+  if(!row){row=node('div',entry.kind==='activity'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));}
+  const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==entry.state){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state','Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
+  if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
+ }
+ for(const row of messages.querySelectorAll('[data-entry]'))if(!live.has(row.dataset.entry))row.remove();
+ const pending=pendingSends.get(bot.id);
+ if(pending&&!live.has(pending.id)){const row=append(node('div','message-row user pending'),append(node('div','message-body'),node('div','bubble',pending.text),node('small','delivery-state',pending.failed?'Failed to send':'Sending…')));row.dataset.extra='true';if(pending.failed)row.firstChild.append(button('Retry sending',()=>submitMessage(bot,pending.text,pending.id)));messages.append(row);}
+ if(!entries(bot).length&&!pending){const empty=node('div','empty','What’s on your mind?');empty.dataset.extra='true';messages.append(empty);}
+ if(running.has(bot.id)){const stop=button('Stop response',()=>bridge.stop(bot.id));stop.dataset.extra='true';messages.append(stop);}
+ $('#save-note').disabled=running.has(bot.id)||!!pending&&!pending.failed;$('#save-note').setAttribute('aria-label',pending&&!pending.failed?'Sending message':'Send message');
+ if(nearBottom||messages.dataset.previousBot!==bot.id)requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight;});else messages.scrollTop=previousScroll;messages.dataset.previousBot=bot.id;
+}
+async function submitMessage(bot,text,id=crypto.randomUUID()){
+ if(running.has(bot.id)||pendingSends.get(bot.id)&&!pendingSends.get(bot.id).failed)return;
+ const pending={id,text,failed:false};pendingSends.set(bot.id,pending);drafts.set(bot.id,text);persistDrafts();renderMessages(bot);
+ try{workspace=await result(bridge.send(bot.id,text,id));pendingSends.delete(bot.id);if(drafts.get(bot.id)===text){drafts.delete(bot.id);if(selected===bot.id&&$('#draft').value.trim()===text)$('#draft').value='';}persistDrafts();render();if(selected===bot.id)$('#draft').focus();}
+ catch(error){pending.failed=true;toast(error.message);if(selected===bot.id)renderMessages(bot);}
 }
 function configuration(bot){const active=setup.installed.find(x=>x.id===setup.selected);return bot.aiConfiguration||{providers:active?[{provider:active.provider,model:''}]:[],activeProvider:active?.provider,replyMode:'one'};}
 function toggleInspector(open=!inspectorOpen){inspectorOpen=open;renderInspector();}
@@ -89,7 +133,7 @@ function renderInspector(){
  if(signature===inspectorSignature)return;inspectorSignature=signature;const generation=++inspectorGeneration;
  pane.replaceChildren();
  const controls=node('div','inspector-actions');const share=button('↑',()=>exportConversation(bot),'circle glass');share.setAttribute('aria-label','Share conversation');const close=button('×',()=>toggleInspector(false),'circle glass');close.setAttribute('aria-label','Close bot details');append(controls,share,close);
- const profile=append(node('div','inspector-profile'),avatar(bot.color),node('h2','',bot.name));
+ const avatarButton=append(button('',()=>showAvatarPicker(bot),'avatar-edit'),avatar(bot));avatarButton.setAttribute('aria-label','Change Bot avatar');const profile=append(node('div','inspector-profile'),avatarButton,node('h2','',bot.name));
  const tabs=node('nav','inspector-tabs');tabs.setAttribute('aria-label','Bot details tabs');
  for(const name of ['Details','Library','Computer']){const tab=button(name,()=>{inspectorTab=name;renderInspector();},name===inspectorTab?'active':'');tab.setAttribute('aria-current',String(name===inspectorTab));tabs.append(tab);}
  const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
@@ -117,7 +161,7 @@ function renderInspector(){
   }
   if(!bot.isMain)body.append(node('p','',bot.purpose));
   for(const [title,memory] of [['This Bot’s memory',bot.memory],['Shared memory',workspace.sharedMemory]])if(memory?.length){body.append(node('h3','',title));for(const fact of memory)body.append(node('p','memory-fact',fact));}
-  body.append(node('p','muted','This Bot has no scheduled routines.'));
+  body.append(button(isPinned(bot)?'Unpin Bot':'Pin to top',()=>organize(bot,{isPinned:!isPinned(bot)})));body.append(button('Organize Bot…',()=>showBotActions(bot)));
  }else if(inspectorTab==='Computer'){
   const choice=config.providers.find(x=>x.provider===config.activeProvider)||config.providers[0],provider=setup.providers.find(x=>x.id===choice?.provider);
   append(body,node('h3','','Runs on this device'),node('p','',provider?.name||'Choose an AI CLI'),node('p','muted',choice?.model||'CLI default model'),node('p','muted',busy?'Working…':'Each Bot keeps its own working folder.'),button('AI CLI setup',()=>showConnection()),button('Open working folder',()=>bridge.openBotFolder(bot.id)));
@@ -152,7 +196,7 @@ async function showConnection(detail='') {
     else if(step===1){
       body.append(node('h2','','Choose an AI CLI'));
       if(!window.desktop)body.append(node('p','','Install the desktop app to use AI CLIs. A browser cannot launch local processes.'));
-      for(const candidate of setup.providers){const found=setup.installed.find(x=>x.provider===candidate.id);body.append(button(`${provider===candidate.id?'✓ ':''}${candidate.name} · ${found?.version||'Not installed'}`,async()=>{provider=candidate.id;verified=false;if(found)setup=await result(bridge.chooseCLI(found.id));draw();},'setting-row'));}
+      for(const candidate of setup.providers){const found=setup.installed.find(x=>x.provider===candidate.id);body.append(button(`${provider===candidate.id?'✓ ':''}${candidate.name} · ${found?.version||'Not installed'}${setup.health?.[candidate.id]?' · '+setup.health[candidate.id].detail:''}`,async()=>{provider=candidate.id;verified=false;if(found)setup=await result(bridge.chooseCLI(found.id));draw();},'setting-row'));}
       body.append(button('Scan again',async()=>{try{setup=await result(bridge.scanCLIs());draw();}catch(error){toast(error.message);}}));
     }else if(step===2){
       const definition=setup.providers.find(x=>x.id===provider),found=setup.installed.find(x=>x.provider===provider);
@@ -233,7 +277,7 @@ function showSettings(tab = 'General') {
     const promo = node('div','promo');
     append(promo, append(node('div'), node('h3','','A free app for your AI CLIs'), node('p','','Choose Codex, Claude Code, Grok Build, OpenCode, or Gemini CLI on this computer. Optionally connect tools with Composio.'), button('Set up AI and tools', () => showConnection(), 'pill primary')), append(node('div','brand-tile'), node('span','','⬡'), node('span','','✧'), avatar(), node('span','','𝕏')));
     const profile = node('input'); profile.value = localStorage.getItem('profile') || 'Local workspace'; profile.setAttribute('aria-label','Local display name'); profile.addEventListener('change', () => localStorage.setItem('profile',profile.value));
-    const account = append(node('div','settings-card'), append(node('div','setting-row'), node('span','profile-icon','LP'), append(node('div','profile-text'),profile,node('small','','Uses your CLI account')),button('Connection status', () => showConnection())));
+    const account = append(node('div','settings-card'), append(node('div','setting-row'), node('span','profile-icon',(localStorage.getItem('profile')||'You').slice(0,2).toUpperCase()), append(node('div','profile-text'),profile,node('small','','Uses your CLI account')),button('Connection status', () => showConnection())));
     const appearance = node('div','settings-card'); const select = node('select'); select.setAttribute('aria-label','Theme');
     for (const [value,label] of [['system','Follow System'],['dark','Dark'],['light','Light']]) { const option=node('option','',label); option.value=value; select.append(option); } select.value=localStorage.getItem('appearance') || 'dark'; select.addEventListener('change',()=>applyTheme(select.value));
     append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),node('span','muted','Bot color')),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
@@ -241,29 +285,26 @@ function showSettings(tab = 'General') {
   } else if (tab === 'Computer') { page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); }
   else if (tab === 'Permissions') page.append(unavailable('CLI tool permissions', 'Codex runs with read-only workspace access. Other CLIs retain their own permissions. The app does not add approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
-  else if (tab === 'Updates') append(page,unavailable('OpenGrokBot 0.5.0','Install a new build from the project’s release artifacts. This app does not update the official Grok Bot application.'),button('Open project ↗',()=>bridge.openDocs('https://github.com/carboy285/opengrokbot')));
+  else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
 }
 async function renderRemoteAccess(page){
- const body=node('section','composio-settings');page.append(body);
- if(!bridge.remoteStatus){body.append(node('p','muted','Remote control is available in the installed desktop app.'));return;}
- const draw=async()=>{
-  let status;try{status=await result(bridge.remoteStatus());}catch(error){body.textContent=error.message;return;}body.replaceChildren();
-  append(body,node('h2','','iPhone remote control'),node('p','','Your phone controls this computer’s Bots, chats, models and running work. No separate phone workspace is created.'));
-  const modes=[['tailscale','Tailscale · private'],['funnel','Tailscale Funnel · public HTTPS'],['wifi','Wi-Fi / private IP'],['proxy','My HTTPS proxy']];
-  const select=node('select','field');select.setAttribute('aria-label','Remote connection mode');for(const [value,label] of modes){const option=node('option','',label);option.value=value;select.append(option);}select.value=status.mode;select.disabled=status.enabled||status.busy;
-  const address=node('input','field');address.value=status.address;address.placeholder='https://my-pc.tailnet.ts.net:8443';address.setAttribute('aria-label','Desktop remote address');
-  select.addEventListener('change',()=>address.value='');
-  const note=node('p','muted');const explain=()=>{note.textContent=select.value==='wifi'?'Use a private IP on trusted Wi-Fi or your Tailscale IP. Direct Wi-Fi HTTP is unencrypted. Use HTTPS when away from home.':select.value==='funnel'?'Public HTTPS protected by your pairing key. The phone does not need Tailscale. Funnel must be authorized in your tailnet.':select.value==='proxy'?'Forward your HTTPS proxy to http://127.0.0.1:48291 and enter its HTTPS base address.':'Install Tailscale on this computer and your iPhone, join the same tailnet, and keep it connected for private HTTPS access wherever you go.';};select.addEventListener('change',explain);explain();
-  const run=async operation=>{try{for(const control of body.querySelectorAll('button'))control.disabled=true;await result(operation);await draw();}catch(error){toast(error.message);await draw();}};
-  append(body,select,note,address,button(status.enabled?'Disable remote access':'Enable remote access',()=>run(status.enabled?bridge.remoteDisable():bridge.remoteEnable(select.value,address.value))));
-  if(status.needsCleanup)body.append(button('Retry Tailscale cleanup',()=>run(bridge.remoteDisable())));
-  if(status.enabled){
-   append(body,button('Save address',()=>run(bridge.remoteAddress(address.value))),button('Copy pairing link',async()=>{try{const link=await result(bridge.remoteLink());await navigator.clipboard.writeText(link);toast('Pairing link copied. Treat it like a workspace password.');}catch(error){toast(error.message);}}),button('Revoke phones / new key',()=>run(bridge.remoteRotate())));
-   if(['tailscale','funnel'].includes(status.mode)){const command=`tailscale ${status.mode==='funnel'?'funnel':'serve'} --bg --https=8443 http://127.0.0.1:48291`;append(body,node('pre','',command),button('Copy command',()=>navigator.clipboard.writeText(command)));}
+ const body=node('section','composio-settings');page.append(body);let disposed=false;const draw=async()=>{
+  if(!body.isConnected){disposed=true;return;}let status;try{status=await result(bridge.cloudStatus());}catch(error){body.replaceChildren(node('p','',error.message));return;}if(disposed||!body.isConnected)return;cloudStatus=status;body.replaceChildren();
+  append(body,node('h2','','iPhone remote control'),node('p','','Sign in with the same account as your iPhone. Your computer runs the work; approved phones control its Bots.'),node('p',`connection-state ${status.phase}`,status.feedback));
+  const run=async operation=>{for(const control of body.querySelectorAll('button'))control.disabled=true;try{await result(operation);}catch(error){toast(error.message);}if(body.isConnected)draw();};
+  if(!status.signedIn){const email=node('input','field'),password=node('input','field');email.type='email';email.placeholder='Email';email.autocomplete='username';email.setAttribute('aria-label','Account email');password.type='password';password.placeholder='Password';password.autocomplete='current-password';password.setAttribute('aria-label','Account password');const form=node('form');append(form,email,password);const sign=button('Sign in',()=>{});sign.type='submit';form.append(sign);form.addEventListener('submit',event=>{event.preventDefault();const value=password.value;password.value='';run(bridge.cloudSignIn(email.value,value,false));});append(body,form,button('Create account',()=>{const value=password.value;password.value='';run(bridge.cloudSignIn(email.value,value,true));}));}
+  else{
+   append(body,node('strong','',status.email),button(status.enabled?'Turn off phone access':'Allow phone access',()=>run(bridge.cloudEnabled(!status.enabled))),button('Reconnect now',()=>run(bridge.cloudReconnect())),node('p','fingerprint',`This computer: ${status.fingerprint}`));
+   for(const phone of status.phones){const row=append(node('div','settings-card'),node('strong','',phone.name),node('p','fingerprint',phone.fingerprint),node('small','muted',phone.approved?'Approved':'Compare this fingerprint with your iPhone before approving.'));row.append(button(phone.approved?'Revoke':'Approve phone',()=>run(bridge.cloudApprove(phone.id,!phone.approved))));body.append(row);}
+   if(!status.phones.length)body.append(node('p','muted','Sign in on your iPhone to make it appear here.'));body.append(button('Sign out on this computer',()=>run(bridge.cloudSignOut())));
   }
-  append(body,node('p','muted',status.feedback),node('p','muted','Open the pairing link on your iPhone or paste it into Connect Desktop. Keep it private. The host must be awake with OpenGrokBot running. When remote access is enabled, closing this window keeps the app in the system tray; use its Quit menu to stop the host.'),button('Get Tailscale ↗',()=>bridge.openDocs('https://tailscale.com/download')));
- };await draw();
+  const diagnostics={state:status.phase,enabled:status.enabled,lastHeartbeat:status.lastHeartbeat||null,lastPhoneRequest:status.lastRequest||null,approvedPhones:status.phones.filter(x=>x.approved).length};append(body,node('p','muted','Keep this computer awake with OpenGrokBot running. Closing the window keeps phone access running in the system tray.'),button('Copy connection diagnostics',()=>navigator.clipboard.writeText(JSON.stringify(diagnostics,null,2))));
+ };if(!bridge.cloudStatus){body.append(node('p','','Open the installed Windows app to connect your iPhone.'));return;}await draw();const timer=setInterval(()=>{if(!body.isConnected){clearInterval(timer);return;}if(!body.querySelector('input'))draw();},4000);
+}
+async function renderUpdates(page){
+ const body=append(node('section','settings-card'),node('h2','','App updates'),node('p','muted','Download updates from the official project. Installers do not replace your saved workspace.'));page.append(body);
+ const check=button('Check for updates',async()=>{check.disabled=true;try{const update=await result(bridge.checkUpdates());body.append(node('p','',update.available?`${update.version} is available${update.prerelease?' (development release)':''}.`:`You’re using ${update.current}. No newer release is published.`));if(update.available)body.append(button('Open download page',()=>bridge.openUpdate(update.url)));}catch(error){toast(error.message);}finally{check.disabled=false;}});body.append(check);
 }
 async function renderVault(page) {
   append(page,node('h2','','Device vault'),node('p','muted','Encrypted with Windows data protection. This local vault is not synced or accessible to Grok Bot.'));
@@ -282,22 +323,37 @@ async function renderVault(page) {
 }
 function showDeleteSecret(item) { const content=panel('Delete secure note?'); append(content,node('p','','This removes the encrypted note from this device.'),button('Delete secure note',async()=>{try {await result(bridge.vaultDelete(item.id));showSettings('Vault');}catch(error){toast(error.message);}}),button('Cancel',()=>showSettings('Vault'))); }
 function confirmReset() { const content=panel('Reset conversations?'); append(content,node('p','','This removes local conversations and additional Bots. Your CLI login, Composio setup, and vault notes are kept.'),button('Reset conversations',async()=>{if(await persist(structuredClone(preview))){selected=workspace.bots[0].id;drafts.clear();render();dialog.close();}}),button('Cancel',()=>showSettings())); }
-function showBotActions(bot) { const content=panel(bot.name); append(content,button('Export conversation…',()=>exportConversation(bot)),!bot.isMain?button('Delete Bot',async()=>{const next=structuredClone(workspace);next.bots=next.bots.filter(x=>x.id!==bot.id);next.entries=next.entries.filter(x=>x.botID!==bot.id);if(await persist(next)){selected=workspace.bots[0]?.id;render();dialog.close();}}):null); }
+function showBotActions(bot){
+ const content=panel(bot.name),folder=node('input','field');folder.value=bot.folder||'';folder.maxLength=80;folder.placeholder='Folder · blank for Unfiled';folder.setAttribute('aria-label','Bot folder');
+ append(content,button(isPinned(bot)?'Unpin Bot':'Pin to top',async()=>{await organize(bot,{isPinned:!isPinned(bot)});dialog.close();}),folder,button('Save folder',async()=>{await organize(bot,{folder:folder.value.trim()});dialog.close();}),button('Change avatar',()=>showAvatarPicker(bot)),button('Export conversation…',()=>exportConversation(bot)));
+ if(!bot.isMain)content.append(button('Delete Bot…',()=>{const confirm=panel(`Delete ${bot.name}?`);append(confirm,node('p','','This removes this Bot and its local conversations.'),button('Delete Bot',async()=>{const next=structuredClone(workspace);next.bots=next.bots.filter(x=>x.id!==bot.id);next.entries=next.entries.filter(x=>x.botID!==bot.id);if(await persist(next)){if(selected===bot.id)selected=workspace.bots[0]?.id;render();dialog.close();}}),button('Cancel',()=>dialog.close()));}));
+}
+function showAvatarPicker(bot){
+ const content=panel('Bot avatar');let draft=structuredClone(bot.appearance||{shape:'hexagon',color:bot.color}),preview=avatar({...bot,appearance:draft});preview.classList.add('avatar-preview');content.append(preview);const refresh=()=>{const next=avatar({...bot,appearance:draft});next.classList.add('avatar-preview');preview.replaceWith(next);preview=next;};
+ const shapes=node('div','avatar-grid');for(const shape of avatarShapes)shapes.append(append(button('',()=>{draft.shape=shape;delete draft.imageData;refresh();}),avatar({appearance:{shape,color:draft.color}})));content.append(shapes);
+ const colors=node('div','colors');for(const[color,hex]of Object.entries(avatarColors)){const swatch=button('',()=>{draft.color=color;delete draft.imageData;refresh();},'color-choice');swatch.style.background=hex;swatch.setAttribute('aria-label',color);colors.append(swatch);}content.append(colors);
+ const upload=node('input','field');upload.type='file';upload.accept='image/png,image/jpeg,image/webp,image/heic';upload.setAttribute('aria-label','Upload avatar image');upload.addEventListener('change',async()=>{try{const file=upload.files[0];if(!file)return;if(file.size>12000000)throw new Error('Choose an image under 12 MB.');const image=await createImageBitmap(file);const canvas=document.createElement('canvas'),scale=Math.min(1,192/Math.max(image.width,image.height));canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);image.close();let data;for(const q of [.8,.6,.4,.2]){data=canvas.toDataURL('image/jpeg',q).split(',')[1];if(data.length<=32768)break;}if(data.length>32768)throw new Error('Choose a smaller image.');draft.imageData=data;refresh();}catch(error){toast(error.message);}});
+ append(content,upload,button('Generate a look',()=>{draft={shape:avatarShapes[Math.floor(Math.random()*avatarShapes.length)],color:Object.keys(avatarColors)[Math.floor(Math.random()*Object.keys(avatarColors).length)]};refresh();}),button('Reset',async()=>{await organize(bot,{appearance:null,color:bot.isMain?'white':'purple'});dialog.close();}),button('Save avatar',async()=>{await organize(bot,{appearance:draft,color:draft.color});dialog.close();},'pill primary'));
+}
 async function exportConversation(bot=currentBot()) { if(!bot)return; const text='OpenGrokBot — Local AI conversation\n\n'+entries(bot).map(x=>`${x.kind==='user'?'You':x.senderName||bot.name}: ${x.text}`).join('\n\n'); try { if(await result(bridge.export(text)))toast('Conversation exported.'); }catch(error){toast(error.message);} }
-$('#composer').addEventListener('submit',async event=>{
-  event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||!text||running.has(bot.id))return;
-  if(!window.desktop){showConnection();return;}
-  if(!setup.installed.length){showConnection();return;}
-  try{workspace=await result(bridge.send(bot.id,text));drafts.delete(bot.id);render();$('#draft').focus();}catch(error){toast(error.message);}
-});
-$('#draft').addEventListener('input',()=>{ drafts.set(selected,$('#draft').value); $('#draft').style.height='auto';$('#draft').style.height=Math.min(180,$('#draft').scrollHeight)+'px'; });
+$('#composer').addEventListener('submit',event=>{event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||!text||running.has(bot.id))return;if(!window.desktop||!setup.installed.length){showConnection();return;}submitMessage(bot,text,pendingSends.get(bot.id)?.text===text?pendingSends.get(bot.id).id:undefined);});
+$('#draft').addEventListener('input',()=>{ drafts.set(selected,$('#draft').value);persistDrafts(); $('#draft').style.height='auto';$('#draft').style.height=Math.min(180,$('#draft').scrollHeight)+'px'; });
 $('#search-button').addEventListener('click',()=>{const slot=$('#search-slot');if(slot.firstChild){slot.replaceChildren();search='';render();return;}const field=node('input','search-input');field.placeholder='Search Bots';field.setAttribute('aria-label','Search Bots');field.addEventListener('input',()=>{search=field.value;render();});slot.append(field);field.focus();});
 $('#new-button').addEventListener('click',showNewBot); $('#profile-button').addEventListener('click',()=>showSettings()); $('#apps-button').addEventListener('click',showApps); $('#status-button').addEventListener('click',()=>showConnection()); $('#attachment-button').addEventListener('click',()=>{const content=panel('Conversation actions');append(content,button('Export conversation…',()=>exportConversation()),button('Attachment status',()=>toast('Paste text into your message. File attachments are not supported yet.')));});
-for(const control of document.querySelectorAll('[data-window]')) control.addEventListener('click',()=>window.desktop?.windowAction(control.dataset.window));
+for(const control of document.querySelectorAll('[data-window]')) control.addEventListener('click',async()=>{if(control.dataset.window==='close'&&bridge.saveDrafts){clearTimeout(draftTimer);try{await result(bridge.saveDrafts(Object.fromEntries(drafts)));}catch(error){toast(error.message);return;}}window.desktop?.windowAction(control.dataset.window);});
 window.addEventListener('blur',()=>{focusGeneration++;for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key==='n'){event.preventDefault();showNewBot();}else if(event.key===','){event.preventDefault();showSettings();}else if(event.key==='f'){event.preventDefault();$('#search-button').click();}else if(event.key==='Enter'&&!dialog.open){event.preventDefault();$('#composer').requestSubmit();}});
-bridge.onChange?.(value=>{workspace=value.workspace;running=new Set(value.running);render();$('#messages').scrollTop=$('#messages').scrollHeight;});
+bridge.onChange?.(value=>{workspace=value.workspace;running=new Set(value.running);render();});
+function showCloudStatus(value){
+ const old=cloudStatus?.phase;cloudStatus=value;let badge=$('#phone-state');if(!badge){badge=button('',()=>showSettings('Computer'),'phone-state');badge.id='phone-state';$('#status-button').before(badge);}badge.textContent=value.phase==='approval-required'?'Approve your iPhone':value.enabled?value.phase==='offline'?'Phone connection offline · retrying':value.phase==='connecting'?'Connecting your iPhone…':'Phone access ready':'Connect your iPhone';badge.title=value.feedback;badge.dataset.state=value.phase;if(value.phase==='approval-required'&&old!==value.phase)toast(value.feedback);
+}
+bridge.onCloudChange?.(showCloudStatus);
+bridge.cloudStatus?.().then(response=>{if(response.ok)showCloudStatus(response.value);}).catch(()=>{});
 try { workspace=await result(bridge.load());selected=workspace.bots[0]?.id; setup=await result(bridge.scanCLIs()); }catch(error){toast(error.message);}
 render();
 
 if(window.desktop&&!setup.complete)showConnection();
+
+bridge.loadDrafts?.().then(response=>{if(response.ok){for(const[id,text]of Object.entries(response.value||{}))if(!drafts.has(id))drafts.set(id,text);render();}}).catch(()=>{});
+if(bridge.checkUpdates&&Date.now()-Number(localStorage.getItem('lastUpdateCheck')||0)>86400000){localStorage.setItem('lastUpdateCheck',String(Date.now()));bridge.checkUpdates().then(response=>{if(response.ok&&response.value.available){toast(`${response.value.version} is available. Open Settings → Updates to download it.`);$('#profile-button').classList.add('update-available');}}).catch(()=>{});}
+document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||event.altKey||dialog.open)return;if(event.key.toLowerCase()==='k'){event.preventDefault();const content=panel('Switch Bot');const field=node('input','field'),results=node('div','switcher-results');field.placeholder='Find a Bot…';field.setAttribute('aria-label','Find a Bot');const draw=()=>{results.replaceChildren();for(const bot of orderedBots().filter(x=>x.name.toLowerCase().includes(field.value.toLowerCase())))results.append(button(bot.name,()=>{dialog.close();selectBot(bot.id);}));};field.addEventListener('input',draw);append(content,field,results);draw();field.focus();}});

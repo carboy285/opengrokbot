@@ -26,12 +26,16 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 final class MacAppModel: ObservableObject {
     let composio = ComposioModel()
     let remote = MacRemoteHost()
+    let updates = DesktopUpdates()
+    @Published var providerHealth: [CLIProvider:String] = [:]
+    @Published var sendFeedback: [UUID:String] = [:]
     @Published var selectedID: UUID?
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
     @Published var showSearch = false
     @Published var showBotInspector = false
-    @Published var drafts: [UUID: String] = [:]
+    @Published var drafts: [UUID: String] = [:] { didSet { scheduleDraftSave() } }
+    private var draftSave: Task<Void,Never>?
     @Published var importFeedback: String?
     @Published var installedCLIs: [InstalledCLI] = []
     @Published var selectedCLIID = UserDefaults.standard.string(forKey: "selectedLocalCLI") ?? ""
@@ -50,8 +54,34 @@ final class MacAppModel: ObservableObject {
     var runs: [UUID:LocalCLIRun] = [:]
     var runOwners: [UUID:UUID] = [:]
 
+    init() {
+        if let data = try? Data(contentsOf: Self.draftURL), let saved = try? JSONDecoder().decode([String:String].self, from: data) {
+            drafts = Dictionary(uniqueKeysWithValues: saved.compactMap { key, value in UUID(uuidString: key).map { ($0, value) } })
+        }
+    }
+    private static var draftURL: URL { WorkspaceStore.application.url.deletingLastPathComponent().appendingPathComponent("drafts.json") }
+    private func scheduleDraftSave() {
+        draftSave?.cancel()
+        draftSave = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(400)); try Task.checkCancellation(); self?.flushDrafts() } catch {}
+        }
+    }
+    func flushDrafts() {
+        do {
+            let values = Dictionary(uniqueKeysWithValues: drafts.filter { !$0.value.isEmpty }.map { ($0.key.uuidString, $0.value) })
+            let data = try JSONEncoder().encode(values)
+            try FileManager.default.createDirectory(at: Self.draftURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: Self.draftURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Self.draftURL.path)
+        } catch { setupFeedback = "Your draft is visible but could not be saved. Check available storage before quitting." }
+    }
     func selectFirst(in app: AppModel) {
         if selectedID == nil { selectedID = app.workspace.bots.first?.id }
+    }
+    func cycleBot(_ direction: Int, app: AppModel) {
+        let bots = app.visibleBots; guard !bots.isEmpty else { return }
+        let index = bots.firstIndex(where: { $0.id == selectedID }) ?? 0
+        selectedID = bots[(index + direction + bots.count) % bots.count].id
     }
     func selected(in app: AppModel) -> Bot? {
         app.workspace.bots.first { $0.id == selectedID } ?? app.workspace.bots.first
@@ -146,9 +176,11 @@ extension MacAppModel {
             if cli.provider == .codex {
                 let status = await Task.detached { CLIInstallationScanner.capture(path: cli.path, arguments: ["login", "status"], timeout: 12).exit }.value
                 loginVerified = status == 0
+                providerHealth[cli.provider] = loginVerified ? "Signed in" : "Needs sign-in"
                 setupFeedback = loginVerified ? "Codex is signed in and ready." : "Sign in using codex login in Terminal, then check again."
             } else {
                 loginVerified = true
+                providerHealth[cli.provider] = "Configured · verify by sending a message"
                 setupFeedback = "This CLI uses its own saved provider configuration. Authentication will be verified when you send your first message."
             }
             checkingLogin = false
@@ -168,9 +200,10 @@ extension MacAppModel {
             deliverQueuedMessages(app: app); return true
         }
         let providers = providersToRun(for: bot)
-        guard !providers.isEmpty else { showBotInspector = true; return false }
-        guard !runningBots.contains(bot.id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        guard app.addNote(text, to: bot, id: requestID) else { return false }
+        guard !providers.isEmpty else { sendFeedback[bot.id] = "Choose an installed provider in Bot details, or open AI CLI setup."; showBotInspector = true; return false }
+        guard !runningBots.contains(bot.id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 100000 else { sendFeedback[bot.id] = "Stop the current response first, and keep messages under 100,000 characters."; return false }
+        guard app.addNote(text, to: bot, id: requestID) else { sendFeedback[bot.id] = app.errorMessage ?? "The message could not be saved. Your draft was kept."; return false }
+        sendFeedback[bot.id] = nil
         for provider in providers { startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app) }
         return true
     }
@@ -228,7 +261,7 @@ extension MacAppModel {
                 let stopped = Task.isCancelled || (error as? CLIError) == .stopped
                 let message = stopped ? "Response stopped." : ((error as? CLIError)?.errorDescription ?? "The CLI could not start. Check its executable path and sign-in in setup.")
                 app.finishReply(replyID, state: stopped ? .stopped : .failed, message: message)
-                if !stopped { runErrors[bot.id] = message }
+                if !stopped { runErrors[bot.id] = message; providerHealth[cli.provider] = (error as? CLIError) == .notLoggedIn ? "Needs sign-in" : "Last message failed · open setup" }
                 if let delivery { app.finishDelivery(delivery, status: stopped ? .stopped : .failed) }
             }
             tasks[replyID] = nil; runs[replyID] = nil; runOwners[replyID] = nil

@@ -7,6 +7,9 @@ final class MacRemoteHost: ObservableObject {
     let account: CloudAccount
     @Published private(set) var enabled = false
     @Published private(set) var feedback: String?
+    @Published private(set) var connectionState = "Signed out"
+    @Published private(set) var lastHeartbeat: Date?
+    @Published private(set) var lastPhoneRequest: Date?
     @Published var pendingPhoneApproval: CloudDevice?
     private let preferences: UserDefaults
     private var revision = UUID().uuidString
@@ -45,17 +48,18 @@ final class MacRemoteHost: ObservableObject {
     }
     func start() {
         guard account.signedIn, app != nil, !enabled else { return }
-        enabled = true; preferences.set(true,forKey:"cloudHostEnabled"); feedback = "Connecting to your account…"
+        enabled = true; preferences.set(true,forKey:"cloudHostEnabled"); feedback = "Connecting to your account…"; connectionState = "Connecting"
         polling = Task { [weak self] in
             var nextHeartbeat = Date.distantPast
             var lastRequest = Date.distantPast
+            var retryDelay = 1000
             while !Task.isCancelled {
                 guard let self, self.enabled else { return }
                 var retrying = false
                 do {
                     if Date() >= nextHeartbeat {
                         try await self.account.sync(available:true)
-                        nextHeartbeat = Date().addingTimeInterval(20)
+                        nextHeartbeat = Date().addingTimeInterval(20); self.lastHeartbeat = Date()
                     }
                     let packets = try await self.account.poll()
                     if !packets.isEmpty { lastRequest = Date() }
@@ -75,12 +79,14 @@ final class MacRemoteHost: ObservableObject {
                             if self.pendingPhoneApproval == nil, self.promptedPhones.insert(peer.id).inserted {
                                 self.pendingPhoneApproval = peer
                             }
+                            self.connectionState = "Waiting for phone approval"
                             let denied = RemoteHostResponse.error(403,"Approve this phone in Mac Settings → Computer. Compare its fingerprint before approving.")
                             try? await self.account.send(CloudCoding.encoder().encode(CloudResponse(status:denied.status,body:denied.body)),to:peer,id:packet.id,kind:"response")
                             try? await self.account.acknowledge(packet); continue
                         }
                         do {
                             let data = try self.account.decrypt(packet,peer:peer)
+                            self.lastPhoneRequest = Date(); self.connectionState = "Connected"
                             guard packet.kind == "request" else { throw CloudError.invalidPacket }
                             let cacheKey = peer.id.uuidString + packet.id.uuidString
                             let response: CloudResponse
@@ -97,10 +103,12 @@ final class MacRemoteHost: ObservableObject {
                             try await self.account.acknowledge(packet)
                         } catch { try? await self.account.acknowledge(packet) }
                     }
-                    let message = "Phone access is on. Approve a phone below to allow control."
+                    if self.connectionState != "Waiting for phone approval" { self.connectionState = self.lastPhoneRequest.map { Date().timeIntervalSince($0) < 10 ? "Connected" : "Ready for approved phones" } ?? "Ready for approved phones" }
+                    let message = self.connectionState == "Waiting for phone approval" ? "Compare the phone’s fingerprint below, then choose Approve phone." : "Phone access is ready. Keep this Mac awake."
+                    retryDelay = 1000
                     if self.feedback != message { self.feedback = message }
-                } catch { self.feedback = error.localizedDescription; nextHeartbeat = .distantPast; retrying = true }
-                let interval: Duration = retrying ? .seconds(2) : Date().timeIntervalSince(lastRequest) < 10 ? .milliseconds(250) : .milliseconds(700)
+                } catch { if Task.isCancelled || !self.enabled { return }; self.connectionState = "Offline · retrying"; self.feedback = error.localizedDescription; nextHeartbeat = .distantPast; retrying = true; retryDelay = min(15000, retryDelay * 2) }
+                let interval: Duration = retrying ? .milliseconds(retryDelay) : Date().timeIntervalSince(lastRequest) < 10 ? .milliseconds(250) : .milliseconds(700)
                 try? await Task.sleep(for: interval)
             }
         }
@@ -109,13 +117,20 @@ final class MacRemoteHost: ObservableObject {
         enabled = false; polling?.cancel(); polling = nil; baselines = [:]; replies = [:]
         pendingPhoneApproval = nil
         if persistPreference { preferences.set(false,forKey:"cloudHostEnabled") }
-        feedback = "Phone access is off."
+        feedback = "Phone access is off."; connectionState = account.signedIn ? "Phone access off" : "Signed out"
         // The registered host expires as offline even if this update cannot reach the network.
         Task { if !enabled, account.signedIn { try? await account.sync(available:false) } }
+    }
+    func reconnect() { guard account.signedIn else { return }; stop(persistPreference: false); start() }
+    var diagnostics: String {
+        let formatter = ISO8601DateFormatter()
+        let values: [String: String] = ["state": connectionState, "phoneAccess": String(enabled), "lastHeartbeat": lastHeartbeat.map(formatter.string(from:)) ?? "none", "lastPhoneRequest": lastPhoneRequest.map(formatter.string(from:)) ?? "none", "approvedPhones": String(account.controllers.filter { account.approved($0) }.count)]
+        return (try? String(data: JSONEncoder().encode(values), encoding: .utf8)) ?? "Connection diagnostics unavailable."
     }
     func approve(_ device: CloudDevice, allowed: Bool) {
         do {
             try account.approve(device,allowed:allowed); baselines[device.id] = nil; replies = [:]
+            connectionState = enabled ? "Ready for approved phones" : "Phone access off"
             if pendingPhoneApproval?.id == device.id { pendingPhoneApproval = nil }
         }
         catch { feedback = error.localizedDescription }

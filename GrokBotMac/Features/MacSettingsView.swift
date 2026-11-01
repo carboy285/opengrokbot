@@ -25,7 +25,7 @@ struct MacSettingsView: View {
                     }.buttonStyle(.plain).accessibilityAddTraits(desktop.settingsTab == tab ? [.isSelected] : [])
                 }
                 Spacer()
-                Text("OpenGrokBot 0.6.0").font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
+                Text("OpenGrokBot \(desktop.updates.current)").font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
             }
             .padding(16).padding(.top, 6).frame(width: 238).background(MacTheme.sidebar)
             Rectangle().fill(MacTheme.line).frame(width: 1)
@@ -77,7 +77,7 @@ struct MacSettingsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(MacTheme.line))
             section("Account") {
                 HStack(spacing: 16) {
-                    Text("LP").font(.system(size: 21)).foregroundStyle(MacTheme.secondary)
+                    Text(String(profileName.prefix(2)).uppercased()).font(.system(size: 21)).foregroundStyle(MacTheme.secondary)
                         .frame(width: 56, height: 56).background(MacTheme.raised, in: Circle())
                     VStack(alignment: .leading, spacing: 6) {
                         TextField("Display name", text: $profileName).textFieldStyle(.plain).font(.system(size: 17))
@@ -115,7 +115,7 @@ struct MacSettingsView: View {
 
     private var computer: some View {
         Group {
-            unavailable(title: "AI runs from this Mac", detail: "This app launches the installed CLI on this Mac. Each Bot has a separate working folder and saved CLI session. Cloud computer control is not part of this local version.", icon: "desktopcomputer")
+            unavailable(title: "AI runs from this Mac", detail: "This app launches the installed CLI on this Mac. Each Bot has a separate working folder and saved CLI session. Approved iPhones can control this workspace using the same account.", icon: "desktopcomputer")
             MacRemoteAccessView(remote: desktop.remote)
             section("This Mac") {
                 VStack(spacing: 0) {
@@ -126,12 +126,7 @@ struct MacSettingsView: View {
         }
     }
 
-    private var updates: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            unavailable(title: "OpenGrokBot 0.6.0", detail: "Install a new build from this project’s release artifacts. This build does not modify or update the official Grok Bot application.", icon: "arrow.down.circle")
-            MacPillButton(title: "Open project") { openDocumentation("https://github.com/carboy285/opengrokbot") }
-        }
-    }
+    private var updates: some View { DesktopUpdatesView(updates: desktop.updates) }
 
     private func unavailable(title: String, detail: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {

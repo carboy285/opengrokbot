@@ -1,12 +1,14 @@
 # Development downloads
 
-## Latest iPhone layout source
+## Latest desktop and iPhone source
 
-[Download the latest Xcode project](https://github.com/carboy285/opengrokbot/archive/refs/heads/codex/macos-client.zip) for **0.6.6 (build 7)**. This source update includes pinned Bot tiles, a floating search bar, glass navigation controls, rounded avatars and chat bubbles, and shorter connection polling waits. Open `GrokBot.xcodeproj`, select the **GrokBot** scheme and your iPhone, then choose **Product → Run** to replace the installed app. In the iPhone app, open **Settings** and confirm that **App version** shows **0.6.6**. Unzipping the project alone does not update the installed app.
+[Download the latest source/Xcode project](https://github.com/carboy285/opengrokbot/archive/refs/heads/codex/macos-client.zip) for **0.7.0 (build 8)**. See [Desktop workspace 0.7](DESKTOP_0_7.md) for the Mac/Windows changes, phone connection setup, signing requirements, and verification limits.
 
-Long-press any Bot to **Pin to top** or **Unpin Bot**, or use the button in Bot details. Pins are saved on this iPhone separately for each account and Mac. Pinned tiles have no arrows and open conversations, just like unpinned rows. Only the avatar/name tile is tappable; empty space beside a single pinned Bot does not open its chat. Use the long-press menu or the chat title to open Bot details. The chat header has no full-width blurred background. The composer sits closer to the bottom safe area, with the redundant host caption removed. The attachment, send, and stop buttons follow the Bot’s avatar color. The send and stop buttons have full 48-point tap areas, the decorative composer background ignores taps, and sending completes on the Mac’s acknowledgment instead of waiting for a second workspace refresh. The main assistant is initially pinned. The phone remembers its Mac for a direct reconnect; the new Mac source also polls more frequently while the phone is active. Update both apps from this project for all latency changes.
+Windows now implements the account relay used by iPhone and Mac. Both desktops include persistent Bot pins/folders, drag ordering, avatar customization, draft recovery, better provider feedback, and update notifications. The iPhone retains the redesigned chat and roster, avatar-colored controls, corrected tap targets, and lower composer.
 
-Version 0.6.6 has not been compiled or tested at the user's request. Connection latency and appearance on a physical phone remain unverified. The versioned 0.6.1 DMG and ZIP below predate this update.
+For iPhone, open `GrokBot.xcodeproj`, choose **GrokBot** and your iPhone, keep your existing signing team and bundle identifier, and choose **Product → Run**. Confirm **Settings → App version: 0.7.0** afterward. For Mac, choose **GrokBotMac**; for Windows, use the desktop installer or build with `npm ci` and `npm run dist:windows`.
+
+Unit, UI, database, protocol-interoperability, and physical-device checks have not been run for this update, at the user's request. Build/package results will be recorded with published downloads. Trusted installer signing requires the owner’s certificates and credentials; development builds are labeled accordingly.
 
 ## Published Apple downloads
 

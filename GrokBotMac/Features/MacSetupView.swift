@@ -67,6 +67,7 @@ struct MacSetupView: View {
             Text("We look for installed CLIs on this Mac. You can switch providers later without mixing their saved conversations.").foregroundStyle(MacTheme.secondary)
             ForEach(CLIProvider.allCases) { candidate in
                 let found = desktop.installedCLIs.first { $0.provider == candidate }
+                if let health = desktop.providerHealth[candidate] { Text("\(candidate.name): \(health)").font(.caption).foregroundStyle(.secondary) }
                 Button { provider = candidate } label: {
                     HStack(spacing: 14) {
                         Image(systemName: "terminal").font(.system(size: 21)).frame(width: 31)

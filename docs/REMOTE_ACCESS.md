@@ -1,6 +1,6 @@
 # Connect iPhone to Mac with one account
 
-Use the **0.6.0 Mac app and iOS sources together**. The iPhone controls the Mac's existing workspace: Bots, chats, models, memory and running CLI tasks. It never creates or saves a separate phone workspace. The Windows 0.5.0 host uses the older pairing protocol and is not compatible with this account-based controller yet.
+Use the **0.7.0 desktop app and matching iOS sources together**. The iPhone controls the Mac's existing workspace: Bots, chats, models, memory and running CLI tasks. It never creates or saves a separate phone workspace. Windows 0.7.0 uses the same encrypted account relay; open Windows Settings → Computer to sign in and approve the phone.
 
 ## Connect
 

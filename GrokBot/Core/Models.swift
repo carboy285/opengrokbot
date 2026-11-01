@@ -11,6 +11,9 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var memory: [String]? = nil
     var memberIDs: [UUID]? = nil
     var appearance: BotAppearance? = nil
+    var isPinned: Bool? = nil
+    var folder: String? = nil
+    var sortOrder: Int? = nil
 }
 
 struct BotAppearance: Codable, Hashable, Sendable {
@@ -37,6 +40,7 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var provider: String? = nil
     var senderBotID: UUID? = nil
     var senderName: String? = nil
+    var delivery: String? = nil
     let date: Date
 
     init(botID: UUID, kind: Kind, text: String, id: UUID = UUID()) {
