@@ -6,8 +6,8 @@ enum TailscaleHosting {
         let candidates = CLIInstallationScanner.environment["PATH", default: ""].split(separator: ":").map { String($0) + "/tailscale" } + ["/Applications/Tailscale.app/Contents/MacOS/Tailscale"]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
-    static func configure(localPort: UInt16, funnel: Bool) -> String? {
-        guard let path = executable else { return nil }
+    static func configure(localPort: UInt16, funnel: Bool, executablePath: String? = nil) -> String? {
+        guard let path = executablePath ?? executable else { return nil }
         let result = CLIInstallationScanner.capture(path: path, arguments: ["status","--json"], timeout: 10, limit: 65536)
         guard result.exit == 0, let object = object(result.text), let info = object["Self"] as? [String:Any],
               let raw = info["DNSName"] as? String else { return nil }
@@ -20,9 +20,10 @@ enum TailscaleHosting {
         guard allowed == funnel else { return nil }
         return "https://\(host):8443"
     }
-    static func remove(localPort: UInt16, address: String, funnel: Bool) -> Bool {
-        guard let path = executable, let host = URL(string: address)?.host, let current = status(path) else { return false }
+    static func remove(localPort: UInt16, address: String, funnel: Bool, executablePath: String? = nil) -> Bool {
+        guard let path = executablePath ?? executable, let host = URL(string: address)?.host, let current = status(path) else { return false }
         guard proxy(current, host: host) == "http://127.0.0.1:\(localPort)" else { return true }
+        guard available(current, host: host, port: localPort) else { return false }
         return CLIInstallationScanner.capture(path: path, arguments: [funnel ? "funnel" : "serve", "--https=8443", "off"], timeout: 10).exit == 0
     }
     private static func status(_ path: String) -> [String:Any]? {
@@ -33,11 +34,13 @@ enum TailscaleHosting {
     private static func proxy(_ config: [String:Any], host: String) -> String? {
         let web = config["Web"] as? [String:Any], server = web?[host + ":8443"] as? [String:Any]
         let handlers = server?["Handlers"] as? [String:Any], root = handlers?["/"] as? [String:Any]
-        return root?["Proxy"] as? String
+        return (root?["Proxy"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
     private static func available(_ config: [String:Any], host: String, port: UInt16) -> Bool {
-        let tcp = config["TCP"] as? [String:Any]
-        guard tcp?["8443"] != nil else { return true }
+        let tcp = config["TCP"] as? [String:Any], web = config["Web"] as? [String:Any] ?? [:]
+        let hosts = web.keys.filter { $0.hasSuffix(":8443") }
+        if tcp?["8443"] == nil && hosts.isEmpty { return true }
+        guard hosts.count == 1, hosts[0] == host + ":8443", let server = web[hosts[0]] as? [String:Any], let handlers = server["Handlers"] as? [String:Any], handlers.count == 1, handlers["/"] != nil else { return false }
         return proxy(config, host: host) == "http://127.0.0.1:\(port)"
     }
 }

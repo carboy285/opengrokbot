@@ -51,4 +51,6 @@ The application is free and open source. AI inference and Composio usage follow 
 
 ## iPhone
 
-iOS cannot spawn a desktop CLI. This version includes the native iOS interface and desktop setup guide, but **secure desktop host pairing is not yet implemented**. Use the Mac or Windows app for chat. No iPhone chat response is simulated.
+iOS controls the desktop app instead of running a separate assistant. In desktop **Settings → Computer → iPhone remote control**, choose Tailscale, Funnel, Wi-Fi/private IP, or your HTTPS proxy; enable access and copy the pairing link. Open it on your iPhone, or paste it into **Connect Desktop**. Allow local-network access when using Wi-Fi.
+
+The desktop keeps its Bots, models, memories, files and work; the phone shows that same state and sends control commands. Keep the host awake with OpenGrokBot running. Work continues while the phone is disconnected, and the phone reconnects when reopened or its network returns. See [Remote access](REMOTE_ACCESS.md) for the full connection guide, transport choices, key revocation and troubleshooting.

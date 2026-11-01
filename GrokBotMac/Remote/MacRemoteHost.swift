@@ -44,11 +44,11 @@ final class MacRemoteHost: ObservableObject {
         desktop.$runningBots.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$installedCLIs.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$selectedCLIID.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
-        if preferences.bool(forKey: "remoteEnabled") { ownedRoute = nil; start() }
+        if preferences.bool(forKey: "remoteEnabled") { start(restoring: true) }
     }
-    func start() {
+    func start(restoring: Bool = false) {
         guard !enabled, !changing, app != nil else { return }
-        if ownedRoute != nil { feedback = "Remove the previous Tailscale route before enabling a different connection."; return }
+        if ownedRoute != nil && !restoring { feedback = "Remove the previous Tailscale route before enabling a different connection."; return }
         do {
             if let data = try secrets.read(account: "pairing"), let saved = String(data: data, encoding: .utf8), saved.range(of:"^[A-Za-z0-9_-]{43,128}$",options:.regularExpression) != nil { token = saved }
             else { try replaceToken() }

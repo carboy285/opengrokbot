@@ -459,6 +459,7 @@
 				"25695E05473B546209A5645E",
 				"E2867CB36EA999F4EEF74337",
 				"30A9DB59419819CB84737FA0",
+				"9AED15F6C91A8F0F17210EB9",
 			);
 			"name" = "GrokBotTests";
 			"sourceTree" = "<group>";
@@ -955,6 +956,7 @@
 				"24767BD2BEDC50F4E47136C8",
 				"EC93B56BDEE035C7E39628B2",
 				"0CA84F3F6CAD3C302EABB46E",
+				"23C7BC51FC3F6CA70DA54FDE",
 				"CABA21E860827AEDC2F53D27",
 				"1C8A428177FFEC3112760792",
 				"1CFFF7044FC951B673B5C515",
@@ -1552,6 +1554,16 @@
 		"1C8A428177FFEC3112760792" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "30A9DB59419819CB84737FA0";
+		};
+		"9AED15F6C91A8F0F17210EB9" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotTests/MacTailscaleTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"23C7BC51FC3F6CA70DA54FDE" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9AED15F6C91A8F0F17210EB9";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";

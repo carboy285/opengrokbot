@@ -12,7 +12,7 @@ struct SettingsView: View {
                     HStack(spacing:16) { BotAvatar(size:42); VStack(alignment:.leading,spacing:4) { Text("OpenGrokBot").font(.headline);Text("Your desktop controller").font(.caption).foregroundStyle(.secondary) } }.padding(.vertical,8)
                     LabeledContent("Host",value:remote.hostName)
                     Text(remote.status).font(.footnote).foregroundStyle(.secondary)
-                    Button("Connect / change desktop") { dismiss(); remote.showPairing = true }
+                    Button("Connect / change desktop") { dismiss(); Task { try? await Task.sleep(for:.milliseconds(500)); remote.showPairing = true } }
                     if remote.hasSnapshot { Button("Disconnect this iPhone",role:.destructive) { disconnect = true } }
                 } footer: { Text("Disconnecting this phone leaves desktop Bots, conversations and running work in place.") }
                 Section("Appearance") { Picker("Theme",selection:$appearance) { Text("Follow system").tag("system");Text("Dark").tag("dark");Text("Light").tag("light") } }

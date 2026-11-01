@@ -41,6 +41,8 @@ final class RemoteController: ObservableObject {
         busy = true; defer { busy = false }
         do {
             let pairing = try RemotePairing(link: link.trimmingCharacters(in: .whitespacesAndNewlines))
+            let host = pairing.baseURL.host?.trimmingCharacters(in:CharacterSet(charactersIn:"[]")) ?? ""
+            guard host != "localhost", host != "::1", !host.hasPrefix("127.") else { throw RemoteError.rejected("That address points at this iPhone. Copy the desktop’s Wi-Fi IP or Tailscale HTTPS pairing link instead.") }
             guard let snapshot = try await client.snapshot(pairing, since: nil) else { throw RemoteError.incompatible }
             try secrets.save(JSONEncoder().encode(pairing), account: "desktop")
             polling?.cancel(); connection = pairing; revision = nil; sequence = 0; appliedSequence = 0

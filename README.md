@@ -1,6 +1,6 @@
 # OpenGrokBot
 
-A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS target is included, but desktop host pairing for iPhone chat is not implemented yet.
+A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS app remotely controls the same desktop workspace through authenticated Tailscale, Funnel, Wi-Fi/private IP, or your own HTTPS proxy.
 
 Start with **one empty assistant named Grok Bot**. There are no seeded conversations or extra Bots. Ask Grok Bot to create specialists, or add your own Bots when you want separate conversations.
 
@@ -24,9 +24,15 @@ The app is free. AI providers, local model configurations, and Composio have the
 | --- | --- | --- |
 | macOS 14+ | Native SwiftUI/AppKit; Liquid Glass on macOS 26, material fallback earlier | Universal `.app` in a drag-to-Applications `.dmg` |
 | Windows x64 | Electron with an isolated, sandboxed renderer | NSIS Setup `.exe` |
-| iOS 18+ | Native SwiftUI roster and setup guidance | Xcode project; no desktop host bridge yet |
+| iOS 18+ | Native SwiftUI remote controller for the desktop’s Bots/chats/models | Xcode project; pair through a desktop connection link |
 
 The development Mac build is ad-hoc signed and not notarized. The Windows build is unsigned. iPhone device installation requires your own signing team. See the [Mac](docs/MACOS.md), [Windows](docs/WINDOWS.md), and [iPhone](docs/DEVICE_SETUP.md) guides.
+
+## iPhone remote control
+
+In desktop **Settings → Computer → iPhone remote control**, choose private Tailscale, public Funnel HTTPS, trusted Wi-Fi/private IP, or your own HTTPS proxy. Enable access and copy its pairing link. Open the link on the iPhone or paste it into **Connect Desktop** in the iOS app. Tailscale private access needs both devices on your tailnet; Funnel works without Tailscale on the phone. Keep the host awake with OpenGrokBot running.
+
+The phone controls the same Bots, chats, memories, active models and running tasks; it does not save an independent local workspace. Work continues when the phone disconnects. The controller reconnects after network changes and suppresses duplicate sends after a lost acknowledgment. Every request needs a revocable random pairing key, stored in Keychain/Windows device encryption. Direct Wi-Fi HTTP is an explicit unencrypted option for trusted private networks; public endpoints require HTTPS. See the [connection guide](docs/REMOTE_ACCESS.md).
 
 ## Bots, models and teamwork
 
@@ -93,7 +99,7 @@ CHROMIUM_PATH=/path/to/chromium npm run test:ui
 
 Native CI compiles Apple targets, runs XCTest, builds the universal DMG, captures actual Mac windows, and builds/tests the Windows app and installer. Tests include real fixture subprocesses, saved-session resumption, Unicode replies, Composio request contracts, MCP JSON/SSE transport, secret redaction, persistence, and encryption. Test fixtures are separate from production replies.
 
-Live model inference and Composio OAuth/tool execution require configured user accounts. A Composio project key was not supplied during implementation, so live authorization and tool execution are unverified. Voice, file attachments, a built-in cloud computer, and iPhone host pairing are not implemented. See [verification details](docs/VERIFICATION.md).
+Live model inference and Composio OAuth/tool execution require configured user accounts. A Composio project key was not supplied during implementation, so live authorization and tool execution are unverified. Voice, file attachments, a built-in cloud computer, remote screen sharing, and power/wake management are not implemented. Actual user-account Tailscale/Funnel and physical-phone roaming have not been exercised in this implementation environment. See [verification details](docs/VERIFICATION.md).
 
 ## License
 

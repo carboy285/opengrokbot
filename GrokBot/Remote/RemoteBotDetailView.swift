@@ -4,6 +4,7 @@ struct RemoteBotDetailView: View {
     let botID: UUID
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var remote: RemoteController
+    @Environment(\.dismiss) private var dismiss
     @State private var tab = "Details"
     @State private var provider = CLIProvider.codex
     @State private var modelID = ""
@@ -60,7 +61,7 @@ struct RemoteBotDetailView: View {
                         Label(remote.hostName,systemImage:"desktopcomputer").font(.headline)
                         Text(remote.status).foregroundStyle(.secondary)
                         Text("This iPhone is a controller. CLI sessions, files and work stay on the desktop and continue when the phone disconnects.").font(.footnote).foregroundStyle(.secondary)
-                        Button("Connection settings") { remote.showPairing = true }
+                        Button("Connection settings") { dismiss(); Task { try? await Task.sleep(for:.milliseconds(500)); remote.showPairing = true } }
                     }
                 } else { Text("This Bot was removed on the desktop.").foregroundStyle(.secondary) }
             }.padding(24)
