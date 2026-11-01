@@ -430,6 +430,7 @@
 				"2F26E97E91A334FDC303CAE8",
 				"DB2AB786C58F8ECA95F8A1CE",
 				"BA52E79E515061E9B6B99C72",
+				"724BE92F39477F5EF78124E7",
 			);
 			"name" = "GrokBotTests";
 			"sourceTree" = "<group>";
@@ -883,6 +884,7 @@
 				"C8F0B97E774109CCB65823EB",
 				"28C6BBB4D6021F6DB62AB59D",
 				"0126694C861E25269C743807",
+				"CABA21E860827AEDC2F53D27",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -909,6 +911,16 @@
 			"productName" = "GrokBotMacTests";
 			"productReference" = "9B6121C65A466ACFE6B2F313";
 			"productType" = "com.apple.product-type.bundle.unit-test";
+		};
+		"724BE92F39477F5EF78124E7" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotTests/MacVisualTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"CABA21E860827AEDC2F53D27" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "724BE92F39477F5EF78124E7";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";

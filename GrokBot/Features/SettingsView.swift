@@ -29,12 +29,12 @@ struct SettingsView: View {
                     }
                 }
                 if model.previewEnabled {
-                    Section("Offline preview") {
+                    Section {
                         LabeledContent("Storage", value: "On this device")
                         LabeledContent("Preview Bots", value: "\(model.workspace.bots.count)")
                         Button("Leave preview") { model.leavePreview(); dismiss() }
                         Button("Reset preview data", role: .destructive) { reset = true }
-                    } footer: { Text("Leaving preview keeps local notes. Reset replaces preview Bots and notes with the example workspace.") }
+                    } header: { Text("Offline preview") } footer: { Text("Leaving preview keeps local notes. Reset replaces preview Bots and notes with the example workspace.") }
                 }
                 Section("Learn more") {
                     Link(destination: URL(string: "https://docs.x.ai/grok-bot/overview")!) { Label("Official Grok Bot documentation", systemImage: "arrow.up.right.square") }

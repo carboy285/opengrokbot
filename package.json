@@ -10,7 +10,8 @@
     "start:windows": "electron .",
     "test:desktop": "node --test desktop-windows/app/*.test.cjs",
     "dist:windows": "electron-builder --win nsis --x64",
-    "preview:desktop": "python3 -m http.server 4173 --bind 127.0.0.1 --directory desktop-windows/renderer"
+    "preview:desktop": "python3 -m http.server 4173 --bind 127.0.0.1 --directory desktop-windows/renderer",
+    "test:ui": "node scripts/test-desktop-ui.cjs"
   },
   "devDependencies": {
     "electron": "45.2.1",
@@ -20,9 +21,20 @@
   "build": {
     "appId": "org.opengrokbot.windows",
     "productName": "OpenGrokBot",
-    "directories": { "output": "artifacts/windows" },
-    "files": ["desktop-windows/app/**/*", "desktop-windows/renderer/**/*", "package.json"],
-    "win": { "target": ["nsis"], "signAndEditExecutable": false },
+    "directories": {
+      "output": "artifacts/windows"
+    },
+    "files": [
+      "desktop-windows/app/**/*",
+      "desktop-windows/renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,

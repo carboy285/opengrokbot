@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   macos:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Select newest installed Xcode
@@ -30,6 +30,8 @@ jobs:
           -configuration Debug -destination 'platform=macOS'
           -resultBundlePath artifacts/macos-tests.xcresult
           CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
+      - name: Export native view screenshots
+        run: xcrun xcresulttool export attachments --path artifacts/macos-tests.xcresult --output-path artifacts/visuals
       - name: Build universal app and DMG
         run: ./scripts/build-macos.sh
       - uses: actions/upload-artifact@v4
@@ -40,4 +42,22 @@ jobs:
             artifacts/macos/*.dmg
             artifacts/macos/*.sha256
             artifacts/macos-tests.xcresult
+            artifacts/visuals
           if-no-files-found: warn
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:desktop
+      - run: npm run dist:windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenGrokBot-Windows
+          path: artifacts/windows/*Setup.exe
+          if-no-files-found: error

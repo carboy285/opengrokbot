@@ -46,6 +46,7 @@ add_to_group(uid('appgroup'), [uid(glass)])
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
 shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift',glass]
 tests = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotTests').glob('*.swift'))
+add_to_group(uid('testgroup'), [reference(p) for p in tests])
 for path in mac_sources: reference(path)
 for path, kind in [('GrokBotMac/Resources/Info.plist','text.plist.xml'),('GrokBotMac/Resources/GrokBotMac.entitlements','text.plist.entitlements'),('GrokBotMac/Resources/AppIcon.icns','image.icns')]: reference(path,kind)
 mac_id=uid('mac-target'); test_id=uid('mac-test-target')
