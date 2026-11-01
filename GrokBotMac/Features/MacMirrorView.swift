@@ -60,7 +60,7 @@ struct MacMirrorView: View {
         .background(MacTheme.canvas)
         .task { remote.account.useAccount(from: source); remote.attach(workspace); remote.setActive(true) }
         .onDisappear { remote.setActive(false) }
-        .onChange(of: selected) { old, _ in if let old { remote.drafts[old] = draft }; draft = selected.flatMap { remote.drafts[$0] } ?? ""; follow = true; if let id = selected { Task { _ = await remote.command(RemoteCommand(action: "touch_bot", botID: id)) } } }
+        .onChange(of: selected) { old, _ in if let old { remote.drafts[old] = draft }; draft = selected.flatMap { remote.drafts[$0] } ?? ""; follow = true; if let id = selected, remote.online { Task { _ = await remote.command(RemoteCommand(action: "touch_bot", botID: id)) } } }
         .onChange(of: remote.account.session?.user.id) { _, _ in selected = nil; draft = "" }
         .alert("Remote workspace", isPresented: Binding(get: { remote.error != nil }, set: { if !$0 { remote.error = nil } })) { Button("OK") { remote.error = nil } } message: { Text(remote.error ?? "") }
         .sheet(isPresented: $browser) { if let bot { CloudBrowserView(botID: bot.id, remote: remote).frame(width: 900, height: 700) } }

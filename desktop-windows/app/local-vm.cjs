@@ -26,7 +26,7 @@ class LocalVMs{
     const password=randomBytes(24).toString('base64url');
     await this.run(['createvm','--name',name,'--ostype','Ubuntu_64','--basefolder',folder,'--register']);
     this.records[bot.id]={name,state:'configuring',username:'bot',password:safeStorage.encryptString(password).toString('base64')};await this.save(this.records);
-    await this.run(['modifyvm',name,'--memory','4096','--cpus','2','--nic1','nat','--clipboard-mode','disabled','--drag-and-drop','disabled','--graphicscontroller','vmsvga']);
+    await this.run(['modifyvm',name,'--memory','4096','--cpus','2','--nic1','nat','--clipboard-mode','disabled','--drag-and-drop','disabled','--graphicscontroller','vmsvga','--vram','128','--ioapic','on']);
     await this.run(['storagectl',name,'--name','SATA','--add','sata','--controller','IntelAhci']);
     const disk=path.join(folder,'linux.vdi');await this.run(['createmedium','disk','--filename',disk,'--size','32768','--format','VDI']);
     await this.run(['storageattach',name,'--storagectl','SATA','--port','0','--device','0','--type','hdd','--medium',disk]);
