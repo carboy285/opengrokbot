@@ -24,6 +24,8 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>OpenGrokBot shares only the selected Bot’s UTM virtual machine window with your approved devices when you enable remote VM viewing.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>OpenGrokBot uses UTM to create and open a separate Linux virtual machine for each Bot when you choose VM setup.</string>
 	<key>NSHighResolutionCapable</key>

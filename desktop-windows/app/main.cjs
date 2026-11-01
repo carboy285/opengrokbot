@@ -168,7 +168,7 @@ const cloud = new CloudHost({
  pins:()=>state.bots.map(bot=>({bot_id:bot.id,is_pinned:bot.isPinned??!!bot.isMain,explicit:typeof bot.isPinned==='boolean'})),
  applyPins:async rows=>{let changed=false;for(const row of rows){const bot=state.bots.find(bot=>bot.id.toLowerCase()===row.bot_id.toLowerCase());if(bot&&(bot.isPinned??!!bot.isMain)!==row.is_pinned){bot.isPinned=row.is_pinned;changed=true;}}if(changed){await atomicJSON('preview-workspace.json',state);notify();}},
  snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
- browser:id=>localBrowsers.preview(id),
+ browser:async id=>{try{return await localBrowsers.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},vm:async id=>{try{return await localVMs.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
  changed:status=>{mirror.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
 });
@@ -215,7 +215,7 @@ function configureIPC() {
  handle('vm:credentials',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.credentials(id);}catch(error){throw new PublicError(error.message);}});
  handle('browser:open',async(id,address)=>{await ensureState();try{localBrowsers.open(id,address);return true;}catch(error){throw new PublicError(error.message);}});
  handle('workspace:mirror',async()=>{await ensureState();if(!cloud.data.session)throw new PublicError('Sign in under Settings → Computer first.');openMirror();});
- handle('mirror:browser',id=>mirrorAction(async()=>{if(typeof id!=='string'||!/^[a-f0-9-]{36}$/i.test(id))throw new Error('Choose a Bot.');return (await mirror.fetch('/v1/browser?bot='+encodeURIComponent(id))).value;}));
+ handle('mirror:browser',(id,kind)=>mirrorAction(async()=>{if(typeof id!=='string'||!/^[a-f0-9-]{36}$/i.test(id)||!['browser','vm'].includes(kind||'browser'))throw new Error('Choose a Bot and browser or VM.');return (await mirror.fetch('/v1/'+(kind||'browser')+'?bot='+encodeURIComponent(id))).value;}));
  handle('mirror:retry',()=>mirrorAction(async()=>{if(!mirror.peer)return mirror.discover();return mirror.select(mirror.peer.id);}));
  handle('mirror:discover',()=>mirrorAction(()=>mirror.discover()));
  handle('mirror:select',id=>mirrorAction(()=>mirror.select(id)));

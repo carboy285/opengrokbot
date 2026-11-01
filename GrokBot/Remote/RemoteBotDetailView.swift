@@ -16,6 +16,7 @@ struct RemoteBotDetailView: View {
     @State private var modelRequest = UUID()
     @State private var editingAvatar = false
     @State private var browser = false
+    @State private var vmViewer = false
     private var bot: Bot? { model.workspace.bots.first { $0.id == botID } }
 
     var body: some View {
@@ -34,6 +35,7 @@ struct RemoteBotDetailView: View {
                     Picker("Bot details",selection:$tab) { Text("Details").tag("Details");Text("Library").tag("Library");Text("Computer").tag("Computer") }.pickerStyle(.segmented)
                     if tab == "Details" {
                         Button("Open / view local browser", systemImage: "globe") { browser = true }.disabled(!remote.online)
+                        Button("View local Linux VM", systemImage: "desktopcomputer") { vmViewer = true }.disabled(!remote.online)
                         if let members = bot.memberIDs {
                             Text("Group members").font(.headline)
                             ForEach(model.workspace.bots.filter { members.contains($0.id) }) { Text($0.name) }
@@ -88,6 +90,7 @@ struct RemoteBotDetailView: View {
                 } else { Text("This Bot was removed on the desktop.").foregroundStyle(.secondary) }
             }.padding(24)
         }.navigationTitle("Bot details").navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $vmViewer) { CloudBrowserView(isVM: true, botID: botID, remote: remote) }
             .sheet(isPresented: $browser) { CloudBrowserView(botID: botID, remote: remote) }
         .sheet(isPresented: $editingAvatar) {
                 if let bot {

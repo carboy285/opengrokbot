@@ -42,8 +42,8 @@ function open(local, peer, owner, packet, kind = 'request') {
   return JSON.parse(data.subarray(8).toString('utf8'));
 }
 class CloudHost {
-  constructor({ load, save, snapshot, execute, models, files, browser = async () => ({title:"Browser not open",url:"",imageData:null}), pins = () => [], applyPins = async () => {}, changed = () => {}, fetchImpl = fetch }) {
-    Object.assign(this, { load, save, snapshot, execute, models, files, browser, pins, applyPins, changed, fetchImpl });
+  constructor({ load, save, snapshot, execute, models, files, vm = async () => ({title:"VM not set up",url:"",imageData:null}), browser = async () => ({title:"Browser not open",url:"",imageData:null}), pins = () => [], applyPins = async () => {}, changed = () => {}, fetchImpl = fetch }) {
+    Object.assign(this, { load, save, snapshot, execute, models, files, browser, vm, pins, applyPins, changed, fetchImpl });
     this.data = { identities: {}, approvals: {}, receipts: [], pinPending: {} }; this.devices = []; this.phase = 'signed-out'; this.feedback = 'Sign in with the same account as your iPhone.'; this.generation = 0; this.accountGeneration = 0; this.enabled = false; this.refreshing = null; this.saveQueue = Promise.resolve();
   }
   get active() { return this.enabled && !!this.data.session; }
@@ -117,6 +117,7 @@ class CloudHost {
     const url = new URL(request.target, BASE);
     if (request.method === 'GET') {
       if (url.pathname === '/v1/state') { let snapshot = this.snapshot(); if(url.searchParams.get('overview')==='true'){const latest=new Map();for(const entry of snapshot.workspace.entries)latest.set(entry.botID,entry);snapshot={...snapshot,overview:true,revision:'overview-'+snapshot.revision,workspace:{...snapshot.workspace,sharedMemory:undefined,teamMessages:undefined,bots:snapshot.workspace.bots.map(({memory,schedules,...bot})=>bot),entries:snapshot.workspace.bots.map(bot=>latest.get(bot.id)).filter(Boolean).map(entry=>({...entry,text:entry.text.slice(0,1000)}))}};} return url.searchParams.get('since') === snapshot.revision ? { status: 204, body: '' } : this.response(200, { snapshot, removedEntries: [] }); }
+      if (url.pathname === '/v1/vm') return this.response(200, await this.vm(url.searchParams.get('bot')));
       if (url.pathname === '/v1/browser') return this.response(200, await this.browser(url.searchParams.get('bot')));
       if (url.pathname === '/v1/models') return this.response(200, await this.models(url.searchParams.get('provider')));
       if (url.pathname === '/v1/files') return this.response(200, await this.files(url.searchParams.get('bot')));

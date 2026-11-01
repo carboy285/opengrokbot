@@ -17,6 +17,7 @@ struct MacMirrorView: View {
     @State private var purpose = ""
     @State private var editing: Bot?
     @State private var browser = false
+    @State private var vmViewer = false
     private var roster: [Bot] { workspace.visibleBots.filter { remote.isPinned($0) } + workspace.recentlyUsed(workspace.visibleBots.filter { !remote.isPinned($0) }) }
     private var bot: Bot? { workspace.workspace.bots.first { $0.id == selected } }
     var body: some View {
@@ -63,6 +64,7 @@ struct MacMirrorView: View {
         .onChange(of: selected) { old, _ in if let old { remote.drafts[old] = draft }; draft = selected.flatMap { remote.drafts[$0] } ?? ""; follow = true; if let id = selected, remote.online { Task { _ = await remote.command(RemoteCommand(action: "touch_bot", botID: id)) } } }
         .onChange(of: remote.account.session?.user.id) { _, _ in selected = nil; draft = "" }
         .alert("Remote workspace", isPresented: Binding(get: { remote.error != nil }, set: { if !$0 { remote.error = nil } })) { Button("OK") { remote.error = nil } } message: { Text(remote.error ?? "") }
+        .sheet(isPresented: $vmViewer) { if let bot { CloudBrowserView(isVM: true, botID: bot.id, remote: remote).frame(width: 900, height: 700) } }
         .sheet(isPresented: $browser) { if let bot { CloudBrowserView(botID: bot.id, remote: remote).frame(width: 900, height: 700) } }
         .sheet(item: $editing) { bot in
             BotAvatarPicker(bot: bot, save: { appearance in await remote.command(RemoteCommand(action: "update_avatar", botID: bot.id, appearance: appearance)) }, close: { editing = nil }).frame(width: 450, height: 650)
@@ -82,6 +84,7 @@ struct MacMirrorView: View {
                 Button { editing = bot } label: { MacBotAvatar(color: bot.color, size: 36, appearance: bot.appearance) }.buttonStyle(.plain).disabled(!remote.online)
                 Text(bot.name).font(.headline)
                 Button("Browser") { browser = true }.disabled(!remote.online)
+                Button("VM view") { vmViewer = true }.disabled(!remote.online)
                 Menu("Provider") {
                     ForEach(remote.providers) { provider in
                         Button(provider.provider.name + " · default model") {

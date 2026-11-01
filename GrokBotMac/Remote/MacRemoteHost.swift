@@ -229,6 +229,9 @@ final class MacRemoteHost: ObservableObject {
             if request.method == "GET", parts.path == "/v1/state", let snapshot = snapshot() {
                 return query("since") == revision ? RemoteHostResponse(status: 204) : try .json(snapshot)
             }
+            if request.method == "GET", parts.path == "/v1/vm", let bot = app.workspace.bots.first(where: { $0.id.uuidString.lowercased() == query("bot")?.lowercased() }) {
+                return try .json(try await MacBotVMs.shared.preview(bot))
+            }
             if request.method == "GET", parts.path == "/v1/browser", let bot = app.workspace.bots.first(where: { $0.id.uuidString.lowercased() == query("bot")?.lowercased() }) {
                 return try .json(try await LocalBotBrowsers.shared.preview(bot))
             }
@@ -273,6 +276,6 @@ final class MacRemoteHost: ObservableObject {
             preferences.set(receipts.map(\.uuidString),forKey:"cloudCommandReceipts")
             revision = UUID().uuidString
             return try .json(["accepted":true])
-        } catch { return .error(400,"The request could not be completed") }
+        } catch { if let cloud = error as? CloudError { return .error(409, cloud.localizedDescription) }; return .error(400,"The request could not be completed") }
     }
 }

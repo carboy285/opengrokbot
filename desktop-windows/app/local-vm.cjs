@@ -2,7 +2,7 @@ const {spawn}=require('node:child_process');
 const {access,mkdir,writeFile,unlink}=require('node:fs/promises');
 const path=require('node:path');
 const {randomBytes}=require('node:crypto');
-const {safeStorage}=require('electron');
+const {safeStorage,nativeImage}=require('electron');
 class LocalVMs{
  constructor({getBot,load,save,root}){Object.assign(this,{getBot,load,save,root});this.records=null;this.busy=new Set();this.loading=null;}
  async init(){if(!this.records){this.loading||=this.load().then(value=>{this.records=value||{};}).catch(error=>{this.loading=null;throw error;});await this.loading;}}
@@ -42,6 +42,7 @@ class LocalVMs{
  async open(id){await this.init();const record=this.records[id];if(!record)throw new Error('Set up this Bot’s Linux VM from its host desktop first.');await this.run(['startvm',record.name,'--type','gui'],60000);return this.status(id);}
  async setCommands(id,enabled){await this.init();const record=this.records[id];if(!record)throw new Error('Set up the VM first.');record.commandsEnabled=enabled===true;await this.save(this.records);return this.status(id);}
  async execute(id,argv){await this.init();const record=this.records[id];if(!record?.commandsEnabled||!record.password)throw new Error('Enable Bot commands in VM settings. A running Linux guest with VirtualBox Guest Additions and saved login is required.');if(!Array.isArray(argv)||!argv.length||argv.length>16||argv.some(x=>typeof x!=='string'||x.includes('\0'))||!argv[0].startsWith('/')||argv.join('').length>16000)throw new Error('Use 1–16 guest arguments, starting with an absolute Linux executable path.');const login=await this.credentials(id),passwordFile=path.join(this.root,id,'guest-command-'+randomBytes(8).toString('hex')+'.txt');try{await writeFile(passwordFile,login.password,{mode:0o600,flag:'wx'});return await this.run(['guestcontrol',record.name,'run','--exe='+argv[0],'--username='+login.username,'--passwordfile='+passwordFile,'--timeout=60000','--wait-stdout','--wait-stderr','--',...argv],65000);}finally{await unlink(passwordFile).catch(()=>{});}}
+ async preview(id){await this.init();id=this.getBot(id)?.id;const record=id&&this.records[id];if(!record)return {title:'VM not set up',url:'Set up this Bot’s Linux VM on the host desktop.',imageData:null};const file=path.join(this.root,id,'preview-'+randomBytes(8).toString('hex')+'.png');try{await this.run(['controlvm',record.name,'screenshotpng',file,'0'],10000);const image=nativeImage.createFromPath(file);if(image.isEmpty())throw new Error('The VM display is unavailable.');const bytes=image.resize({width:900}).toJPEG(60);if(bytes.length>2000000)throw new Error('The VM display preview is too large.');return {title:record.name,url:'VirtualBox · local Linux VM',imageData:bytes.toString('base64')};}finally{await unlink(file).catch(()=>{});}}
  async credentials(id){await this.init();const record=this.records[id];if(!record?.password)throw new Error('This VM uses the credentials supplied by its template.');if(!safeStorage.isEncryptionAvailable())throw new Error('Unlock Windows encryption first.');return {username:record.username,password:safeStorage.decryptString(Buffer.from(record.password,'base64'))};}
 }
 module.exports={LocalVMs};

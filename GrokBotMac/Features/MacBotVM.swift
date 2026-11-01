@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import ScreenCaptureKit
+import CoreGraphics
 
 @MainActor
 final class MacBotVMs: ObservableObject {
@@ -15,6 +17,29 @@ final class MacBotVMs: ObservableObject {
         let result = await Task.detached { CLIInstallationScanner.capture(path: "/Applications/UTM.app/Contents/MacOS/utmctl", arguments: ["exec",id,"--cmd"] + argv, timeout: 65, limit: 16000) }.value
         guard result.exit >= 0 else { throw CloudError.message("Guest command did not finish. Install/start qemu-guest-agent in the Linux template and check UTM. A timed-out guest process may still be running.") }
         return "Linux guest exit \(result.exit):\n" + result.text
+    }
+    func enableViewing(_ id: UUID) {
+        preferences.set(true, forKey: "bot-vm-viewing-" + id.uuidString)
+        if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
+        objectWillChange.send()
+    }
+    func preview(_ bot: Bot) async throws -> RemoteBrowserPreview {
+        guard assigned(bot.id) != nil else { return RemoteBrowserPreview(title: "VM not set up", url: "Set up this Bot’s Linux VM on the host desktop.", imageData: nil) }
+        guard preferences.bool(forKey: "bot-vm-viewing-" + bot.id.uuidString), CGPreflightScreenCaptureAccess() else { throw CloudError.message("On the hosting Mac, open this Bot’s VM settings, enable remote VM viewing, and allow macOS Screen Recording for OpenGrokBot.") }
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        let expected = "OpenGrokBot-" + bot.id.uuidString
+        guard let window = content.windows.first(where: { window in
+            guard let owner = window.owningApplication else { return false }
+            return owner.bundleIdentifier.lowercased().contains("utm") && (window.title?.range(of: expected, options: .caseInsensitive) != nil)
+        }) else { throw CloudError.message("Open this Bot’s UTM console on the hosting Mac. Only its matching VM window can be shared.") }
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration(); configuration.width = 900
+        configuration.height = max(1, min(1600, Int(900 * window.frame.height / max(1, window.frame.width))))
+        configuration.showsCursor = true
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        guard let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor:0.6]), data.count <= 2_000_000 else { throw CloudError.message("The VM preview is too large.") }
+        return RemoteBrowserPreview(title: window.title ?? expected, url: "UTM · local Linux VM", imageData: data)
     }
     func assigned(_ id: UUID) -> String? { preferences.string(forKey: "bot-vm-" + id.uuidString) }
     var installed: Bool { FileManager.default.isExecutableFile(atPath: "/Applications/UTM.app/Contents/MacOS/utmctl") }
@@ -65,6 +90,8 @@ struct MacBotVMControls: View {
             Link("Download a Linux template", destination: URL(string: "https://mac.getutm.app/gallery/")!)
             Button(vms.busy.contains(bot.id) ? "Setting up VM…" : vms.assigned(bot.id) == nil ? "Set up this Bot’s Linux VM…" : "Open this Bot’s VM") { Task { if vms.assigned(bot.id) == nil { await vms.provision(bot) } else { await vms.open(bot) } } }.disabled(vms.busy.contains(bot.id))
             if vms.assigned(bot.id) != nil {
+                Button("Enable remote VM viewing") { vms.enableViewing(bot.id) }
+                Text("macOS Screen Recording permission is required. Only this Bot’s matching UTM console window is captured; the rest of the host screen is excluded.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Allow this Bot to run guest commands", isOn: Binding(get: { vms.commandsEnabled(bot.id) }, set: { vms.setCommands($0, id: bot.id) }))
                 Text("Requires qemu-guest-agent in Linux. Commands run through UTM’s guest agent and may run as root inside the VM.").font(.caption).foregroundStyle(.secondary)
             }
