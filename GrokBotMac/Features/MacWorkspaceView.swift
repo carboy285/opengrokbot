@@ -127,7 +127,7 @@ struct MacWorkspaceView: View {
                             appChip("G", color: Color(hex: 0xD8DD50))
                         }
                     }.frame(maxWidth: .infinity).frame(height: 42).glassChrome(in: Capsule())
-                }.buttonStyle(.plain)
+                }.buttonStyle(.plain).accessibilityLabel("Connect apps")
             }.padding(.horizontal, 14).padding(.bottom, 15)
         }.background(MacTheme.sidebar)
     }

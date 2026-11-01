@@ -62,7 +62,16 @@ proxy=add('mac-proxy',isa='PBXContainerItemProxy',containerPortal=project['rootO
 dep=add('mac-dependency',isa='PBXTargetDependency',target=mac_id,targetProxy=proxy)
 objects[mac_id]={'isa':'PBXNativeTarget','buildConfigurationList':app_configs,'buildPhases':[phase('mac-sources',mac_sources+shared,'PBXSourcesBuildPhase'),phase('mac-frameworks',[],'PBXFrameworksBuildPhase'),phase('mac-resources',['GrokBotMac/Resources/AppIcon.icns','GrokBot/Resources/PrivacyInfo.xcprivacy'],'PBXResourcesBuildPhase')],'buildRules':[],'dependencies':[],'name':'GrokBotMac','productName':'OpenGrokBot','productReference':app_product,'productType':'com.apple.product-type.application'}
 objects[test_id]={'isa':'PBXNativeTarget','buildConfigurationList':test_configs,'buildPhases':[phase('mac-test-sources',tests,'PBXSourcesBuildPhase'),phase('mac-test-frameworks',[],'PBXFrameworksBuildPhase')],'buildRules':[],'dependencies':[dep],'name':'GrokBotMacTests','productName':'GrokBotMacTests','productReference':test_product,'productType':'com.apple.product-type.bundle.unit-test'}
-objects[project['rootObject']]['targets']=list(dict.fromkeys(objects[project['rootObject']]['targets']+[mac_id,test_id]))
+ui_id = uid('mac-ui-target')
+ui_path = 'GrokBotMacUITests/MacUITests.swift'
+reference(ui_path)
+ui_product = add('mac-ui-product',isa='PBXFileReference',explicitFileType='wrapper.cfbundle',includeInIndex='0',path='GrokBotMacUITests.xctest',sourceTree='BUILT_PRODUCTS_DIR')
+add_to_group(uid('products'),[ui_product])
+ui_group = add('mac-ui-group',isa='PBXGroup',children=[uid(ui_path)],name='GrokBotMacUITests',sourceTree='<group>')
+add_to_group(uid('main'),[ui_group])
+ui_configs = configs('mac-ui',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac.uitests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_TARGET_NAME':'GrokBotMac'})
+objects[ui_id]={'isa':'PBXNativeTarget','buildConfigurationList':ui_configs,'buildPhases':[phase('mac-ui-sources',[ui_path],'PBXSourcesBuildPhase'),phase('mac-ui-frameworks',[],'PBXFrameworksBuildPhase')],'buildRules':[],'dependencies':[dep],'name':'GrokBotMacUITests','productName':'GrokBotMacUITests','productReference':ui_product,'productType':'com.apple.product-type.bundle.ui-testing'}
+objects[project['rootObject']]['targets']=list(dict.fromkeys(objects[project['rootObject']]['targets']+[mac_id,test_id,ui_id]))
 
 def encode(value,indent=0):
     if isinstance(value,dict): return '{\n'+''.join('\t'*(indent+1)+json.dumps(k)+' = '+encode(v,indent+1)+';\n' for k,v in value.items())+'\t'*indent+'}'
@@ -71,5 +80,6 @@ def encode(value,indent=0):
 PROJECT.write_text('// !$*UTF8*$!\n'+encode(project)+'\n')
 scheme=(ROOT/'GrokBot.xcodeproj/xcshareddata/xcschemes/GrokBot.xcscheme').read_text()
 scheme=scheme.replace(uid('app'),mac_id).replace(uid('test'),test_id).replace('BuildableName="GrokBot.app"','BuildableName="OpenGrokBot.app"').replace('BlueprintName="GrokBot"','BlueprintName="GrokBotMac"').replace('BuildableName="GrokBotTests.xctest"','BuildableName="GrokBotMacTests.xctest"').replace('BlueprintName="GrokBotTests"','BlueprintName="GrokBotMacTests"')
+scheme = scheme.replace('</Testables>', f'<TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{ui_id}" BuildableName="GrokBotMacUITests.xctest" BlueprintName="GrokBotMacUITests" ReferencedContainer="container:GrokBot.xcodeproj"/></TestableReference></Testables>')
 (ROOT/'GrokBot.xcodeproj/xcshareddata/xcschemes/GrokBotMac.xcscheme').write_text(scheme)
 print(f'Updated project with {len(mac_sources)} macOS sources and {len(shared)} shared sources.')

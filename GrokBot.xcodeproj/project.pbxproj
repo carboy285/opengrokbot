@@ -442,6 +442,7 @@
 				"E7F08BCC397888750F5CB9BD",
 				"563222CAD436A0B15D309F4A",
 				"9B6121C65A466ACFE6B2F313",
+				"49EC37C2492B97E97CE59762",
 			);
 			"name" = "Products";
 			"sourceTree" = "<group>";
@@ -453,6 +454,7 @@
 				"781CAA6738A604344AE86EE3",
 				"0A3E27B8CA818264D75C8D81",
 				"C443DACDC7602DD178BF742C",
+				"2EC44201541E2DA9ACCD026E",
 			);
 			"sourceTree" = "<group>";
 		};
@@ -488,6 +490,7 @@
 				"9F86D081884C7D659A2FEAA0",
 				"E9D9CCD71B08802CD0D11F93",
 				"4A31FD47B9A67A6916664094",
+				"BC00EBB9C90D27B434D0E1F5",
 			);
 		};
 		"7A3BA4BE97D2BE335CC9E2E0" = {
@@ -921,6 +924,106 @@
 		"CABA21E860827AEDC2F53D27" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "724BE92F39477F5EF78124E7";
+		};
+		"9191838EB4A9BBA6CD268179" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMacUITests/MacUITests.swift";
+			"sourceTree" = "<group>";
+		};
+		"49EC37C2492B97E97CE59762" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.cfbundle";
+			"includeInIndex" = "0";
+			"path" = "GrokBotMacUITests.xctest";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"2EC44201541E2DA9ACCD026E" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"9191838EB4A9BBA6CD268179",
+			);
+			"name" = "GrokBotMacUITests";
+			"sourceTree" = "<group>";
+		};
+		"E56BD91FBBB2BA8B4C5A5F53" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"MACOSX_DEPLOYMENT_TARGET" = "14.0";
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"SWIFT_VERSION" = "6.0";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "org.opengrokbot.mac.uitests";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"TEST_TARGET_NAME" = "GrokBotMac";
+			};
+			"name" = "Debug";
+		};
+		"833E2EDB91BC482477D4DEED" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"MACOSX_DEPLOYMENT_TARGET" = "14.0";
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"SWIFT_VERSION" = "6.0";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "org.opengrokbot.mac.uitests";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"TEST_TARGET_NAME" = "GrokBotMac";
+			};
+			"name" = "Release";
+		};
+		"BF4317E9366E5F2651296D81" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"E56BD91FBBB2BA8B4C5A5F53",
+				"833E2EDB91BC482477D4DEED",
+			);
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+		};
+		"DD63EC8F25DC68B2482C68FC" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9191838EB4A9BBA6CD268179";
+		};
+		"EB07C8000A39E79C96F068CC" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+				"DD63EC8F25DC68B2482C68FC",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"41F6544FD3BF31F7FC5E9305" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"BC00EBB9C90D27B434D0E1F5" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "BF4317E9366E5F2651296D81";
+			"buildPhases" = (
+				"EB07C8000A39E79C96F068CC",
+				"41F6544FD3BF31F7FC5E9305",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+				"BC3FFBFDD26D5424E191920C",
+			);
+			"name" = "GrokBotMacUITests";
+			"productName" = "GrokBotMacUITests";
+			"productReference" = "49EC37C2492B97E97CE59762";
+			"productType" = "com.apple.product-type.bundle.ui-testing";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";

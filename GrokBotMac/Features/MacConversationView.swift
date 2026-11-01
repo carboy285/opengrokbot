@@ -127,6 +127,7 @@ private struct MacMessageView: View {
                             copied = true
                         }
                     }
+                    .accessibilityIdentifier("conversation-message")
                     .accessibilityLabel("\(entry.kind == .user ? "Local preview note" : "Example Bot message"): \(entry.text)")
                 if entry.kind == .bot { Spacer(minLength: 90) }
             }.frame(maxWidth: .infinity)
