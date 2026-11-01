@@ -74,6 +74,7 @@ struct MacConversationView: View {
                         if press.modifiers.contains(.shift) { return .ignored }
                         sendMessage(); return .handled
                     }
+                    .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showBotInspector = false } }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
                 if desktop.runningBots.contains(bot.id) {
                     Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").frame(width: 38, height: 38) }.buttonStyle(.plain).help("Stop response")
@@ -81,7 +82,7 @@ struct MacConversationView: View {
                     Button { sendMessage() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(.black)
                             .frame(width: 38, height: 38).background(.white, in: Circle())
-                    }.buttonStyle(.plain).disabled(desktop.providersToRun(for: bot).isEmpty).keyboardShortcut(.return, modifiers: [])
+                    }.buttonStyle(.plain).disabled(bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty).keyboardShortcut(.return, modifiers: [])
                         .help("Send message").accessibilityLabel("Send message")
                 } else {
                     Image(systemName: "mic").font(.system(size: 21)).foregroundStyle(MacTheme.secondary)
@@ -94,7 +95,7 @@ struct MacConversationView: View {
             .padding(9).glassChrome(in: RoundedRectangle(cornerRadius: 31))
             HStack(spacing: 9) {
                 if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
-                if desktop.providersToRun(for: bot).isEmpty {
+                if bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty {
                     Button("Choose a provider") { desktop.showBotInspector = true }.buttonStyle(.link)
                 }
                 Spacer()
@@ -131,17 +132,14 @@ private struct MacMessageView: View {
 
     var body: some View {
         if entry.kind == .activity {
-            HStack(spacing: 7) {
-                Text(entry.text.components(separatedBy: " · ").first ?? entry.text)
-                MacBotAvatar(color: "ochre", size: 17)
-                Text("School")
-            }.font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
-                .frame(maxWidth: .infinity).padding(.vertical, 2)
+            Text(entry.text).font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+                .textSelection(.enabled).frame(maxWidth: .infinity).padding(.vertical, 2)
                 .accessibilityLabel("Activity: \(entry.text)")
         } else {
             HStack(alignment: .top) {
                 if entry.kind == .user { Spacer(minLength: 90) }
                 VStack(alignment: .leading, spacing: 6) {
+                    if let sender = entry.senderName { Text("Message from \(sender)").font(.system(size: 12, weight: .medium)).foregroundStyle(MacTheme.secondary) }
                     if entry.kind == .bot, let provider = entry.provider {
                         Text(provider).font(.system(size: 11)).foregroundStyle(MacTheme.secondary).padding(.horizontal, 5)
                     }

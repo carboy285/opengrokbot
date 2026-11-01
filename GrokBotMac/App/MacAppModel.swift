@@ -97,9 +97,7 @@ extension MacAppModel {
 
     func providersToRun(for bot: Bot) -> [(cli: InstalledCLI, choice: BotAIProvider)] {
         let configuration = aiConfiguration(for: bot)
-        let choices: [BotAIProvider]
-        if configuration.replyMode == .all { choices = configuration.providers }
-        else { choices = (configuration.providers.first { $0.provider == configuration.activeProvider } ?? configuration.providers.first).map { [$0] } ?? [] }
+        let choices = (configuration.providers.first { $0.provider == configuration.activeProvider } ?? configuration.providers.first).map { [$0] } ?? []
         return choices.compactMap { choice in installedCLIs.first { $0.provider == choice.provider }.map { ($0, choice) } }
     }
 
@@ -164,6 +162,10 @@ extension MacAppModel {
 
     @discardableResult
     func send(_ text: String, to bot: Bot, app: AppModel) -> Bool {
+        if bot.memberIDs != nil {
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app.sendGroup(text, group: bot) else { return false }
+            deliverQueuedMessages(app: app); return true
+        }
         let providers = providersToRun(for: bot)
         guard !providers.isEmpty else { showBotInspector = true; return false }
         guard !runningBots.contains(bot.id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -180,42 +182,54 @@ extension MacAppModel {
     func stop(botID: UUID) { for (runID, owner) in runOwners where owner == botID { runs[runID]?.cancel() } }
     func stopAll(immediately: Bool = false) { for run in runs.values { run.cancel(immediately: immediately) } }
 
-    private func startReply(to bot: Bot, cli: InstalledCLI, model: String, app: AppModel) {
+    func deliverQueuedMessages(app: AppModel) {
+        for message in app.workspace.teamMessages ?? [] where message.status == .queued {
+            guard !runningBots.contains(message.to) else { continue }
+            guard let bot = app.workspace.bots.first(where: { $0.id == message.to }),
+                  let provider = providersToRun(for: bot).first else { app.finishDelivery(message, status: .failed); continue }
+            guard app.beginDelivery(message) else { continue }
+            startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app, delivery: message)
+        }
+    }
+
+    private func startReply(to bot: Bot, cli: InstalledCLI, model: String, app: AppModel, delivery: TeamMessage? = nil) {
         let key = bot.id.uuidString + "|" + cli.id + (model.isEmpty ? "" : "|" + model)
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
-        let prompt: String
-        if session != nil { prompt = history.last(where: { $0.kind == .user })?.text ?? "" }
-        else {
-            let transcript = history.suffix(30).map { "\($0.kind == .user ? "User" : bot.name): \($0.text)" }.joined(separator: "\n\n")
-            prompt = "You are \(bot.name). \(bot.purpose)\nRespond to the user's latest message.\n\n" + String(transcript.suffix(100_000))
-        }
+        let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil)
+        let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
+        let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")
+        let prompt = instructions + "\n\n" + (session != nil ? latest : String(transcript.suffix(100_000)))
         let replyID = app.beginReply(for: bot, provider: cli.provider.name + (model.isEmpty ? "" : " · " + model))
         runningBots.insert(bot.id); runErrors[bot.id] = nil
         let directory = workingDirectory(for: bot)
         let run = LocalCLIRun(); runs[replyID] = run; runOwners[replyID] = bot.id
         tasks[replyID] = Task {
+            var finalText = ""
             do {
                 let mcpURL = try composio.mcpURL()
                 for try await event in run.events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model) {
                     try Task.checkCancellation()
                     switch event {
                     case .session(let id): app.setSession(id, for: key)
-                    case .text(let value): app.updateReply(replyID, text: value)
+                    case .text(let value): finalText = value; app.updateReply(replyID, text: BotTeamwork.parse(value).text)
                     case .activity: break
                     case .failed: throw CLIError.failed(1)
                     }
                 }
                 try Task.checkCancellation()
-                app.finishReply(replyID, state: .complete)
+                guard app.applyBotActions(finalText, replyID: replyID, bot: bot, configuration: aiConfiguration(for: bot), delivery: delivery) else { throw CLIError.failed(1) }
+                if let delivery { app.finishDelivery(delivery, status: .complete) }
             } catch {
                 let stopped = Task.isCancelled || (error as? CLIError) == .stopped
                 let message = stopped ? "Response stopped." : ((error as? CLIError)?.errorDescription ?? "The CLI could not start. Check its executable path and sign-in in setup.")
                 app.finishReply(replyID, state: stopped ? .stopped : .failed, message: message)
                 if !stopped { runErrors[bot.id] = message }
+                if let delivery { app.finishDelivery(delivery, status: stopped ? .stopped : .failed) }
             }
             tasks[replyID] = nil; runs[replyID] = nil; runOwners[replyID] = nil
             if !runOwners.values.contains(bot.id) { runningBots.remove(bot.id) }
+            deliverQueuedMessages(app: app)
         }
     }
 }

@@ -160,6 +160,7 @@
 				"872015344FAA5E5095005F29",
 				"BEB6B360B7B3AC0990DADF74",
 				"166CBFC81A4D508FABCD3858",
+				"672A68E0A56F346BBEEAB71B",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -200,6 +201,7 @@
 				"BCB0EBD2ADA4E1560B278A6E",
 				"B77E8610D6612A1CC14A85C8",
 				"6A647BA6FF201D320BA911C1",
+				"8C0E5D565AFA439BB0B57C88",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -426,6 +428,7 @@
 				"7A3BA4BE97D2BE335CC9E2E0",
 				"0382A7C5DF1AAC957280C3E0",
 				"FC06DDBD68E8C2F0988AA290",
+				"EC2FA14A15172FE096EBAEBF",
 			);
 			"name" = "GrokBot";
 			"sourceTree" = "<group>";
@@ -440,6 +443,7 @@
 				"F6FD79410D4F56EA6F29DD17",
 				"F112D150E2067EF6904298BC",
 				"11D870A7BD5197C7470C28BF",
+				"A8D6D5FE4D963584760C4748",
 			);
 			"name" = "GrokBotTests";
 			"sourceTree" = "<group>";
@@ -854,6 +858,7 @@
 				"AA4368729CE344CCE3A22104",
 				"57C52D0B7107881447CA354A",
 				"13069DF629571FB53188D9D2",
+				"9375AF7961EB4B5B9FF800D0",
 				"F46FB84C7BA32BCF20016587",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
@@ -918,6 +923,7 @@
 			"buildActionMask" = "2147483647";
 			"files" = (
 				"C8F0B97E774109CCB65823EB",
+				"2F791D952BE703581D221B6C",
 				"2E960B70C54D42052F60F97B",
 				"28C6BBB4D6021F6DB62AB59D",
 				"0126694C861E25269C743807",
@@ -1354,6 +1360,34 @@
 		"8AA969354261F14BEA9BA926" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "970655998244611D581844E4";
+		};
+		"EC2FA14A15172FE096EBAEBF" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBot/Core/BotTeamwork.swift";
+			"sourceTree" = "<group>";
+		};
+		"672A68E0A56F346BBEEAB71B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "EC2FA14A15172FE096EBAEBF";
+		};
+		"9375AF7961EB4B5B9FF800D0" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "EC2FA14A15172FE096EBAEBF";
+		};
+		"A8D6D5FE4D963584760C4748" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotTests/BotTeamworkTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"8C0E5D565AFA439BB0B57C88" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A8D6D5FE4D963584760C4748";
+		};
+		"2F791D952BE703581D221B6C" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A8D6D5FE4D963584760C4748";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";

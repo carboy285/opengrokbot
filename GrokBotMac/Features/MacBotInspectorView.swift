@@ -25,8 +25,7 @@ struct MacBotInspectorView: View {
                 }.buttonStyle(.plain).accessibilityLabel("Share conversation").help("Share conversation")
                 MacCircleButton(symbol: "xmark", label: "Close bot details") { desktop.showBotInspector = false }
             }.padding(18)
-            ScrollView {
-                VStack(spacing: 0) {
+            VStack(spacing: 0) {
                     MacBotAvatar(color: bot.color, size: 86).padding(.top, 14)
                     Text(bot.name).font(.system(size: 24, weight: .medium))
                         .multilineTextAlignment(.center).textSelection(.enabled)
@@ -43,12 +42,15 @@ struct MacBotInspectorView: View {
                                 .accessibilityAddTraits(tab == item ? [.isSelected] : [])
                         }
                     }.padding(.top, 30).padding(.bottom, 46)
+                    ScrollView {
+                    VStack(spacing: 0) {
                     switch tab {
                     case .details: details
                     case .library: library
                     case .computer: computer
                     }
                 }.frame(maxWidth: .infinity).padding(.bottom, 30)
+                    }
             }
         }
         .frame(maxHeight: .infinity).background(MacTheme.canvas)
@@ -58,7 +60,21 @@ struct MacBotInspectorView: View {
 
     private var details: some View {
         VStack(spacing: 28) {
-            MacBotProviderSettingsView(bot: bot)
+            if let members = bot.memberIDs {
+                Text("Group members").font(.headline)
+                ForEach(app.workspace.bots.filter { members.contains($0.id) }) { member in
+                    Button(member.name) { desktop.selectedID = member.id }
+                }
+                Text("Each member answers with its own selected provider and model.").font(.caption).foregroundStyle(MacTheme.secondary)
+            } else { MacBotProviderSettingsView(bot: bot) }
+            if !(bot.memory ?? []).isEmpty {
+                Text("This Bot’s memory").font(.headline)
+                ForEach(bot.memory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
+            }
+            if !(app.workspace.sharedMemory ?? []).isEmpty {
+                Text("Shared memory").font(.headline)
+                ForEach(app.workspace.sharedMemory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
+            }
             if bot.isMain != true, !bot.purpose.isEmpty {
                 Text(bot.purpose).font(.system(size: 16)).textSelection(.enabled)
             }
@@ -98,8 +114,9 @@ struct MacBotInspectorView: View {
         VStack(spacing: 18) {
             Image(systemName: "desktopcomputer").font(.system(size: 34, weight: .light)).foregroundStyle(MacTheme.secondary)
             Text("Runs on this Mac").font(.system(size: 18, weight: .medium))
-            if let cli = desktop.selectedCLI {
-                Label(cli.provider.name, systemImage: "terminal").font(.system(size: 15))
+            if let provider = desktop.providersToRun(for: bot).first {
+                Label(provider.cli.provider.name, systemImage: "terminal").font(.system(size: 15))
+                Text(provider.choice.model.isEmpty ? "CLI default model" : provider.choice.model).font(.system(size: 13))
                 Text(desktop.runningBots.contains(bot.id) ? "Working…" : "Ready").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
             } else {
                 Text("Choose an AI CLI to start chatting.").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)

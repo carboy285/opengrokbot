@@ -8,6 +8,8 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var symbol: String
     var isMain: Bool? = nil
     var aiConfiguration: BotAIConfiguration? = nil
+    var memory: [String]? = nil
+    var memberIDs: [UUID]? = nil
 }
 
 struct Entry: Identifiable, Codable, Equatable, Sendable {
@@ -18,6 +20,8 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var text: String
     var state: MessageState? = nil
     var provider: String? = nil
+    var senderBotID: UUID? = nil
+    var senderName: String? = nil
     let date: Date
 
     init(botID: UUID, kind: Kind, text: String) {
@@ -36,6 +40,8 @@ struct Workspace: Codable, Equatable, Sendable {
     var entries: [Entry] = []
     var schemaVersion: Int? = 2
     var sessions: [String: String]? = [:]
+    var sharedMemory: [String]? = nil
+    var teamMessages: [TeamMessage]? = nil
 
     static var fresh: Workspace {
         Workspace(bots: [Bot(id: UUID(), name: "Grok Bot", purpose: "Your AI assistant, powered by a CLI on this device.", color: "white", symbol: "sparkles", isMain: true)])
@@ -82,7 +88,7 @@ struct Workspace: Codable, Equatable, Sendable {
         schemaVersion = 2
     }
 
-    private enum CodingKeys: String, CodingKey { case bots, entries, schemaVersion, sessions }
+    private enum CodingKeys: String, CodingKey { case bots, entries, schemaVersion, sessions, sharedMemory, teamMessages }
     init(bots: [Bot] = [], entries: [Entry] = [], schemaVersion: Int? = 2, sessions: [String:String]? = [:]) {
         self.bots = bots; self.entries = entries; self.schemaVersion = schemaVersion; self.sessions = sessions
     }
@@ -92,6 +98,8 @@ struct Workspace: Codable, Equatable, Sendable {
         entries = try values.decode([Entry].self, forKey: .entries)
         schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
         sessions = try values.decodeIfPresent([String:String].self, forKey: .sessions) ?? [:]
+        sharedMemory = try values.decodeIfPresent([String].self, forKey: .sharedMemory)
+        teamMessages = try values.decodeIfPresent([TeamMessage].self, forKey: .teamMessages)
     }
 }
 

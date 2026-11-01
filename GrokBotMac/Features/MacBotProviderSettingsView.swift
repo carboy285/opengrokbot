@@ -12,7 +12,7 @@ struct MacBotProviderSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Providers & models").font(.system(size: 17, weight: .medium))
-            Text("Enable the providers you want for this Bot. Model access follows each CLI’s account.")
+            Text("Choose available providers, then select the one provider and model that answers for this Bot. Model access follows each CLI’s account.")
                 .font(.system(size: 13)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
             ForEach(CLIProvider.allCases) { provider in
                 let installed = desktop.installedCLIs.first { $0.provider == provider }
@@ -61,19 +61,13 @@ struct MacBotProviderSettingsView: View {
                 }.padding(14).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 14))
             }
             if configuration.providers.count > 1 {
-                Picker("Replies", selection: Binding(get: { configuration.replyMode }, set: { mode in update { $0.replyMode = mode } })) {
-                    Text("One provider at a time").tag(ProviderReplyMode.one)
-                    Text("Every enabled provider").tag(ProviderReplyMode.all)
-                }.disabled(busy).accessibilityIdentifier("bot-provider-reply-mode")
-                if configuration.replyMode == .one {
-                    Picker("Active provider", selection: Binding(get: { configuration.activeProvider ?? configuration.providers[0].provider }, set: { provider in update { $0.activeProvider = provider } })) {
-                        ForEach(configuration.providers) { choice in Text(choice.provider.name).tag(choice.provider) }
-                    }.disabled(busy)
-                } else {
-                    Text("Each enabled provider will answer the same message using its own account.")
-                        .font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
-                }
+                Picker("Active provider", selection: Binding(get: { configuration.activeProvider ?? configuration.providers[0].provider }, set: { provider in update { $0.activeProvider = provider } })) {
+                    ForEach(configuration.providers) { choice in Text(choice.provider.name).tag(choice.provider) }
+                }.disabled(busy).accessibilityIdentifier("bot-active-provider")
             }
+            Text("Only the active provider’s selected model responds to this Bot’s messages.")
+                .font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+
             if busy { Text("Stop the current response to change providers or models.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
             if let feedback { Text(feedback).font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
         }.onChange(of: bot.id) { _, _ in modelDrafts = [:]; feedback = nil }
@@ -88,7 +82,7 @@ struct MacBotProviderSettingsView: View {
     }
     private func update(_ change: (inout BotAIConfiguration) -> Void) {
         guard !busy else { return }
-        var value = configuration; change(&value)
+        var value = configuration; change(&value); value.replyMode = .one
         _ = app.setAIConfiguration(value, for: bot)
     }
 }

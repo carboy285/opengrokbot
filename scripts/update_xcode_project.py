@@ -39,6 +39,11 @@ def add_to_group(group_id, children):
 # Add the shared glass source to the iOS target and source group.
 glass = 'GrokBot/Design/GlassChrome.swift'
 reference(glass)
+team_shared = 'GrokBot/Core/BotTeamwork.swift'
+reference(team_shared)
+team_build = add('build'+team_shared, isa='PBXBuildFile', fileRef=uid(team_shared))
+objects[uid('sources')]['files'] = list(dict.fromkeys(objects[uid('sources')]['files']+[team_build]))
+add_to_group(uid('appgroup'), [uid(team_shared)])
 cli_shared = 'GrokBot/Core/CLIProtocol.swift'
 reference(cli_shared)
 cli_build = add('build'+cli_shared, isa='PBXBuildFile', fileRef=uid(cli_shared))
@@ -55,7 +60,7 @@ for configuration in ('Debug','Release'):
     objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.4.0'
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
-shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',glass]
+shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',team_shared,glass]
 tests = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotTests').glob('*.swift'))
 add_to_group(uid('testgroup'), [reference(p) for p in tests])
 for path in tests:
