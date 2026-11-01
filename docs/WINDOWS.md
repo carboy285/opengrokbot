@@ -14,13 +14,14 @@ npm run test:desktop
 node scripts/test-electron.cjs
 npm run start:windows
 npm run dist:windows
+node scripts/test-packaged-helper.cjs
 ```
 
 The Setup EXE is written to `artifacts/windows/`. Windows CI runs the same unit tests, native Electron smoke test, and installer build. The smoke test launches a real fixture CLI subprocess; it does not require a paid provider account.
 
 The renderer has no Node access and uses an allowlisted preload API. The main process validates IPC, owns the authoritative conversation state, launches CLIs without a shell, and stores encrypted credentials using Windows data protection. There is no plaintext secret fallback. Known npm command shims are resolved to package entry points; prompts use stdin or Grok Build’s private prompt file. Each Bot’s working folder is private to the application.
 
-Composio tools reach the CLI through the bundled stdio MCP helper. Only its scoped session capability is passed to the CLI; the project key remains encrypted in app storage. Tool permission settings remain with the selected CLI. Removing Composio locally does not revoke existing grants in your Composio project.
+Composio tools reach the CLI through the bundled stdio MCP helper. The helper and its API module are unpacked beside the app archive so the packaged runtime can launch them. Only its scoped session capability is passed to the CLI; the project key remains encrypted in app storage. Tool permission settings remain with the selected CLI. Removing Composio locally does not revoke existing grants in your Composio project.
 
 ## UI checks
 

@@ -31,6 +31,8 @@ You can skip Composio entirely and chat through your CLI. You can also connect t
 
 The project key and MCP capability URL are stored securely on the device. The project key is not given to the CLI. The CLI receives a session-scoped MCP connection through a bundled helper and retains its own tool permission controls. To change tool selection, stop active responses, remove the local project configuration, and set it up again. Local removal does not revoke existing OAuth grants; use Composio’s dashboard for that.
 
+![Composio project setup in the native Mac app](screenshots/macos-composio-setup.png)
+
 ## Start chatting
 
 The workspace starts with only **Grok Bot** and an empty conversation. Type a message, then use **Command-Return** on Mac or **Control-Enter** on Windows. Each added Bot has a separate saved session. Switching providers keeps their sessions separate.

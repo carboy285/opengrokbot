@@ -1,20 +1,23 @@
-# Development downloads
+# Development downloads · 0.3.0
 
-Built from source commit `c24ab6a34075604c1d6ff3bf637a8881de6cb82e`. [Desktop build, unit/UI tests, and Windows smoke test](https://github.com/carboy285/opengrokbot/actions/runs/41257537906) passed.
+Built from source commit `45c9c74c75206c65a1e3db5f3726ee94ec905dd0`. [Desktop build, native tests, and packaging](https://github.com/carboy285/opengrokbot/actions/runs/41262168054) passed.
 
 | Download | Contents |
 | --- | --- |
-| [macOS universal installer](https://github.com/carboy285/opengrokbot/actions/runs/41257537906/artifacts/13062883547) | ZIP containing `OpenGrokBot-0.2.0-mac-universal.dmg` and its checksum; Apple Silicon and Intel, macOS 14+ |
-| [Windows x64 installer](https://github.com/carboy285/opengrokbot/actions/runs/41257537906/artifacts/13063094851) | ZIP containing `OpenGrokBot-0.2.0-Windows-x64-Setup.exe` |
-| [Native macOS screenshots and test results](https://github.com/carboy285/opengrokbot/actions/runs/41257537906/artifacts/13063299529) | Real app-window captures and XCTest bundles |
-| [Source review](https://github.com/carboy285/opengrokbot/pull/1) | Draft PR with Apple and Windows sources, packaging, tests, and setup documentation |
+| [macOS universal installer](https://github.com/carboy285/opengrokbot/actions/runs/41262168054/artifacts/13065493415) | ZIP containing `OpenGrokBot-0.3.0-mac-universal.dmg` and SHA-256; Apple Silicon/Intel, macOS 14+ |
+| [Windows x64 installer](https://github.com/carboy285/opengrokbot/actions/runs/41262168054/artifacts/13064959179) | ZIP containing `OpenGrokBot-0.3.0-Windows-x64-Setup.exe` |
+| [Native Mac screenshots](https://github.com/carboy285/opengrokbot/actions/runs/41262168054/artifacts/13065313972) | Actual workspace, chat, setup, Composio, and settings captures |
+| [Native Mac test results](https://github.com/carboy285/opengrokbot/actions/runs/41262168054/artifacts/13065254344) | XCTest bundles: 22 unit tests and 2 UI tests passed |
+| [Source review](https://github.com/carboy285/opengrokbot/pull/1) | Draft PR with Apple/Windows sources, packaging, tests, and setup documentation |
 
-GitHub may require you to sign in to download Actions artifacts. These build artifacts have a 90-day retention period; the source can recreate installers afterward.
+GitHub may require sign-in to download Actions artifacts. Artifacts have 90-day retention; the source can recreate installers afterward.
 
 Mac DMG SHA-256:
 
 ```text
-50087b3c75659d240371c7baec52d0a9aa13f6f535e50944de9da57ec90c57ad
+428eec8dd741ca30bafed2fc03ef908e95410c59246b7156fe292858dea4bf25
 ```
 
-The Mac installer is ad-hoc signed and not notarized. The Windows installer is unsigned. They are independent development builds with local preview workflows; neither connects to the Grok Bot service. See `MACOS.md` and `WINDOWS.md` for installation and signing details. The iOS target is included as source for Xcode signing, not a pre-signed IPA.
+The app starts with one empty Grok Bot. Follow [Setup](SETUP.md) to choose an installed AI CLI and optionally connect your Composio project. The application is free; provider and Composio costs/limits are separate.
+
+The Mac build is ad-hoc signed and not notarized; the Windows build is unsigned. See [Mac installation](MACOS.md) and [Windows installation](WINDOWS.md). The iOS target is provided as source for your own Xcode signing; iPhone desktop host pairing is not yet implemented. Live provider inference and Composio OAuth/tool execution require user accounts and remain unverified in this implementation session.

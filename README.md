@@ -6,6 +6,8 @@ Start with **one empty assistant named Grok Bot**. There are no seeded conversat
 
 [Downloads](docs/DOWNLOADS.md) · [Setup guide](docs/SETUP.md) · [Verification](docs/VERIFICATION.md) · [Source review](https://github.com/carboy285/opengrokbot/pull/1)
 
+![Native Mac workspace with only Grok Bot](docs/screenshots/macos-workspace.png)
+
 ## First launch
 
 1. Choose **Codex**, **Claude Code**, **Grok Build**, **OpenCode**, or **Gemini CLI**.

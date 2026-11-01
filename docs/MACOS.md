@@ -16,7 +16,7 @@ Native CI compiles the app and helper, runs unit/UI tests, and packages a univer
 
 Open `OpenGrokBot-0.3.0-mac-universal.dmg` and drag **OpenGrokBot** to **Applications**. The image also contains an Applications shortcut and a Read Me. Launch your installed copy from Applications.
 
-The CI package is ad-hoc signed and **not notarized**. macOS may block a downloaded copy under Gatekeeper. A local Xcode build is the predictable development path; a public distribution build requires a Developer ID certificate and Apple notarization. Do not disable Gatekeeper globally. The package does not replace, modify, or launch the official Grok Bot app.
+The CI package is ad-hoc signed and **not notarized**. If macOS blocks a development copy you have reviewed, use **System Settings > Privacy & Security > Open Anyway** for that app and confirm the system prompt. Apple documents this [per-app opening workflow](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac). macOS may block a downloaded copy under Gatekeeper. A local Xcode build is the predictable development path; a public distribution build requires a Developer ID certificate and Apple notarization. Do not disable Gatekeeper globally. The package does not replace, modify, or launch the official Grok Bot app.
 
 ## Build the installer yourself
 
