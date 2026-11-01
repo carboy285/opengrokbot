@@ -21,7 +21,7 @@ final class AppModel: ObservableObject {
         catch {
             workspace = .fresh
             loadFailed = true
-            errorMessage = "Saved preview could not be read. Your saved file has been kept."
+            errorMessage = "Saved workspace could not be read. Your saved file has been kept."
         }
         previewEnabled = true
         for index in workspace.entries.indices where workspace.entries[index].state == .streaming {
@@ -52,6 +52,7 @@ final class AppModel: ObservableObject {
         commit { value in
             value.bots.removeAll { $0.id == bot.id }
             value.entries.removeAll { $0.botID == bot.id }
+            value.sessions = value.sessions?.filter { !$0.key.hasPrefix(bot.id.uuidString + "|") }
         }
     }
 

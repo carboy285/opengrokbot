@@ -1,85 +1,72 @@
 # OpenGrokBot
 
-Independent Grok Bot client project, with **native macOS as the current priority**, an iOS target, and a Windows desktop app/Setup installer. The desktop layout follows the supplied reference screenshots.
+A free, open-source chat app for **AI CLIs installed on your own computer**, with optional **Composio** tool connections. macOS is the priority: native SwiftUI/AppKit, Liquid Glass on macOS 26, and a universal Apple Silicon/Intel DMG. Windows has an Electron app and Setup EXE. The iOS target is included, but desktop host pairing for iPhone chat is not implemented yet.
 
-**Live Grok Bot service integration is unfinished.** The apps have working local preview features; they cannot sign in to the real service, sync your Bots, or execute agent tasks. No private protocol, authentication flow, or compatible harness version has been verified. Example messages and handoffs remain offline fixtures. See [harness evidence](docs/HARNESS.md).
+Start with **one empty assistant named Grok Bot**. There are no seeded conversations or extra Bots. Add your own Bots when you want separate conversations.
 
-## Platforms and builds
+[Downloads](docs/DOWNLOADS.md) · [Setup guide](docs/SETUP.md) · [Verification](docs/VERIFICATION.md) · [Source review](https://github.com/carboy285/opengrokbot/pull/1)
 
-| Platform | Implementation | Build |
+## First launch
+
+1. Choose **Codex**, **Claude Code**, **Grok Build**, **OpenCode**, or **Gemini CLI**.
+2. Let the app find your installed CLI, or choose its executable. If it is missing, follow its official installation guide.
+3. Sign in through the CLI in your Terminal. The app checks Codex login status; other providers validate their configured account on the first message.
+4. Optionally enter your **Composio project API key**, choose tools, and authorize each account in your browser. Return and refresh connections.
+5. Start chatting. Each Bot keeps a separate CLI session. You can stop a response, retry a failed response, switch providers, and export conversation text.
+
+The app is free. AI providers, local model configurations, and Composio have their own pricing, quotas, and requirements. Free inference is not guaranteed.
+
+## Platforms
+
+| Platform | Implementation | Distribution |
 | --- | --- | --- |
-| macOS 14+ | Native SwiftUI/AppKit; Liquid Glass on macOS 26, native material fallback earlier | Universal Apple Silicon/Intel `.app` and `.dmg` |
-| iOS 18+ | Native SwiftUI; shared glass controls activate on iOS 26 | Xcode project for simulator and device signing |
-| Windows x64 | Electron, isolated renderer, desktop screenshot layout | NSIS Setup `.exe` |
+| macOS 14+ | Native SwiftUI/AppKit; Liquid Glass on macOS 26, material fallback earlier | Universal `.app` in a drag-to-Applications `.dmg` |
+| Windows x64 | Electron with an isolated, sandboxed renderer | NSIS Setup `.exe` |
+| iOS 18+ | Native SwiftUI roster and setup guidance | Xcode project; no desktop host bridge yet |
 
-The [downloads page](docs/DOWNLOADS.md) links the desktop installers, native test results, and source review. The Mac development DMG is ad-hoc signed and not notarized. The Windows development installer is unsigned. No signing certificates or account credentials are embedded.
+The development Mac build is ad-hoc signed and not notarized. The Windows build is unsigned. iPhone device installation requires your own signing team. See the [Mac](docs/MACOS.md), [Windows](docs/WINDOWS.md), and [iPhone](docs/DEVICE_SETUP.md) guides.
 
-![Native macOS app on the CI display](docs/screenshots/macos-workspace.png)
+## Chat and tools
 
-## macOS first
+The desktop apps launch actual local CLI subprocesses. Prompts use stdin; Grok Build uses a private temporary prompt file because its documented headless mode requires that. Structured events update replies, and provider session IDs resume subsequent messages. Adapters cover each provider’s documented headless format; account/model availability is determined by that installed CLI.
 
-Open `GrokBot.xcodeproj`, select **GrokBotMac > My Mac**, and run with Xcode 26+. The workspace opens directly, with the reference sidebar, centered Bot header, conversation bubbles, glass composer, app catalog, and settings panel.
+Composio setup uses the documented v3.1 Tool Router API with a stable, randomly generated user ID for this installation and an explicit toolkit allowlist. Authorization links and connection states come from Composio. Selected tools reach the CLI through an app-bundled stdio MCP proxy. The **project API key is never passed to the CLI or model**; the proxy uses the scoped MCP session URL returned by Composio. Connection management is handled in the app rather than automatically by the model.
 
-To produce the universal Mac installer on a Mac:
+The app does not add approval-bypass flags. Codex runs with a read-only local workspace; other providers retain their configured permissions. Remote MCP tool actions can change connected accounts’ data according to the CLI’s tool permissions and your Composio authorization. Review those settings before asking the assistant to act.
+
+This independent app does not sign in to the proprietary Grok Bot service, sync its cloud Bots, or control its cloud computer. Historical binary investigation is documented separately in [HARNESS.md](docs/HARNESS.md). It is not needed for local CLI chat.
+
+## Data and credentials
+
+Conversation text and session IDs are stored locally in normal application data directories. AI CLIs send prompts to their configured provider or local model. CLI login credentials remain with those CLIs.
+
+Composio project credentials and scoped session URLs stay in **macOS Keychain** or **Windows encrypted device storage**. They are not placed in command arguments, generated MCP configuration files, or logs. MCP configuration uses environment placeholders in private per-Bot working directories. Composio API requests go to its fixed HTTPS origin; returned browser/MCP URLs must use trusted Composio HTTPS hosts. Removing the project locally stops access from new runs; revoke connected accounts in Composio to remove authorization at the service.
+
+The separate device vault stores secure notes in Keychain/Windows data protection. It is not exposed to Bots. Older preview workspaces migrate away from known fixtures while preserving authored notes and custom Bots; the original workspace is backed up before migration.
+
+The Mac app runs outside App Sandbox so it can execute CLIs installed on the host. The Windows renderer has no Node access; the main process validates IPC and owns subprocesses, credentials, and tool connections.
+
+## Build
+
+On a Mac with Xcode 26+:
 
 ```bash
 ./scripts/build-macos.sh
 ```
 
-It builds, checks the signature, creates a drag-to-Applications DMG, verifies it, and writes a checksum. [Mac setup and signing details](docs/MACOS.md) explain development installation and Developer ID/notarization options.
+Or open `GrokBot.xcodeproj`, select **GrokBotMac > My Mac**, and run. The MCP helper is built and embedded automatically. Select **GrokBot** for the iOS source target.
 
-For the phone target, select **GrokBot** in the same Xcode project. Follow the [physical iPhone guide](docs/DEVICE_SETUP.md) for team selection, bundle identifiers, Developer Mode, installation, and launch.
+On Windows with Node.js:
 
-For Windows, use the Setup EXE from a successful desktop CI run, or follow the [Windows build guide](docs/WINDOWS.md).
-
-## Working local workflows
-
-- Bot roster and search; create and delete preview Bots.
-- Conversations with persistent local notes, per-Bot desktop drafts, honest offline status, and export.
-- Connect Apps catalog with search/categories and explicit connection requirements. No false connected counts or successful authorization messages.
-- Desktop settings for appearance, local profile preferences, computer status, permissions status, usage status, and updates.
-- Device vault on desktop: macOS Keychain or Windows data protection. It is separate from Grok Bot's cloud Vault, and Bots cannot read it.
-- Native Apple glass/material controls, system typography, immediate interaction feedback, and reduced-motion/transparency support.
-
-Live agent responses, tasks, streaming, cancellation, tool calls, approvals, artifacts, voice, account login, cloud computer control, connectors, and billing remain unavailable. No model API is substituted for the actual Grok Bot service.
-
-## Architecture
-
-- `GrokBot/Core/`: local models/persistence, origin validation, and a protocol boundary that fails before any connection attempt.
-- `GrokBot/App/` and `GrokBot/Features/`: iOS state and screens.
-- `GrokBot/Design/GlassChrome.swift`: shared Apple glass with SDK/OS and accessibility fallbacks.
-- `GrokBotMac/`: native desktop application, screenshot-based workspace, panels, and device vault.
-- `GrokBot/Security/`: Keychain storage. The Mac local vault uses it; no service credential flow is implemented.
-- `desktop-windows/`: Electron main/preload boundary, validated local storage, encrypted vault, and renderer.
-- `GrokBotTests/`, `GrokBotMacUITests/`, and `scripts/`: native tests, native window captures, browser/native Electron checks, packaging, and static installer inspection.
-
-The native Apple apps have no third-party runtime dependencies. Windows dependencies are pinned in `package-lock.json`. SwiftUI/AppKit provide native platform behavior, while Electron supplies the Windows packaging path. Apple Liquid Glass requires an SDK and OS version that support it; CSS blur on Windows is not presented as the native Apple material.
-
-## Binary inspection and real integration
-
-The uploaded `Grok_Bot_0.78.1.dmg` exceeds the attachment tool's 32 MiB transfer limit. Its bytes have not been inspected. There is no official harness source repository in the workspace. Official product docs establish the Bot/cloud-computer model and Cursor browser sign-in, but do not establish a supported independent client protocol.
-
-On the Mac holding your reference installer:
-
-```bash
-./scripts/inspect-dmg.sh "$HOME/Downloads/Grok_Bot_0.78.1.dmg" inspection/0.78.1
+```powershell
+npm ci
+npm run start:windows
+npm run dist:windows
 ```
 
-This mounts read-only, captures selected metadata/checksums/signing diagnostics, and extracts a standard Electron `app.asar` without launching it. [Inspection details](docs/BINARY_INSPECTION.md) explain which small outputs and protocol/auth files are needed next. Extracted vendor code, installers, and local user data are gitignored and not redistributed.
+Apple targets have no third-party runtime dependencies. Windows dependencies are pinned in `package-lock.json`. The supplied screenshots inform the dark layout, avatars, centered chat header, glass composer, and settings. Native Apple glass is used on supported OS/SDK versions; Windows uses its own translucent styling. Pixel-perfect equality with the references has not been established.
 
-## Data, network, and cost
-
-The apps make no Grok Bot or model requests. Opening an official documentation link uses the system browser. Local notes persist in each platform's application data directory and may enter normal device backups; they are not a secret vault. Mac secure-note values are in Keychain, and Windows values are encrypted with data protection. Revealed desktop secrets clear on loss of app focus.
-
-No backend or self-hosted bridge has been verified or supplied. A phone's `localhost` refers to the phone. A future bridge needs an evidenced upstream protocol, trusted HTTPS, reachable routing, authentication, and preserved approval controls. No TLS bypass or broad ATS exception is included.
-
-The offline features incur no service charges. Real Grok Bot access requires an eligible plan according to the [official mobile requirements](https://docs.x.ai/grok-bot/mobile). Independent-client pricing, rate limits, and service compatibility are unknown.
-
-## Verification
-
-Mac native compilation, tests, and DMG creation run in GitHub Actions. Windows Setup builds and native Electron smoke tests use a Windows runner; iOS tests use an iPhone simulator. Current results and remaining limits are recorded in [verification results](docs/VERIFICATION.md).
-
-Local checks:
+## Verification and limits
 
 ```bash
 python3 -m pip install -r scripts/check-requirements.txt
@@ -87,11 +74,13 @@ python3 scripts/check_project.py
 python3 -m unittest discover -s scripts -p 'test_*.py' -v
 npm ci
 npm run test:desktop
-CHROMIUM_PATH=/path/to/installed/chromium npm run test:ui
+CHROMIUM_PATH=/path/to/chromium npm run test:ui
 ```
 
-Swift syntax parsing is separate from Xcode compilation. Simulator tests do not verify a physical phone. Installer creation does not establish live Grok Bot interoperability or notarization.
+Native CI compiles Apple targets, runs XCTest, builds the universal DMG, captures actual Mac windows, and builds/tests the Windows app and installer. Tests include real fixture subprocesses, saved-session resumption, Unicode replies, Composio request contracts, MCP JSON/SSE transport, secret redaction, persistence, and encryption. Test fixtures are separate from production replies.
+
+Live model inference and Composio OAuth/tool execution require configured user accounts. A Composio project key was not supplied during implementation, so live authorization and tool execution are unverified. Voice, file attachments, a built-in cloud computer, and iPhone host pairing are not implemented. See [verification details](docs/VERIFICATION.md).
 
 ## License
 
-Original code and geometric artwork in this repository are [MIT licensed](LICENSE). This independent project is not affiliated with xAI or Cursor. Vendor binaries, renderer code, and artwork are not bundled. The supplied Apple Design guidance informs the materials, motion, typography, and accessibility choices.
+Original code and geometric artwork are [MIT licensed](LICENSE). This project is not affiliated with xAI, Anthropic, OpenAI, Google, Cursor, or Composio. Proprietary binaries and assets are not redistributed.

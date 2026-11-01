@@ -100,7 +100,7 @@ struct MacWorkspaceView: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button("Export Conversation…") { desktop.exportConversation(bot, app: app) }
-                            Button("Delete Preview Bot…", role: .destructive) { deleting = bot }
+                            if bot.isMain != true { Button("Delete Bot…", role: .destructive) { deleting = bot } }
                         }
                     }
                     if !app.search.isEmpty && app.visibleBots.isEmpty {

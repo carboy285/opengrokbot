@@ -8,7 +8,7 @@ struct RootView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if model.previewEnabled { roster } else { welcome }
+                roster
             }
             .background(Palette.background)
             .toolbar {
@@ -17,40 +17,15 @@ struct RootView: View {
                 }
                 if model.previewEnabled {
                     ToolbarItem(placement: .topBarTrailing) {
-                        RoundButton(symbol: "plus", label: "Create a preview Bot") { createBot = true }
+                        RoundButton(symbol: "plus", label: "Create a Bot") { createBot = true }
                     }
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { if !model.previewEnabled { model.enterPreview() } }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $createBot) { CreateBotView() }
             .navigationDestination(for: Bot.self) { bot in ConversationView(bot: bot) }
-        }
-    }
-
-    private var welcome: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                HStack { Spacer(); BotAvatar(size: 100); Spacer() }.padding(.top, 50).padding(.bottom, 16)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Your Bots.\nRoom to work.").font(.system(.largeTitle, design: .rounded, weight: .semibold))
-                    Text("An independent iPhone client foundation for Grok Bot.")
-                        .font(.title3).foregroundStyle(.secondary)
-                }
-                StatusCard(title: "Integration awaiting verification", detail: "The 0.78.1 installer’s connection protocol still needs inspection. This app cannot sign in, sync Bots, or run tasks yet.", symbol: "cable.connector")
-                VStack(spacing: 16) {
-                    Button { model.enterPreview() } label: {
-                        HStack { Text("Explore offline preview"); Spacer(); Image(systemName: "arrow.right") }
-                            .font(.headline).padding(20).background(Color.primary, in: Capsule()).foregroundStyle(Palette.background)
-                    }
-                    NavigationLink { IntegrationView() } label: {
-                        Label("View integration status", systemImage: "info.circle").font(.subheadline)
-                    }
-                }
-                Text("Preview notes stay on your device. No account or credentials are requested.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }.padding(24).frame(maxWidth: 650)
-                .frame(maxWidth: .infinity)
         }
     }
 
@@ -63,14 +38,14 @@ struct RootView: View {
                         VStack(spacing: 16) {
                             BotAvatar(color: first.color, size: 88)
                             Text(first.name).font(.title3.weight(.medium))
-                            Text("Your preview workspace").font(.caption).foregroundStyle(.secondary)
+                            Text("Your assistant").font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity).padding(.vertical, 30)
                     }
                     .buttonStyle(.plain)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                 }
-                ForEach(model.visibleBots) { bot in
+                ForEach(model.visibleBots.filter { !model.search.isEmpty || $0.id != model.workspace.bots.first?.id }) { bot in
                     NavigationLink(value: bot) {
                         HStack(spacing: 18) {
                             BotAvatar(color: bot.color, size: 44)
@@ -83,14 +58,14 @@ struct RootView: View {
                     }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                    .swipeActions { Button("Delete", role: .destructive) { model.removeBot(bot) } }
+                    .swipeActions { if bot.isMain != true { Button("Delete", role: .destructive) { model.removeBot(bot) } } }
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .overlay {
                 if model.visibleBots.isEmpty {
-                    ContentUnavailableView(model.search.isEmpty ? "No preview Bots" : "No matches", systemImage: "magnifyingglass", description: Text(model.search.isEmpty ? "Use + to create a local preview Bot." : "Try another name or topic."))
+                    ContentUnavailableView(model.search.isEmpty ? "No Bots" : "No matches", systemImage: "magnifyingglass", description: Text(model.search.isEmpty ? "Use + to create a Bot." : "Try another name or topic."))
                 }
             }
             .searchable(text: $model.search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search your Bots")
@@ -117,9 +92,9 @@ struct CreateBotView: View {
                         Text("Rose").tag("pink")
                         Text("Amber").tag("ochre")
                     }
-                } footer: { Text("Creates a local preview entry. No Bot is created in Grok Bot and no agent runs.") }
+                } footer: { Text("Creates a separate local conversation. Chat on iPhone requires a desktop host connection.") }
             }
-            .navigationTitle("New preview Bot")
+            .navigationTitle("New Bot")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

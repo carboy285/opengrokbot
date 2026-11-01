@@ -19,6 +19,7 @@ final class MacUITests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let app = XCUIApplication()
         app.launchArguments = ["-localCLISetupComplete", setup ? "NO" : "YES"]
+        app.launchEnvironment["OPENGROKBOT_TEST_SETUP"] = setup ? "1" : "0"
         app.launchEnvironment["OPENGROKBOT_TEST_CODEX_PATH"] = executable.path
         app.launchEnvironment["OPENGROKBOT_TEST_WORKSPACE_DIR"] = directory.appendingPathComponent("data").path
         return (app, directory)
@@ -36,8 +37,12 @@ final class MacUITests: XCTestCase {
         let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 10))
         input.click(); app.typeText("Hello from the UI test")
-        app.typeKey(.return, modifierFlags: .command)
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'CLI fixture reply'")).firstMatch.waitForExistence(timeout: 15))
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(send.waitForExistence(timeout: 10))
+        XCTAssertTrue(send.isEnabled, app.debugDescription)
+        send.click()
+        let reply = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'CLI fixture reply'")).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 15), app.debugDescription)
         capture(app, name: "macos-cli-chat")
         app.buttons["Connect apps"].click()
         XCTAssertTrue(app.staticTexts["Connect Apps"].waitForExistence(timeout: 5))
@@ -53,7 +58,7 @@ final class MacUITests: XCTestCase {
         let (app, directory) = try application(setup: true)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
-        XCTAssertTrue(app.staticTexts["A free app for your AI CLIs"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["A free app for your AI CLIs"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, name: "macos-setup")
         app.buttons["Continue"].click()
         XCTAssertTrue(app.staticTexts["Choose an AI CLI"].waitForExistence(timeout: 5))

@@ -36,14 +36,14 @@ struct BotAvatar: View {
 
 struct PreviewBanner: View {
     var body: some View {
-        Label("OFFLINE PREVIEW · LOCAL DATA", systemImage: "iphone.slash")
+        Label("DESKTOP HOST REQUIRED", systemImage: "iphone.slash")
             .font(.caption2.weight(.semibold))
             .tracking(1.1)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(Palette.card)
-            .accessibilityLabel("Offline preview. All data stays on this device. No connection to Grok Bot.")
+            .accessibilityLabel("Desktop host connection required for AI chat on iPhone.")
     }
 }
 

@@ -20,7 +20,12 @@ struct GrokBotMacApp: App {
                     if !app.previewEnabled { app.enterPreview() }
                     desktop.selectFirst(in: app)
                     desktop.refreshCLIs()
+                    #if DEBUG
+                    if let setup = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_SETUP"] { desktop.panel = setup == "1" ? .setup : nil }
+                    else if !UserDefaults.standard.bool(forKey: "localCLISetupComplete") { desktop.panel = .setup }
+                    #else
                     if !UserDefaults.standard.bool(forKey: "localCLISetupComplete") { desktop.panel = .setup }
+                    #endif
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in desktop.stopAll() }
                 .alert("Couldn’t complete that action", isPresented: Binding(get: { app.errorMessage != nil }, set: { if !$0 { app.errorMessage = nil } })) {

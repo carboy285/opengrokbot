@@ -1,6 +1,6 @@
 # Native macOS application and DMG
 
-The macOS app is the current priority. It is a native SwiftUI/AppKit application with a universal Apple Silicon/Intel build target. The reference screenshots guide the dark sidebar, Bot avatars, centered header, message bubbles, bottom composer, Connect Apps catalog, and settings layout.
+The macOS app is the current priority. It is a native SwiftUI/AppKit application with a universal Apple Silicon/Intel build target. The reference screenshots guide the dark sidebar, Bot avatars, centered header, message bubbles, bottom composer, Composio Connect Apps, and settings layout.
 
 ## Run from Xcode
 
@@ -8,13 +8,13 @@ The macOS app is the current priority. It is a native SwiftUI/AppKit application
 2. Select the **GrokBotMac** scheme and **My Mac**.
 3. Use Xcode 26 or later for Apple's Liquid Glass APIs. The app supports macOS 14 and later; macOS 26 activates Liquid Glass, while earlier systems use native materials.
 4. For local development, choose **Sign to Run Locally** or your development team in Signing & Capabilities.
-5. Choose **Product > Run**. The local preview opens directly in the desktop workspace.
+5. Choose **Product > Run**. The guided setup opens. Choose an installed CLI, sign in through it, and optionally connect a Composio project.
 
-The first successful CI build used Xcode 26.3 and produced a universal DMG after nine native unit tests passed. Later CI also runs actual window captures using a macOS UI test target. See `VERIFICATION.md` for the latest status.
+Native CI compiles the app and helper, runs unit/UI tests, and packages a universal DMG. See `VERIFICATION.md` for the latest status.
 
 ## Install a built DMG
 
-Open `OpenGrokBot-0.2.0-mac-universal.dmg` and drag **OpenGrokBot** to **Applications**. The image also contains an Applications shortcut and a Read Me. Launch your installed copy from Applications.
+Open `OpenGrokBot-0.3.0-mac-universal.dmg` and drag **OpenGrokBot** to **Applications**. The image also contains an Applications shortcut and a Read Me. Launch your installed copy from Applications.
 
 The CI package is ad-hoc signed and **not notarized**. macOS may block a downloaded copy under Gatekeeper. A local Xcode build is the predictable development path; a public distribution build requires a Developer ID certificate and Apple notarization. Do not disable Gatekeeper globally. The package does not replace, modify, or launch the official Grok Bot app.
 
@@ -38,21 +38,11 @@ MACOS_NOTARY_PROFILE='your-existing-notary-profile' \
 
 No Apple credentials are included, requested in source, or available to this project's CI. Successful ad-hoc signature verification is separate from notarization and Gatekeeper acceptance.
 
-## Working local features
 
-- Bot sidebar, search, keyboard navigation, and per-Bot conversations.
-- Preview Bot creation and confirmed deletion.
-- Local notes saved atomically, with drafts preserved on save failure.
-- Conversation export through the macOS save panel.
-- App catalog search and categories. Connect actions explain the missing live session rather than pretending to authorize an app.
-- Settings sections for General, Computer, Permissions, Vault, Usage & Billing, and Updates. Unavailable cloud features show their actual status.
-- Device vault: labeled secure notes stored in macOS Keychain, with reveal/hide and confirmed deletion. Revealed values and the secret entry field clear when the app loses focus. Bot service accounts cannot read this vault.
-- Dark, light, and system appearance; system fonts; native glass/material controls; Reduce Motion and Reduce Transparency handling.
+## Local CLI execution and tools
 
-Keyboard shortcuts: **⌘N** creates a preview Bot, **⌘F** opens Bot search, **⌘,** opens Settings, **⌘Return** saves a local note, **⇧⌘E** exports a conversation, and **Escape** closes a panel. Context-click a Bot for export or deletion.
+See [SETUP.md](SETUP.md) for the full walkthrough. Codex, Claude Code, Grok Build, OpenCode, and Gemini CLI run as local subprocesses. The app is outside App Sandbox to access host installations; each Bot has an app-owned working folder. CLI credentials remain with the provider CLI. Composio project credentials are stored in Keychain, and a native `ComposioBridge` executable in `Contents/Helpers` supplies MCP transport.
 
-## Service status
+Conversations are stored under `~/Library/Application Support/OpenGrokBot/`. Prior sandbox preview data is copied from the app container on first migration, with a backup retained. Normal conversation files are not a secret vault.
 
-This is an independent app with working local features. It still cannot authenticate with or operate the actual Grok Bot service. Example Bot messages and handoffs are fixtures; all new notes stay local. No connector, approval, computer, billing, model, or run operation is sent upstream. The missing binary/protocol evidence is listed in `HARNESS.md`.
-
-The optional local vault is separate from the product's cloud Vault. Secret values stay in Keychain; only item IDs and labels are indexed in app-owned preferences. Profile display names are local preferences, not account identities. No subscription usage is invented.
+The app starts with one empty Grok Bot. Extra Bots are created only by the user. Voice, file attachments, the proprietary Grok Bot cloud computer, and an iPhone host bridge are not implemented.

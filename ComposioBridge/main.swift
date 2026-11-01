@@ -36,6 +36,9 @@ actor Bridge {
                     } else if part.hasPrefix("data:") {
                         if !event.isEmpty { event += "\n" }
                         event += part.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                        // AsyncBytes.lines may elide empty separator lines. Complete single-line JSON
+                        // events can be emitted immediately; multiline JSON waits for the boundary.
+                        if emit(event, matching: id) { return }
                     }
                 }
                 if !event.isEmpty, emit(event, matching: id) { return }

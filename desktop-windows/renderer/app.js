@@ -139,7 +139,7 @@ function showNewBot() {
   const create = button('Create Bot', () => {}, 'pill primary'); create.type = 'submit'; create.disabled = true;
   name.addEventListener('input', () => create.disabled = !name.value.trim());
   append(form, face, node('label', 'muted', 'Name'), name, node('label', 'muted', 'What should it help with?'), purpose, choices, create);
-  form.addEventListener('submit', async event => { event.preventDefault(); if (!name.value.trim()) return; const next = structuredClone(workspace); const bot = { id: crypto.randomUUID(), name: name.value.trim(), purpose: purpose.value, color }; next.bots.push(bot); if (await persist(next)) { selectBot(bot.id); dialog.close(); } });
+  form.addEventListener('submit', async event => { event.preventDefault(); if (!name.value.trim()) return; if(workspace.bots.some(bot=>bot.name.toLowerCase()===name.value.trim().toLowerCase())){toast('A Bot with this name already exists.');return;} const next = structuredClone(workspace); const bot = { id: crypto.randomUUID(), name: name.value.trim(), purpose: purpose.value, color }; next.bots.push(bot); if (await persist(next)) { selectBot(bot.id); dialog.close(); } });
   append(content, form, node('p', 'panel-footnote', 'Creates a separate conversation with your selected AI CLI.'));
   name.focus();
 }
@@ -167,7 +167,7 @@ async function renderComposio(content){
     }
   };await draw();
 }
-async function showApps(){const content=panel('Connect Apps');await renderComposio(content);}
+async function showApps(){const content=panel('Connect Apps');try{if(bridge.composioRefresh)await result(bridge.composioRefresh());}catch(error){toast(error.message);}await renderComposio(content);}
 function unavailable(title, detail) { return append(node('div', 'unavailable'), node('h2', '', title), node('p', '', detail), button('View connection status', () => showConnection())); }
 function showSettings(tab = 'General') {
   dialog.replaceChildren();

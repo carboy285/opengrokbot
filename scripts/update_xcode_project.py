@@ -52,6 +52,7 @@ reference(ios_entitlements, 'text.plist.entitlements')
 add_to_group(uid('appgroup'), [uid(ios_entitlements)])
 for configuration in ('Debug','Release'):
     objects[uid('app'+configuration)]['buildSettings']['CODE_SIGN_ENTITLEMENTS'] = ios_entitlements
+    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.3.0'
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
 shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',glass]

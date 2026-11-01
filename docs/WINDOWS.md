@@ -1,40 +1,33 @@
 # Windows app and Setup EXE
 
-The Windows client uses Electron with a local HTML/CSS interface that follows the desktop screenshots. Its translucent controls use CSS materials; Apple's native Liquid Glass belongs to the SwiftUI macOS/iOS targets.
+Install the x64 Setup EXE from [Downloads](DOWNLOADS.md). It is an unsigned development build. The installer supports a per-user destination, a Start menu entry, and a desktop shortcut. It does not install AI CLIs automatically.
 
-## Install
-
-Download the `OpenGrokBot-Windows` build artifact from the draft PR's successful desktop workflow. Extract the archive and run `OpenGrokBot-0.2.0-Windows-x64-Setup.exe`. The NSIS installer supports per-user installation, choosing a destination, Start Menu/desktop shortcuts, and uninstalling.
-
-The development installer is not Authenticode signed, so Windows reputation checks may warn. No code-signing identity is included. The installer does not replace the official Grok Bot application. Windows x64 is the packaged architecture; Arm64 has not been packaged or tested here.
+Follow [Setup](SETUP.md) on first launch: choose a local CLI, install/sign in using its own guide, then optionally connect a Composio project. The initial workspace contains one empty Grok Bot. Chat, saved provider sessions, stop/retry, manual Bot creation, export, appearance settings, and the device vault are implemented.
 
 ## Build
 
-On Windows with Node.js 24 and npm:
+On Windows with Node.js installed:
 
 ```powershell
 npm ci
 npm run test:desktop
 node scripts/test-electron.cjs
+npm run start:windows
 npm run dist:windows
 ```
 
-The output appears in `artifacts/windows/`. Building the NSIS installer on Linux also requires Wine; the local Linux packaging attempt stopped at that requirement. The successful installer builds run on Windows CI.
+The Setup EXE is written to `artifacts/windows/`. Windows CI runs the same unit tests, native Electron smoke test, and installer build. The smoke test launches a real fixture CLI subprocess; it does not require a paid provider account.
 
-`npm run start:windows` launches the development app. `npm run preview:desktop` serves the browser preview for UI review. The browser preview stores ordinary notes in browser local storage and explicitly cannot use the Windows device vault.
+The renderer has no Node access and uses an allowlisted preload API. The main process validates IPC, owns the authoritative conversation state, launches CLIs without a shell, and stores encrypted credentials using Windows data protection. There is no plaintext secret fallback. Known npm command shims are resolved to package entry points; prompts use stdin or Grok Build’s private prompt file. Each Bot’s working folder is private to the application.
 
-## Features and security
+Composio tools reach the CLI through the bundled stdio MCP helper. Only its scoped session capability is passed to the CLI; the project key remains encrypted in app storage. Tool permission settings remain with the selected CLI. Removing Composio locally does not revoke existing grants in your Composio project.
 
-Bot creation/search, local conversations, note persistence, export, appearance settings, the app catalog, connection status, and an encrypted device vault are included. Nothing connects to Grok Bot; all examples and new notes are local.
-
-The installed app uses a sandboxed renderer with context isolation, no Node integration in the page, a restrictive content policy, and explicit validated IPC methods. The main process checks the calling frame. Workspace data is validated before an atomic write. External links are limited to specific documentation/project URLs. Permission requests and popup windows are denied.
-
-Vault values use Electron `safeStorage` backed by Windows data protection. Values are encrypted before writing to disk, and vault operations fail if encryption is unavailable. There is no plaintext fallback. Item labels remain local metadata. The native Windows smoke test checks IPC, persistence after relaunch, and absence of plaintext in the vault file; it is separate from installer installation testing.
-
-The browser UI test uses an already installed Chromium:
+## UI checks
 
 ```bash
 CHROMIUM_PATH=/path/to/chromium npm run test:ui
 ```
 
-It covers persistence, creating a Bot, text escaping, failed-save recovery, app search, connection status, appearance, and reduced motion. It does not establish Windows installer behavior or live service compatibility.
+These browser checks use an explicit test IPC fixture to exercise setup, chat rendering, persistence, draft recovery, text escaping, theme/reduced-motion behavior, and focus protection for revealed secrets. Native subprocess and encrypted-storage checks run separately on Windows. A normal browser cannot launch local CLIs and shows that limitation.
+
+Native Apple Liquid Glass is available only on the Apple targets. Windows uses translucent styling that follows the same reference layout. Voice, file attachments, cloud-computer control, and iPhone host pairing are not implemented.

@@ -1,4 +1,8 @@
-# Harness identification and evidence
+# Historical proprietary-service investigation
+
+**Current scope:** the user changed the runtime to locally installed AI CLIs, with optional Composio tools. That integration is implemented independently of the proprietary service described below. See [Setup](SETUP.md) and [Verification](VERIFICATION.md). The earlier decision to ship only offline fixtures has been superseded; current workspaces start empty and do not seed demo Bots.
+
+## Original investigation
 
 Status: the product is identifiable; its 0.78.1 third-party client protocol is not verified. Findings were gathered during the October 31, 2026 session (America/Chicago).
 

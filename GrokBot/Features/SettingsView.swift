@@ -14,13 +14,13 @@ struct SettingsView: View {
                         BotAvatar(size: 42)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("OpenGrokBot").font(.headline)
-                            Text("Independent client foundation").font(.caption).foregroundStyle(.secondary)
+                            Text("Free app for local AI CLIs").font(.caption).foregroundStyle(.secondary)
                         }
                     }.padding(.vertical, 8)
                     NavigationLink { IntegrationView() } label: {
-                        Label("Integration status", systemImage: "cable.connector")
+                        Label("Desktop setup guide", systemImage: "cable.connector")
                     }
-                } footer: { Text("Not affiliated with xAI or Cursor. No account is connected.") }
+                } footer: { Text("Independent open-source app. Your CLI account and Composio project have their own usage limits.") }
                 Section("Appearance") {
                     Picker("Theme", selection: $appearance) {
                         Text("Follow system").tag("system")
@@ -31,85 +31,49 @@ struct SettingsView: View {
                 if model.previewEnabled {
                     Section {
                         LabeledContent("Storage", value: "On this device")
-                        LabeledContent("Preview Bots", value: "\(model.workspace.bots.count)")
-                        Button("Leave preview") { model.leavePreview(); dismiss() }
-                        Button("Reset preview data", role: .destructive) { reset = true }
-                    } header: { Text("Offline preview") } footer: { Text("Leaving preview keeps local notes. Reset replaces preview Bots and notes with the example workspace.") }
+                        LabeledContent("Bots", value: "\(model.workspace.bots.count)")
+                        Button("Reset conversations", role: .destructive) { reset = true }
+                    } header: { Text("Local workspace") } footer: { Text("Reset removes local conversations and additional Bots, leaving one empty Grok Bot.") }
                 }
                 Section("Learn more") {
-                    Link(destination: URL(string: "https://docs.x.ai/grok-bot/overview")!) { Label("Official Grok Bot documentation", systemImage: "arrow.up.right.square") }
-                    Link(destination: URL(string: "https://docs.x.ai/grok-bot/mobile")!) { Label("Official mobile setup", systemImage: "iphone") }
+                    Link(destination: URL(string: "https://github.com/carboy285/opengrokbot")!) { Label("Project and downloads", systemImage: "arrow.up.right.square") }
+                    Link(destination: URL(string: "https://docs.composio.dev")!) { Label("Composio documentation", systemImage: "iphone") }
                 }
                 Section {
-                    LabeledContent("App version", value: "0.1.0")
-                    LabeledContent("Verified harness versions", value: "None")
-                    Text("Voice, connectors, Vault, computer access, task execution, and approvals require a verified protocol. This build does not offer these workflows.")
+                    LabeledContent("App version", value: "0.3.0")
+                    LabeledContent("CLI hosting", value: "Mac or Windows")
+                    Text("The desktop apps run installed AI CLIs and connect tools with Composio. The iPhone host bridge is not implemented in this build.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .confirmationDialog("Replace all local preview notes and Bots?", isPresented: $reset, titleVisibility: .visible) {
-                Button("Reset preview", role: .destructive) { model.resetPreview() }
+            .confirmationDialog("Remove local conversations and additional Bots?", isPresented: $reset, titleVisibility: .visible) {
+                Button("Reset conversations", role: .destructive) { model.resetPreview() }
             }
         }
     }
 }
 
 struct IntegrationView: View {
-    @EnvironmentObject private var model: AppModel
-    @AppStorage("connectionDraft") private var storedDraft = ""
-    @State private var address = ""
-    @State private var feedback: String?
-    @State private var invalid = false
-
     var body: some View {
         Form {
             Section {
-                Label("Not connected", systemImage: "circle.slash").font(.headline)
-                Text(model.client.capabilities.reason).foregroundStyle(.secondary)
-                Text("No network request is made by this app. The Connect workflow will be implemented after transport and authentication are verified.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Label("Set up your desktop first", systemImage: "desktopcomputer").font(.headline)
+                Text("AI CLIs run on the computer hosting them. iOS cannot launch a desktop CLI directly.")
             }
-            Section("Verified product facts") {
-                Label("Persistent Bots and a cloud computer", systemImage: "desktopcomputer")
-                Label("Cursor account, browser sign-in", systemImage: "person.crop.circle")
-                Label("Official iOS companion exists", systemImage: "iphone")
-                Link("Read official setup documentation", destination: URL(string: "https://docs.x.ai/grok-bot/get-started")!)
+            Section("1 · Choose an AI CLI") {
+                Text("Open the Mac or Windows app and follow setup. Choose Codex, Claude Code, Grok Build, OpenCode, or Gemini CLI. Install it and sign in using its own guide.")
+                Link("Get the desktop app", destination: URL(string: "https://github.com/carboy285/opengrokbot")!)
             }
-            Section {
-                TextField("https://your-server.example", text: $address)
-                    .keyboardType(.URL).textContentType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityLabel("Future server origin, optional")
-                Button("Save address draft") {
-                    do {
-                        let draft = try ConnectionDraft(address: address)
-                        storedDraft = draft.origin.absoluteString
-                        address = storedDraft
-                        feedback = "Address saved locally. Compatibility is unverified; no connection was attempted."
-                        invalid = false
-                    } catch {
-                        feedback = (error as? IntegrationError)?.errorDescription ?? "Check the server address."
-                        invalid = true
-                    }
-                }
-                if !storedDraft.isEmpty {
-                    Button("Clear saved address", role: .destructive) { storedDraft = ""; address = ""; feedback = nil }
-                }
-                if let feedback {
-                    Label(feedback, systemImage: invalid ? "exclamationmark.circle" : "doc.badge.checkmark")
-                        .font(.footnote).foregroundStyle(.secondary).accessibilityAddTraits(.updatesFrequently)
-                }
-            } header: { Text("Optional future connection") } footer: { Text("Only save a server origin if you plan to operate a supported bridge. This is not a Grok Bot endpoint setting. No bridge or token-provisioning method is verified. Do not enter credentials or secret URLs.") }
-            Section("What is needed") {
-                Text("An inspected 0.78.1 bundle, versioned protocol schemas, browser authentication and callback rules, plus authorized service access. The project includes tools to inspect your local DMG on a Mac.")
-                Text("A generic Grok model API key does not establish access to your existing Bots or their computer.")
-                    .font(.footnote).foregroundStyle(.secondary)
+            Section("2 · Connect tools, optionally") {
+                Text("In desktop setup, enter your Composio project key, choose tools, and authorize connections in your browser. You can also do this later in Connect Apps.")
+                Link("Create a Composio project", destination: URL(string: "https://platform.composio.dev")!)
             }
-        }
-        .navigationTitle("Integration")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { address = storedDraft }
+            Section("iPhone connection") {
+                Text("This build does not yet include a desktop host bridge. Chat from the desktop app until secure host pairing is available. No iPhone messages are sent or simulated.")
+            }
+        }.navigationTitle("Setup").navigationBarTitleDisplayMode(.inline)
     }
 }
