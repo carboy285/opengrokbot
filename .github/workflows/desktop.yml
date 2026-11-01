@@ -1,0 +1,43 @@
+name: Native macOS app and DMG
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest installed Xcode
+        run: |
+          python3 - <<'PY' > /tmp/opengrokbot-xcode.txt
+          from pathlib import Path
+          import re
+          apps = list(Path('/Applications').glob('Xcode_*.app'))
+          def key(path): return tuple(int(n) for n in re.findall(r'\d+', path.name))
+          print(str(max(apps,key=key) if apps else Path('/Applications/Xcode.app')) + '/Contents/Developer')
+          PY
+          sudo xcode-select --switch "$(cat /tmp/opengrokbot-xcode.txt)"
+          xcodebuild -version
+      - name: Run native macOS tests
+        run: >-
+          xcodebuild -project GrokBot.xcodeproj -scheme GrokBotMac
+          -configuration Debug -destination 'platform=macOS'
+          -resultBundlePath artifacts/macos-tests.xcresult
+          CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
+      - name: Build universal app and DMG
+        run: ./scripts/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: OpenGrokBot-macOS
+          path: |
+            artifacts/macos/*.dmg
+            artifacts/macos/*.sha256
+            artifacts/macos-tests.xcresult
+          if-no-files-found: warn
