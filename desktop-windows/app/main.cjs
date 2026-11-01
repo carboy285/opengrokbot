@@ -124,7 +124,7 @@ async function deliverQueued(){
  }
 }
 
-function remoteStatus(){return {enabled:remote.active,mode:remoteConfig?.mode||'tailscale',address:remoteConfig?.address||'',feedback:remoteFeedback,busy:remoteBusy,port:48291};}
+function remoteStatus(){return {enabled:remote.active,mode:remoteConfig?.mode||'tailscale',address:remoteConfig?.address||'',feedback:remoteFeedback,busy:remoteBusy,needsCleanup:!!remoteRoute&&!remote.active,port:48291};}
 async function saveRemote(){requireVault();await atomicJSON('remote.encrypted.json',{encrypted:safeStorage.encryptString(JSON.stringify(remoteConfig)).toString('base64')});}
 function showHost(){if(window&&!window.isDestroyed()){window.show();if(window.isMinimized())window.restore();}}
 function remoteTrayUpdate(){if(remote.active&&!remoteTray){remoteTray=new Tray(path.join(__dirname,'icon.ico'));remoteTray.setToolTip('OpenGrokBot · remote access on');remoteTray.setContextMenu(Menu.buildFromTemplate([{label:'Open OpenGrokBot',click:showHost},{label:'Quit and stop host',click:()=>{quitting=true;app.quit();}}]));remoteTray.on('double-click',showHost);}else if(!remote.active&&remoteTray){remoteTray.destroy();remoteTray=null;showHost();}}
@@ -151,23 +151,23 @@ async function enableRemote(){
  remoteConfig.enabled=true;await saveRemote();remoteTrayUpdate();
  if(['tailscale','funnel'].includes(remoteConfig.mode)){
   const address=await tailscale.configure(48291,remoteConfig.mode==='funnel');
-  if(address){remoteConfig.address=address;remoteRoute={address,funnel:remoteConfig.mode==='funnel'};await saveRemote();remoteFeedback='Tailscale HTTPS is ready. Copy the pairing link to your phone.';}
+  if(address){remoteConfig.address=address;remoteRoute={address,funnel:remoteConfig.mode==='funnel'};remoteConfig.route=remoteRoute;await saveRemote();remoteFeedback='Tailscale HTTPS is ready. Copy the pairing link to your phone.';}
   else remoteFeedback='Tailscale needs setup or port 8443 is already in use. Use the command below, then enter its HTTPS address. Existing routes are not overwritten.';
  }else remoteFeedback='Remote access is on. Copy the pairing link to your phone.';
 }
 function configureIPC() {
  handle('remote:status',async()=>{await ensureState();return remoteStatus();});
  handle('remote:enable',async(mode,address)=>{
-  await ensureState();requireVault();if(remote.active||remoteBusy||!['tailscale','funnel','wifi','proxy'].includes(mode))throw new PublicError('Disable remote access before changing connection modes.');
+  await ensureState();requireVault();if(remote.active||remoteBusy||remoteRoute||!['tailscale','funnel','wifi','proxy'].includes(mode))throw new PublicError('Disable remote access before changing connection modes.');
   remoteBusy=true;try{
    const token=remoteConfig?.token||require('node:crypto').randomBytes(32).toString('hex');
    if(mode==='wifi'&&!address){const candidate=Object.values(require('node:os').networkInterfaces()).flat().find(x=>x&&!x.internal&&x.family==='IPv4'&&remoteAPI.localHost(x.address));address=`http://${candidate?.address||'your-pc.local'}:48291`;}
    if(['wifi','proxy'].includes(mode)){remoteAPI.pairing(address,token);if(mode==='proxy'&&new URL(address).protocol!=='https:')throw new PublicError('Use an HTTPS proxy address.');}
    remoteConfig={enabled:false,mode,address:address||'',token};await enableRemote();return remoteStatus();
-  }finally{remoteBusy=false;}
+  }catch(error){await remote.stop();remoteTrayUpdate();if(remoteConfig)remoteConfig.enabled=false;throw error;}finally{remoteBusy=false;}
  });
- handle('remote:disable',async()=>{await remote.stop();remoteTrayUpdate();if(remoteConfig){remoteConfig.enabled=false;await saveRemote();}if(remoteRoute){const removed=await tailscale.remove(48291,remoteRoute.address,remoteRoute.funnel);if(removed)remoteRoute=null;else remoteFeedback='The app server is off. Remove its port 8443 Tailscale route before changing modes.';}else remoteFeedback='Remote access is off.';return remoteStatus();});
- handle('remote:address',async address=>{if(!remoteConfig||!remote.active)throw new Error('Enable remote access first');remoteAPI.pairing(address,remoteConfig.token);if(remoteConfig.mode!=='wifi'&&new URL(address).protocol!=='https:')throw new PublicError('Use an HTTPS address.');remoteConfig.address=address;await saveRemote();return remoteStatus();});
+ handle('remote:disable',async()=>{await remote.stop();remoteTrayUpdate();if(remoteConfig){remoteConfig.enabled=false;await saveRemote();}if(remoteRoute){const removed=await tailscale.remove(48291,remoteRoute.address,remoteRoute.funnel);if(removed){remoteRoute=null;remoteConfig.route=null;await saveRemote();}else remoteFeedback='The app server is off. Remove its port 8443 Tailscale route before changing modes.';}else remoteFeedback='Remote access is off.';return remoteStatus();});
+ handle('remote:address',async address=>{if(!remoteConfig||!remote.active)throw new Error('Enable remote access first');remoteAPI.pairing(address,remoteConfig.token);if(remoteConfig.mode!=='wifi'&&new URL(address).protocol!=='https:')throw new PublicError('Use an HTTPS address.');remoteConfig.address=address;if(['tailscale','funnel'].includes(remoteConfig.mode)){remoteRoute={address,funnel:remoteConfig.mode==='funnel'};remoteConfig.route=remoteRoute;}await saveRemote();return remoteStatus();});
  handle('remote:link',async()=>{if(!remoteConfig||!remote.active)throw new Error('Enable remote access first');return remoteAPI.pairing(remoteConfig.address,remoteConfig.token);});
  handle('remote:rotate',async()=>{if(!remoteConfig)throw new Error('Enable remote access first');remoteConfig.token=require('node:crypto').randomBytes(32).toString('hex');remote.token=remoteConfig.token;remote.receipts.clear();await saveRemote();return remoteStatus();});
 
@@ -275,7 +275,7 @@ app.whenReady().then(() => {
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.loadFile(rendererFile);
-  (async()=>{try{await ensureState();const stored=await loadJSON('remote.encrypted.json',null);if(stored){requireVault();remoteConfig=JSON.parse(safeStorage.decryptString(Buffer.from(stored.encrypted,'base64')));if(remoteConfig.enabled){installed=await cli.discover(settings.overrides);await enableRemote();}}}catch{remoteFeedback='Remote access could not be restored. Unlock Windows and enable it in Settings.';}})();
+  (async()=>{try{await ensureState();const stored=await loadJSON('remote.encrypted.json',null);if(stored){requireVault();remoteConfig=JSON.parse(safeStorage.decryptString(Buffer.from(stored.encrypted,'base64')));remoteRoute=remoteConfig.route;if(remoteConfig.enabled){installed=await cli.discover(settings.overrides);await enableRemote();}}}catch{await remote.stop();remoteTrayUpdate();remoteFeedback='Remote access could not be restored. Unlock Windows and enable it in Settings.';}})();
 });
 app.on('before-quit',()=>{quitting=true;remote.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
 app.on('window-all-closed', () => {if(!remote.active)app.quit();});

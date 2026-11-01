@@ -24,6 +24,7 @@ struct MacRemoteAccessView: View {
                     .disabled(remote.changing).accessibilityIdentifier("remote-access-toggle")
                 if remote.changing { ProgressView().controlSize(.small) }
             }
+            if remote.needsCleanup { Button("Retry Tailscale cleanup") { remote.stop() }.disabled(remote.changing) }
             if remote.enabled {
                 TextField("Desktop address, e.g. https://my-mac.tailnet.ts.net:8443", text: $remote.address).textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("remote-host-address")

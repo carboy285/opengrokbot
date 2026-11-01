@@ -26,9 +26,11 @@ final class MacRemoteHostTests: XCTestCase {
         host.mode = .wifi;host.address = "http://127.0.0.1:48301";host.attach(app:app,desktop:desktop);host.start()
         for _ in 0..<100 { if host.enabled { break };try await Task.sleep(for:.milliseconds(20)) }
         let pairing = try XCTUnwrap(host.pairing), client = RemoteHTTPClient()
-        let first = try XCTUnwrap(try await client.snapshot(pairing,since:nil))
+        let initial = try await client.snapshot(pairing,since:nil)
+        let first = try XCTUnwrap(initial)
         XCTAssertEqual(first.workspace.bots.count,1);XCTAssertTrue(first.workspace.entries.isEmpty);XCTAssertTrue((first.workspace.sessions ?? [:]).isEmpty)
-        XCTAssertNil(try await client.snapshot(pairing,since:first.revision))
+        let unchanged = try await client.snapshot(pairing,since:first.revision)
+        XCTAssertNil(unchanged)
         let bot = try XCTUnwrap(first.workspace.bots.first)
         let config = BotAIConfiguration(providers:[BotAIProvider(provider:.codex,model:"remote-model")],activeProvider:.codex)
         _ = try await client.fetch(pairing,path:"/v1/command",command:RemoteCommand(action:"configure_bot",botID:bot.id,configuration:config))
@@ -36,14 +38,16 @@ final class MacRemoteHostTests: XCTestCase {
         _ = try await client.fetch(pairing,path:"/v1/command",command:command)
         _ = try await client.fetch(pairing,path:"/v1/command",command:command)
         for _ in 0..<100 { if app.entries(for:bot).last?.state == .complete { break };try await Task.sleep(for:.milliseconds(20)) }
-        let result = try XCTUnwrap(try await client.snapshot(pairing,since:nil))
+        let final = try await client.snapshot(pairing,since:nil)
+        let result = try XCTUnwrap(final)
         XCTAssertEqual(result.workspace.entries.filter{$0.kind == .user}.count,1)
         XCTAssertEqual(result.workspace.entries.last?.text,"Reply on the desktop")
         XCTAssertEqual(app.workspace.bots.first?.aiConfiguration?.providers.first?.model,"remote-model")
         host.rotateKey()
         do { _ = try await client.snapshot(pairing,since:nil);XCTFail("Revoked pairing must be rejected") } catch { if case RemoteError.unauthorized = error {} else { XCTFail("Wrong error: \(error)") } }
         let refreshed = try XCTUnwrap(host.pairing)
-        XCTAssertNotNil(try await client.snapshot(refreshed,since:nil))
+        let repaired = try await client.snapshot(refreshed,since:nil)
+        XCTAssertNotNil(repaired)
     }
 }
 #endif

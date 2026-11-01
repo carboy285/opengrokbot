@@ -31,8 +31,10 @@ final class MacRemoteHost: ObservableObject {
         self.port = port; self.preferences = preferences; self.secrets = secrets
         mode = Mode(rawValue: preferences.string(forKey: "remoteMode") ?? "") ?? .tailscale
         address = preferences.string(forKey: "remoteAddress") ?? ""
+        if let route = preferences.string(forKey: "remoteOwnedRoute") { ownedRoute = (route, preferences.bool(forKey: "remoteOwnedFunnel")) }
     }
 
+    var needsCleanup: Bool { !enabled && ownedRoute != nil }
     var pairing: RemotePairing? { enabled ? try? RemotePairing(address: address, token: token) : nil }
     var serveCommand: String { "tailscale \(mode == .funnel ? "funnel" : "serve") --bg --https=8443 http://127.0.0.1:\(port)" }
 
@@ -41,12 +43,13 @@ final class MacRemoteHost: ObservableObject {
         app.$workspace.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$runningBots.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$installedCLIs.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
-        if preferences.bool(forKey: "remoteEnabled") { start() }
+        if preferences.bool(forKey: "remoteEnabled") { ownedRoute = nil; start() }
     }
     func start() {
         guard !enabled, !changing, app != nil else { return }
+        if ownedRoute != nil { feedback = "Remove the previous Tailscale route before enabling a different connection."; return }
         do {
-            if let data = try secrets.read(account: "pairing"), let saved = String(data: data, encoding: .utf8) { token = saved }
+            if let data = try secrets.read(account: "pairing"), let saved = String(data: data, encoding: .utf8), saved.range(of:"^[A-Za-z0-9_-]{43,128}$",options:.regularExpression) != nil { token = saved }
             else { try replaceToken() }
             if mode == .wifi, address.isEmpty { address = "http://\(Self.localIPv4() ?? "your-mac.local"):\(port)" }
             if mode == .proxy || mode == .wifi { _ = try RemotePairing(address: address, token: token); if mode == .proxy && URL(string: address)?.scheme != "https" { throw RemoteError.invalidPairing } }
@@ -75,7 +78,7 @@ final class MacRemoteHost: ObservableObject {
             let port = port
             let removed = await Task.detached { TailscaleHosting.remove(localPort: port, address: route.0, funnel: route.1) }.value
             changing = false
-            if removed { ownedRoute = nil; feedback = "Remote access is off." }
+            if removed { ownedRoute = nil; preferences.removeObject(forKey: "remoteOwnedRoute"); preferences.removeObject(forKey: "remoteOwnedFunnel"); feedback = "Remote access is off." }
             else { feedback = "The app server is off. Remove its port 8443 route in Tailscale before changing connection modes." }
         }
     }
@@ -94,12 +97,13 @@ final class MacRemoteHost: ObservableObject {
         Task {
             let link = await Task.detached { TailscaleHosting.configure(localPort: port, funnel: funnel) }.value
             changing = false
-            if let link { address = link; ownedRoute = (link,funnel); savePreferences(); feedback = funnel ? "Funnel HTTPS is ready. Your pairing key is still required." : "Private Tailscale HTTPS is ready. Connect your iPhone to the same tailnet." }
+            if let link { address = link; ownedRoute = (link,funnel); preferences.set(link,forKey:"remoteOwnedRoute"); preferences.set(funnel,forKey:"remoteOwnedFunnel"); savePreferences(); feedback = funnel ? "Funnel HTTPS is ready. Your pairing key is still required." : "Private Tailscale HTTPS is ready. Connect your iPhone to the same tailnet." }
             else { feedback = "Tailscale needs setup or port 8443 is already in use. Use the command below in Terminal, authorize Tailscale if asked, then enter its HTTPS address. Existing routes are not overwritten." }
         }
     }
     func saveAddress() {
         guard (mode == .wifi || URL(string: address)?.scheme == "https"), (try? RemotePairing(address: address, token: token)) != nil else { feedback = "Enter an HTTPS address, or a private Wi-Fi address in Wi-Fi mode."; return }
+        if mode == .tailscale || mode == .funnel { ownedRoute = (address,mode == .funnel); preferences.set(address,forKey:"remoteOwnedRoute"); preferences.set(mode == .funnel,forKey:"remoteOwnedFunnel") }
         savePreferences(); feedback = "Pairing address saved."
     }
     private func savePreferences() {

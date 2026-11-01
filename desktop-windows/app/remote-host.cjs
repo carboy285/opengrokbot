@@ -8,8 +8,8 @@ function pairing(address,token){const url=new URL(address);if(url.username||url.
 class RemoteHost{
  constructor(){this.server=null;this.receipts=new Set();}
  async start({port=48291,lan=false,token,snapshot,execute,models,files}){
-  if(this.server)throw new Error('Remote access is already running');this.token=token;
-  const respond=(res,status,value)=>{const bytes=status===204?Buffer.alloc(0):Buffer.from(JSON.stringify(value));res.writeHead(status,{'Content-Type':'application/json','Content-Length':bytes.length,'Connection':'close','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(bytes);};
+  if(this.server)throw new Error('Remote access is already running');if(typeof token!=='string'||!/^[A-Za-z0-9_-]{43,128}$/.test(token))throw new Error('Invalid pairing key');this.token=token;
+  const respond=(res,status,value)=>{if(res.headersSent||res.destroyed)return;const bytes=status===204?Buffer.alloc(0):Buffer.from(JSON.stringify(value));res.writeHead(status,{'Content-Type':'application/json','Content-Length':bytes.length,'Connection':'close','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(bytes);};
   const server=http.createServer({maxHeaderSize:8192},async(req,res)=>{
    try{
     const expected=Buffer.from('Bearer '+this.token),actual=Buffer.from(req.headers.authorization||'');
