@@ -1,6 +1,6 @@
 # Install on a physical iPhone
 
-This installs the independent offline foundation. Live Grok Bot access remains unavailable. These steps have not been exercised on a physical device in this session.
+This installs the independent app’s offline workflows. Live Grok Bot access remains unavailable. These steps have not been exercised on a physical device in this session. The iOS simulator build and all nine unit tests passed in CI.
 
 ## Prerequisites
 

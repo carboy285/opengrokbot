@@ -26,7 +26,7 @@ The second pasted document contains editorial guidance. It was not treated as do
 
 ## Integration decision made before coding
 
-Build an independent SwiftUI foundation, use the supplied screenshots for a restrained native design, keep preview data visibly offline, and represent the real integration as unavailable. Collect no credentials and make no guessed service requests. Put future transport behind `HarnessClient`; `UnverifiedHarnessClient` cannot report success. A URL draft never changes that status.
+Build independent native SwiftUI Apple clients and an Electron Windows client, use the supplied screenshots for the desktop design, keep preview data visibly offline, and represent the real integration as unavailable. Collect no credentials and make no guessed service requests. Put future transport behind `HarnessClient`; `UnverifiedHarnessClient` cannot report success. A URL draft never changes that status.
 
 Supported/verified harness versions: **none**. Version 0.78.1 is the target input label, not a compatibility declaration. No claim is made about supported backend versions, local runtime requirements, configuration file formats, model selection, run APIs, approval RPCs, cancellation, or stream resumption.
 
@@ -45,3 +45,7 @@ The inspection tools produce local evidence for item 1. They do not provide acco
 The documented product uses cloud computers. There is no verified self-hosted Grok Bot server, phone-facing desktop port, or token-provisioning command in the inspected sources. Accordingly this project supplies no backend or fake proxy. Existing official mobile access is documented by the vendor; independent client access remains unresolved.
 
 If inspection establishes a local runtime and a supported bridge becomes necessary, define and test that bridge only then: phone → trusted HTTPS hostname/private VPN route → authenticated bridge → verified upstream transport. Preserve upstream account permissions, human approval requirements, stream delivery, and errors. Never assume that binding a desktop process to `0.0.0.0` is an acceptable connection setup.
+
+## Expanded platform scope
+
+The user subsequently requested a Mac-first desktop app/DMG, a Windows Setup EXE, and continued iOS support, plus the supplied Apple Design guidance. The native macOS target, local device vault, Windows client, packaging workflows, and CI verification implement that platform scope. They do not change the missing-protocol assessment. Native app/installer build success is separate from real service compatibility.

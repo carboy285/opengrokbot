@@ -1,8 +1,9 @@
 import Foundation
 import Security
 
-/// Reserved for a future verified credential flow. No UI currently collects credentials.
-/// The credential kind and provisioning contract must be verified before this is used.
+/// Device-only secret storage, used by the local macOS secure-note vault.
+/// This store does not provision or forward service credentials. Grok Bot
+/// authentication still requires a verified credential and provisioning contract.
 struct KeychainSecretStore {
     let service: String
 

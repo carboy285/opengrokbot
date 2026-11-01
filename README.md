@@ -1,98 +1,97 @@
-# OpenGrokBot for iPhone
+# OpenGrokBot
 
-Native SwiftUI foundation for an independent Grok Bot client. MIT licensed, with an Xcode project, local preview workspace, inspection tools, and tests.
+Independent Grok Bot client project, with **native macOS as the current priority**, an iOS target, and a Windows desktop app/Setup installer. The desktop layout follows the supplied reference screenshots.
 
-**This build cannot connect to or operate Grok Bot. No harness version is verified compatible.** The supplied `Grok_Bot_0.78.1.dmg` could not be transferred into this environment because the file tool limits transfers to 32 MiB. No bytes from that installer were inspected. The real integration requested remains unfinished.
+**Live Grok Bot service integration is unfinished.** The apps have working local preview features; they cannot sign in to the real service, sync your Bots, or execute agent tasks. No private protocol, authentication flow, or compatible harness version has been verified. Example messages and handoffs remain offline fixtures. See [harness evidence](docs/HARNESS.md).
 
-The screenshots establish the design reference. Official product documentation establishes persistent Bots, cloud computers, Cursor browser sign-in, and synced mobile conversations. It does not establish the client protocol needed to implement this app. See [evidence and integration status](docs/HARNESS.md) for sources and unknowns. This project includes no reconstructed vendor code and no private endpoints. Grok Build and the Grok model API are not substitutes for the Grok Bot product.
+## Platforms and builds
 
-## Open and run
+| Platform | Implementation | Build |
+| --- | --- | --- |
+| macOS 14+ | Native SwiftUI/AppKit; Liquid Glass on macOS 26, native material fallback earlier | Universal Apple Silicon/Intel `.app` and `.dmg` |
+| iOS 18+ | Native SwiftUI; shared glass controls activate on iOS 26 | Xcode project for simulator and device signing |
+| Windows x64 | Electron, isolated renderer, desktop screenshot layout | NSIS Setup `.exe` |
 
-Requirements: a Mac with Xcode 16 or newer, an installed iOS 18+ SDK, an Apple ID for device signing, and an iPhone running iOS 18 or newer. Python 3.9+ is needed only for installer inspection. The app has no third-party runtime dependencies and requires no API key.
+The [downloads page](docs/DOWNLOADS.md) links the desktop installers, native test results, and source review. The Mac development DMG is ad-hoc signed and not notarized. The Windows development installer is unsigned. No signing certificates or account credentials are embedded.
 
-1. Open `GrokBot.xcodeproj` in Xcode and select the **GrokBot** scheme.
-2. For a simulator, select an iPhone simulator running iOS 18+ and choose **Product > Run**.
-3. Tap **Explore offline preview**. Create preview Bots with **+**, search, and save local notes in a conversation.
+![Native macOS app on the CI display](docs/screenshots/macos-workspace.png)
 
-For a physical phone, follow the [complete device installation steps](docs/DEVICE_SETUP.md). No website, backend, or account configuration is needed to run the offline foundation. Signing and installing it does not enable Grok Bot service access.
+## macOS first
 
-## Included workflows
+Open `GrokBot.xcodeproj`, select **GrokBotMac > My Mac**, and run with Xcode 26+. The workspace opens directly, with the reference sidebar, centered Bot header, conversation bubbles, glass composer, app catalog, and settings panel.
 
-| Screen | Behavior in this build |
-| --- | --- |
-| Welcome | Explains integration status and opens offline preview |
-| Bot roster | Searches local preview Bots; opens conversations; swipe deletes a preview Bot |
-| Conversation | Displays labeled example messages and an example handoff; saves local notes; shares text through the system share sheet |
-| Create preview Bot | Saves a name, description, and color locally |
-| Settings | Dark/light/system appearance; leave preview; confirm reset of preview data |
-| Integration | Shows verified facts and missing protocol evidence; validates and saves an optional future HTTPS origin draft without contacting it |
+To produce the universal Mac installer on a Mac:
 
-There are no real runs, agent responses, tool calls, approvals, artifacts, connector management, Vault, account login, notifications, voice, computer access, or streaming. Example messages are fixtures. Saving a note never produces an automated reply. Offline labels remain visible throughout the preview. Preview data is separate from any future integration, and is never uploaded.
+```bash
+./scripts/build-macos.sh
+```
 
-## Architecture and choices
+It builds, checks the signature, creates a drag-to-Applications DMG, verifies it, and writes a checksum. [Mac setup and signing details](docs/MACOS.md) explain development installation and Developer ID/notarization options.
 
-SwiftUI and iOS 18 match the official mobile product's documented minimum and provide native navigation, Dynamic Type, VoiceOver labels, materials, and keyboard behavior. No external dependency is needed to build the app. The deployment target is a choice for this foundation, not a claim of service compatibility.
+For the phone target, select **GrokBot** in the same Xcode project. Follow the [physical iPhone guide](docs/DEVICE_SETUP.md) for team selection, bundle identifiers, Developer Mode, installation, and launch.
 
-- `App/` owns the application and main-actor preview state. Changes persist atomically before the UI commits them, preserving the draft when saving fails.
-- `Core/` contains local models, JSON persistence, HTTPS origin-draft validation, and the integration boundary. `UnverifiedHarnessClient` always throws before attempting a connection. Its capability report never claims a supported version.
-- `Features/` contains roster, conversations, creation, settings, and integration status.
-- `Design/` contains adaptive colors, native controls, and original vector Bot avatars.
-- `Security/` provides a Keychain store for a future verified credential flow; it is not currently used to collect or provision tokens.
-- `Resources/` contains an original app icon, Info.plist, and a privacy manifest for app-owned UserDefaults access.
+For Windows, use the Setup EXE from a successful desktop CI run, or follow the [Windows build guide](docs/WINDOWS.md).
 
-No reconnect or background-execution behavior is implemented because no transport exists. Local edits save immediately; background suspension cannot be mistaken for a running cloud task. A future authenticated client must handle foreground refresh, cancellation, expired credentials, event resumption, and version negotiation according to the inspected protocol.
+## Working local workflows
 
-## Inspect your installer
+- Bot roster and search; create and delete preview Bots.
+- Conversations with persistent local notes, per-Bot desktop drafts, honest offline status, and export.
+- Connect Apps catalog with search/categories and explicit connection requirements. No false connected counts or successful authorization messages.
+- Desktop settings for appearance, local profile preferences, computer status, permissions status, usage status, and updates.
+- Device vault on desktop: macOS Keychain or Windows data protection. It is separate from Grok Bot's cloud Vault, and Bots cannot read it.
+- Native Apple glass/material controls, system typography, immediate interaction feedback, and reduced-motion/transparency support.
 
-On your Mac, from the repository directory:
+Live agent responses, tasks, streaming, cancellation, tool calls, approvals, artifacts, voice, account login, cloud computer control, connectors, and billing remain unavailable. No model API is substituted for the actual Grok Bot service.
+
+## Architecture
+
+- `GrokBot/Core/`: local models/persistence, origin validation, and a protocol boundary that fails before any connection attempt.
+- `GrokBot/App/` and `GrokBot/Features/`: iOS state and screens.
+- `GrokBot/Design/GlassChrome.swift`: shared Apple glass with SDK/OS and accessibility fallbacks.
+- `GrokBotMac/`: native desktop application, screenshot-based workspace, panels, and device vault.
+- `GrokBot/Security/`: Keychain storage. The Mac local vault uses it; no service credential flow is implemented.
+- `desktop-windows/`: Electron main/preload boundary, validated local storage, encrypted vault, and renderer.
+- `GrokBotTests/`, `GrokBotMacUITests/`, and `scripts/`: native tests, native window captures, browser/native Electron checks, packaging, and static installer inspection.
+
+The native Apple apps have no third-party runtime dependencies. Windows dependencies are pinned in `package-lock.json`. SwiftUI/AppKit provide native platform behavior, while Electron supplies the Windows packaging path. Apple Liquid Glass requires an SDK and OS version that support it; CSS blur on Windows is not presented as the native Apple material.
+
+## Binary inspection and real integration
+
+The uploaded `Grok_Bot_0.78.1.dmg` exceeds the attachment tool's 32 MiB transfer limit. Its bytes have not been inspected. There is no official harness source repository in the workspace. Official product docs establish the Bot/cloud-computer model and Cursor browser sign-in, but do not establish a supported independent client protocol.
+
+On the Mac holding your reference installer:
 
 ```bash
 ./scripts/inspect-dmg.sh "$HOME/Downloads/Grok_Bot_0.78.1.dmg" inspection/0.78.1
 ```
 
-This mounts the installer read-only, records its checksum and selected bundle metadata, captures signing diagnostics, and extracts standard Electron `app.asar` contents without launching the application. Outputs are local and gitignored. It never reads your installed app's account storage or Keychain. See [binary inspection](docs/BINARY_INSPECTION.md) for limitations and the evidence needed to implement the protocol.
+This mounts read-only, captures selected metadata/checksums/signing diagnostics, and extracts a standard Electron `app.asar` without launching it. [Inspection details](docs/BINARY_INSPECTION.md) explain which small outputs and protocol/auth files are needed next. Extracted vendor code, installers, and local user data are gitignored and not redistributed.
 
-If the DMG uses another layout or the archive contains unsupported entries, the tool stops rather than guessing. The extractor can also operate on a smaller copied `app.asar` directly. The macOS wrapper has not been run against the supplied DMG here; synthetic ASAR tests passed.
+## Data, network, and cost
 
-## Network, authentication, and security
+The apps make no Grok Bot or model requests. Opening an official documentation link uses the system browser. Local notes persist in each platform's application data directory and may enter normal device backups; they are not a secret vault. Mac secure-note values are in Keychain, and Windows values are encrypted with data protection. Revealed desktop secrets clear on loss of app focus.
 
-There is no verified backend or bridge setup to configure. Do not expose a desktop port or use a generic Grok API key expecting this app to control your Bots. Official browser login documentation does not establish OAuth client registration, redirects, scopes, or token lifecycle for an independent iOS app.
+No backend or self-hosted bridge has been verified or supplied. A phone's `localhost` refers to the phone. A future bridge needs an evidenced upstream protocol, trusted HTTPS, reachable routing, authentication, and preserved approval controls. No TLS bypass or broad ATS exception is included.
 
-The iOS foundation makes no network requests. External documentation links open in the system browser. It contains no ATS exemptions, custom trust bypass, analytics, or embedded credentials. A saved future origin is only a local draft and rejects credentials, paths, queries, fragments, plaintext HTTP, and common loopback addresses. Do not put secrets in it.
+The offline features incur no service charges. Real Grok Bot access requires an eligible plan according to the [official mobile requirements](https://docs.x.ai/grok-bot/mobile). Independent-client pricing, rate limits, and service compatibility are unknown.
 
-The unused Keychain implementation stores credentials as `WhenUnlockedThisDeviceOnly`, without iCloud synchronization, for eventual use after the real authentication flow is verified. Secrets must never enter UserDefaults, project files, logs, or screenshots. Preview notes are ordinary app data in Application Support, written atomically with complete file protection; they may be included in normal device backups and are not a secret vault.
+## Verification
 
-A future self-hosted bridge would require a verified upstream protocol, authenticated access, and a trusted HTTPS hostname reachable by the phone. `localhost` on a physical iPhone refers to that phone. VPN reachability alone does not authenticate a service. No bridge is supplied because its upstream protocol is unknown. Do not run a Mac DMG as an iPhone executable.
+Mac native compilation, tests, and DMG creation run in GitHub Actions. Windows Setup builds and native Electron smoke tests use a Windows runner; iOS tests use an iPhone simulator. Current results and remaining limits are recorded in [verification results](docs/VERIFICATION.md).
 
-## Checks and tests
-
-Local Linux checks:
+Local checks:
 
 ```bash
 python3 -m pip install -r scripts/check-requirements.txt
 python3 scripts/check_project.py
 python3 -m unittest discover -s scripts -p 'test_*.py' -v
-bash -n scripts/inspect-dmg.sh
+npm ci
+npm run test:desktop
+CHROMIUM_PATH=/path/to/installed/chromium npm run test:ui
 ```
 
-On a Mac:
+Swift syntax parsing is separate from Xcode compilation. Simulator tests do not verify a physical phone. Installer creation does not establish live Grok Bot interoperability or notarization.
 
-```bash
-xcodebuild -project GrokBot.xcodeproj -scheme GrokBot \
-  -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
-xcodebuild -project GrokBot.xcodeproj -scheme GrokBot -showdestinations
-# Replace the example destination with an installed iPhone simulator from the list.
-xcodebuild -project GrokBot.xcodeproj -scheme GrokBot \
-  -destination 'platform=iOS Simulator,name=iPhone 16' \
-  CODE_SIGNING_ALLOWED=NO test
-```
+## License
 
-XCTest covers origin validation, unsupported connection behavior, persistence, preview state changes, save failure, and Keychain replacement/deletion. The included GitHub workflow can run these on macOS after the project is pushed. **That workflow has not run in this session.**
-
-See [verification results](docs/VERIFICATION.md) for the exact checks completed. Swift syntax parsing is not type checking or compilation. No Xcode build, simulator UI review, XCTest run, signing, physical device install, or live service operation was verified here.
-
-## Costs, limits, and license
-
-The offline app incurs no model/API charges and makes no service calls. Grok Bot service access requires an eligible paid plan according to the [official mobile requirements](https://docs.x.ai/grok-bot/mobile). No third-party API pricing, rate limits, or compatibility commitments have been verified. Apple signing and distribution rules apply separately; see the device guide.
-
-The original code and artwork in this repository are MIT licensed; see [LICENSE](LICENSE). Grok Bot, xAI, and Cursor names identify the intended integration. This project is not affiliated with or endorsed by those organizations. Their binaries and artwork are not redistributed.
+Original code and geometric artwork in this repository are [MIT licensed](LICENSE). This independent project is not affiliated with xAI or Cursor. Vendor binaries, renderer code, and artwork are not bundled. The supplied Apple Design guidance informs the materials, motion, typography, and accessibility choices.
