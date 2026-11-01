@@ -16,7 +16,7 @@ Apple XCTest covers Curve25519/HKDF/AES-GCM round trips, binding account/peer/re
 
 Native Mac UI tests cover the empty single-Bot workspace, real fixture CLI replies, Send/Enter, Shift+Enter, draft preservation, header side panel/model controls, Library/Computer, Escape, Connect Apps, settings, account email/password fields, disabled empty sign-in and the guided local CLI/Composio setup. The universal app and bundled MCP helper are built for arm64/x86_64, ad-hoc signed/verified, and packaged into a verified DMG.
 
-Current CI run links, source commit and test totals are recorded in [Downloads](DOWNLOADS.md) after packaging.
+Runtime commit `bcdf5c7a5d596bead5cf38d5451ee519c6f48ba5` passed [desktop CI](https://github.com/carboy285/opengrokbot/actions/runs/41270461498): **34 Mac unit tests, 2 window tests, database tests, existing Windows checks and universal Mac packaging**. The [iOS simulator run](https://github.com/carboy285/opengrokbot/actions/runs/41270461442) passed **27 tests**. Download links and the Mac SHA-256 are in [Downloads](DOWNLOADS.md). Later commits update documentation/screenshots only.
 
 ## Existing local CLI/Windows coverage
 
