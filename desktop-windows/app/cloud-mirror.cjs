@@ -3,7 +3,8 @@ const os=require('node:os');
 const {identity,seal,open,fingerprint}=require('./cloud-host.cjs');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 class CloudMirror{
- constructor(cloud,changed){this.cloud=cloud;this.changed=changed;this.generation=0;this.snapshot=null;this.devices=[];this.peer=null;this.phase='Choose a computer';this.inFlight=false;}
+ constructor(cloud,changed){this.cloud=cloud;this.changed=changed;this.generation=0;this.snapshot=null;this.devices=[];this.peer=null;this.phase='Choose a computer';this.inFlight=false;this.accountGeneration=cloud.accountGeneration;}
+ accountChanged(){if(this.accountGeneration!==this.cloud.accountGeneration){this.accountGeneration=this.cloud.accountGeneration;this.devices=[];this.stop();}}
  get owner(){return this.cloud.data.session?.user.id;}
  get local(){return this.cloud.data.controllers?.[this.owner?.toLowerCase()];}
  status(){return {phase:this.phase,host:this.peer?.name,hostID:this.peer?.id,hosts:this.devices.filter(x=>x.kind==='host'&&x.id!==this.cloud.local?.id).map(({id,name,available,last_seen})=>({id,name,online:available&&Date.now()-Date.parse(last_seen)<90000})),fingerprint:this.local?fingerprint(this.local.publicKey):null,snapshot:this.snapshot};}
@@ -19,9 +20,9 @@ class CloudMirror{
   if(!Array.isArray(devices))throw new Error('Invalid device list.');this.devices=devices;this.emit();return this.status();
  }
  async select(id){
-  this.stop();await this.discover();const peer=this.devices.find(x=>x.kind==='host'&&x.id===id&&x.id!==this.cloud.local?.id);if(!peer)throw new Error('Choose another computer on this account.');
+  this.stop();const epoch=this.generation,account=this.cloud.accountGeneration;await this.discover();if(epoch!==this.generation||account!==this.cloud.accountGeneration)throw new Error('The selected computer changed.');const peer=this.devices.find(x=>x.kind==='host'&&x.id===id&&x.id!==this.cloud.local?.id);if(!peer)throw new Error('Choose another computer on this account.');
   const key=this.owner.toLowerCase()+'|'+peer.id.toLowerCase();this.cloud.data.mirrorPins||={};const pin=this.cloud.data.mirrorPins[key];if(pin&&pin!==peer.public_key)throw new Error('This computer’s encryption identity changed. Re-register it on the server before connecting.');
-  this.cloud.data.mirrorPins[key]=peer.public_key;await this.cloud.persist();this.peer=peer;const generation=++this.generation,account=this.cloud.accountGeneration;this.phase='Connecting…';this.emit();this.worker(generation,account).catch(()=>{});return this.status();
+  this.cloud.data.mirrorPins[key]=peer.public_key;await this.cloud.persist();if(epoch!==this.generation||account!==this.cloud.accountGeneration)throw new Error('The selected computer changed.');this.peer=peer;const generation=++this.generation;this.phase='Connecting…';this.emit();this.worker(generation,account).catch(()=>{});return this.status();
  }
  async fetch(target,command){
   const generation=this.generation,account=this.cloud.accountGeneration,owner=this.owner,peer=this.peer,local=this.local;

@@ -50,7 +50,7 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
         authenticationSource = source
         authenticationSubscription = source.$session.sink { [weak self] session in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, source.session?.user.id == session?.user.id else { return }
                 do {
                     if self.session?.user.id != session?.user.id || self.identity == nil {
                         self.generation = UUID(); self.devices = []; self.identity = nil; self.approvals = [:]; self.pinnedHosts = [:]

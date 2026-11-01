@@ -168,7 +168,7 @@ const cloud = new CloudHost({
  applyPins:async rows=>{let changed=false;for(const row of rows){const bot=state.bots.find(bot=>bot.id.toLowerCase()===row.bot_id.toLowerCase());if(bot&&(bot.isPinned??!!bot.isMain)!==row.is_pinned){bot.isPinned=row.is_pinned;changed=true;}}if(changed){await atomicJSON('preview-workspace.json',state);notify();}},
  snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
- changed:status=>{remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
+ changed:status=>{mirror.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
 });
 const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
 function openMirror(){
