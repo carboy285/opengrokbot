@@ -257,7 +257,7 @@ function configureIPC() {
   handle('setup:complete',async()=>{if(!selectedCLI())throw new PublicError('Choose an installed CLI first.');settings.complete=true;await saveSettings();});
   handle('chat:send',async(botID,text,requestID)=>{await ensureState();if(typeof text!=='string'||!text.trim()||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');if(requestID&&!/^[0-9a-f-]{36}$/i.test(requestID))throw new PublicError('Invalid delivery ID.');if(!requestID||!state.entries.some(x=>x.id.toLowerCase()===requestID.toLowerCase()))await startChat(botID,text,undefined,requestID);return state;});
   handle('chat:retry',async botID=>{await ensureState();const message=state.teamMessages?.findLast(x=>x.to===botID&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(botID);return state;});
-  handle('chat:stop',async botID=>{for(const run of active.get(botID)||[])run.cancel();});
+  handle('chat:stop',async botID=>{stoppedBots.add(botID);for(const run of active.get(botID)||[])run.cancel();});
   handle('composio:status',async()=>{await ensureState();return composioStatus();});
   handle('composio:connect',async(key,toolkits)=>{
     await ensureState();requireVault();
