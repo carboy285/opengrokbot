@@ -55,6 +55,7 @@ struct MacWorkspaceView: View {
             .background(MacTheme.canvas)
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
+        .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
         .onChange(of: desktop.showSearch) { _, visible in searchFocused = visible }
         .foregroundStyle(.primary.opacity(0.9))
         .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its local notes?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
@@ -73,6 +74,7 @@ struct MacWorkspaceView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
+                Button { desktop.showMirror = true } label: { Label("This computer", systemImage: "desktopcomputer") }.buttonStyle(.plain).help("Switch to another computer on your account")
                 Spacer()
                 MacCircleButton(symbol: "magnifyingglass", label: "Search Bots") {
                     desktop.showSearch.toggle()

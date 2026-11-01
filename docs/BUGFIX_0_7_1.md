@@ -25,3 +25,9 @@ No Browserbase account/key was available during this update, so cloud browsing r
 ## Validation limits
 
 Tests, syntax checks, UI automation, protocol checks, database behavioral checks and physical-device validation were not run, at the user's request. Installer compilation/packaging is separate and does not confirm runtime behavior. Mac installers use ad-hoc signatures without notarization and Windows installers are unsigned until publisher credentials are configured.
+
+## Remote desktop workspaces
+
+Mac and Windows include a “This computer” switcher and a remote workspace view. Sign in under Settings → Computer, select your server computer and approve the viewing computer on the server after comparing its controller fingerprint. Chats, Bot creation/deletion, provider selection, and shared pins target the selected server. Mac additionally exposes remote avatar editing and task cancellation. The server must be awake with phone/remote access enabled. Your iPhone can choose the same server.
+
+Remote workspaces use separate in-memory state; viewing a server never replaces the local workspace file or runs its CLI on the viewer. A separate controller encryption identity shares the desktop's existing authenticated account transport and token refresher. Changing accounts invalidates remote views. The server stores no extra long-lived plaintext chat copies for this feature. Browser sessions still run at Browserbase when configured on the server.

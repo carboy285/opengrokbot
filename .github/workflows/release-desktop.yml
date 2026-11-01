@@ -119,7 +119,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.7.1: chats open at the newest message and follow generated replies on iPhone, Mac and Windows. Includes server-backed pin sync, iPhone edge-swipe back, safer workspace/auth/avatar handling, persistent scheduled tasks with catch-up, and optional isolated hosted page reading through Browserbase. Update both iPhone and desktop for shared pins.
+          0.7.1: chats open at the newest message and follow generated replies on iPhone, Mac and Windows. Includes server-backed pin sync, iPhone edge-swipe back, safer workspace/auth/avatar handling, persistent scheduled tasks with catch-up, optional isolated hosted page reading through Browserbase, and account-based desktop mirroring. Select your server from the desktop workspace switcher and approve the viewing device on that server. Update both iPhone and desktop for shared pins.
 
           Ask a Bot to schedule one-time, hourly, daily or weekly work. Incoming Bot messages are the supported event trigger. Your desktop app must be running with its CLI configured. Cloud browsing requires your Browserbase account, API key and project UUID in desktop Settings → Computer; sessions are isolated, temporary, and do not use the desktop browser.
 

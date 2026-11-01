@@ -149,7 +149,7 @@ struct MacConversationView: View {
     }
 }
 
-private struct MacMessageView: View {
+struct MacMessageView: View {
     let entry: Entry
     @State private var copied = false
 
@@ -190,7 +190,7 @@ private struct MacMessageView: View {
 
 /// Observes the actual AppKit scroll view after layout, including on macOS 14.
 /// Bounds changes caused by streamed text never turn off the user's follow intent.
-private struct ChatScrollMonitor: NSViewRepresentable {
+struct ChatScrollMonitor: NSViewRepresentable {
     var onUserScroll: (Bool) -> Void
     var onLayout: () -> Void
     func makeNSView(context: Context) -> Probe { Probe() }

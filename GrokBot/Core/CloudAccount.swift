@@ -22,6 +22,8 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     private let secrets: KeychainSecretStore
     private let network: URLSession
     private var browser: ASWebAuthenticationSession?
+    private weak var authenticationSource: CloudAccount?
+    private var authenticationSubscription: AnyCancellable?
     private var authCompletion: AuthCompletion?
     private var refreshTask: Task<CloudSession, Error>?
     private var generation = UUID()
@@ -41,6 +43,23 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
             if let data = try self.secrets.read(account: "session") { session = try JSONDecoder().decode(CloudSession.self, from: data) }
             if let session { try loadIdentity(owner: session.user.id) }
         } catch { self.error = "Unlock this device’s Keychain to restore sign-in."; session = nil }
+    }
+    /// Desktop controllers use their own encryption identity but one shared auth refresher.
+    func useAccount(from source: CloudAccount) {
+        guard authenticationSource !== source else { return }
+        authenticationSource = source
+        authenticationSubscription = source.$session.sink { [weak self] session in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    if self.session?.user.id != session?.user.id || self.identity == nil {
+                        self.generation = UUID(); self.devices = []; self.identity = nil; self.approvals = [:]; self.pinnedHosts = [:]
+                        if let session { try self.loadIdentity(owner: session.user.id) }
+                    }
+                    self.session = session
+                } catch { self.session = nil; self.error = "Unlock Keychain to load this controller's identity." }
+            }
+        }
     }
     private func loadIdentity(owner: UUID) throws {
         let account = "identity-" + owner.uuidString
@@ -146,6 +165,12 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
     func request(path: String, method: String = "POST", body: [String:String]? = nil, authenticated: Bool = true) async throws -> Data {
         let epoch = generation
+        if authenticated, let source = authenticationSource {
+            guard source.session?.user.id == session?.user.id, session != nil else { throw CloudError.signedOut }
+            let result = try await source.request(path: path, method: method, body: body)
+            guard epoch == generation else { throw CloudError.signedOut }
+            return result
+        }
         let token = authenticated ? try await accessToken() : nil
         let result = try await raw(path:path,method:method,data:try body.map { try JSONEncoder().encode($0) },token:token)
         if authenticated, epoch != generation { throw CloudError.signedOut }
@@ -168,7 +193,7 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     func sync(available: Bool = true) async throws {
         guard let identity else { throw CloudError.signedOut }
         #if os(macOS)
-        let name = Host.current().localizedName ?? "Mac"
+        let name = (Host.current().localizedName ?? "Mac") + (kind == "controller" ? " · remote view" : "")
         #else
         let name = UIDevice.current.name
         #endif

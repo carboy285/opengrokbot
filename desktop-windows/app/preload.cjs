@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
+  openMirror:()=>ipcRenderer.invoke('workspace:mirror'),
   cloudStatus:()=>ipcRenderer.invoke('cloud:status'),
   cloudSignIn:(email,password,create)=>ipcRenderer.invoke('cloud:sign-in',email,password,create),
   cloudSignOut:()=>ipcRenderer.invoke('cloud:sign-out'),

@@ -18,18 +18,19 @@ class PublicError extends Error {}
 let state,settings,installed=[],composioConfiguration,connectedTools=[],composioBusy=false,browserConfiguration;
 const active=new Map(),pendingBots=new Set();
 let initialization;
-let window;
+let window,mirrorWindow;
 const rendererFile = path.resolve(__dirname, '../renderer/index.html');
+const mirrorFile = path.resolve(__dirname, '../renderer/mirror.html');
 const documentation = new Set(['https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://tailscale.com/download','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
 let writeQueue = Promise.resolve();
 function file(name) { return path.join(app.getPath('userData'), name); }
 function authorized(event) {
-  try { return event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame && fileURLToPath(event.senderFrame.url) === rendererFile; }
+  try { return (event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame && fileURLToPath(event.senderFrame.url) === rendererFile) || (event.sender === mirrorWindow?.webContents && event.senderFrame === mirrorWindow.webContents.mainFrame && fileURLToPath(event.senderFrame.url) === mirrorFile); }
   catch { return false; }
 }
 function handle(name, callback) {
   ipcMain.handle(name, async (event, ...args) => {
-    if (!authorized(event)) return { ok: false, error: 'Untrusted request' };
+    if (!authorized(event) || event.sender === mirrorWindow?.webContents && !name.startsWith('mirror:')) return { ok: false, error: 'Untrusted request' };
     try { return { ok: true, value: await callback(...args) }; }
     catch(error) { return { ok: false, error: error instanceof PublicError?error.message:'The action could not be completed. Your existing data was kept; unlock your device or check available storage and try again.' }; }
   });
@@ -169,6 +170,14 @@ const cloud = new CloudHost({
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
  changed:status=>{remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
 });
+const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
+function openMirror(){
+ if(mirrorWindow&&!mirrorWindow.isDestroyed()){mirrorWindow.show();mirrorWindow.focus();return;}
+ mirrorWindow=new BrowserWindow({width:1150,height:800,minWidth:850,minHeight:600,title:'OpenGrokBot · Remote computer',webPreferences:{preload:path.join(__dirname,'mirror-preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
+ mirrorWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));mirrorWindow.webContents.on('will-navigate',event=>event.preventDefault());mirrorWindow.webContents.session.setPermissionRequestHandler((_webContents,_permission,callback)=>callback(false));
+ mirrorWindow.on('closed',()=>{mirror.stop();mirrorWindow=null;showHost();});mirrorWindow.loadFile(mirrorFile);
+}
+async function mirrorAction(operation){await ensureState();try{return await operation();}catch(error){throw new PublicError(error.message);}}
 async function cloudAction(operation){await ensureState();try{return await operation();}catch(error){throw new PublicError(error.message);}}
 function remoteSnapshot(){const {sessions,version,...workspace}=state;return {protocolVersion:1,hostName:require('node:os').hostname(),revision,workspace:{...workspace,schemaVersion:2,bots:workspace.bots.map(x=>({...x,symbol:x.symbol||'sparkles'})),entries:workspace.entries.map(x=>({...x,date:(x.date||'2001-01-01T00:00:00Z').replace(/\.\d+Z$/,'Z')}))},running:[...active.keys()],providers:installed.map(x=>({provider:x.provider,version:x.version})),defaultProvider:selectedCLI()?.provider};}
 async function remoteFiles(id){if(!state.bots.some(x=>x.id.toLowerCase()===String(id).toLowerCase()))throw new Error('Unknown Bot');let values;try{values=await readdir(botDirectory(state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase()).id),{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}return values.filter(x=>!x.name.startsWith('.')&&x.isFile()).slice(0,500).map(x=>({name:x.name}));}
@@ -191,6 +200,12 @@ async function remoteCommand(command){
  await atomicJSON('preview-workspace.json',state);notify();
 }
 function configureIPC() {
+ handle('workspace:mirror',async()=>{await ensureState();if(!cloud.data.session)throw new PublicError('Sign in under Settings → Computer first.');openMirror();});
+ handle('mirror:discover',()=>mirrorAction(()=>mirror.discover()));
+ handle('mirror:select',id=>mirrorAction(()=>mirror.select(id)));
+ handle('mirror:command',command=>mirrorAction(()=>{if(!command||typeof command!=='object'||JSON.stringify(command).length>131072||!['send','stop','retry','create_bot','delete_bot','configure_bot','update_avatar','cancel_task'].includes(command.action))throw new Error('Unsupported remote command.');return mirror.command(command);}));
+ handle('mirror:pin',(bot,value)=>mirrorAction(()=>{if(typeof bot!=='string'||!/^[a-f0-9-]{36}$/i.test(bot)||typeof value!=='boolean')throw new Error('Invalid pin setting.');return mirror.pin(bot,value);}));
+ handle('mirror:close',()=>{mirrorWindow?.close();});
  handle('browser:status',async()=>{await ensureState();return {configured:!!browserConfiguration};});
  handle('browser:configure',async(key,project)=>{await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing browser access.');requireVault();if(typeof key!=='string'||!key.trim()||key.length>4096||typeof project!=='string'||!/^[a-f0-9-]{36}$/i.test(project))throw new PublicError('Enter a Browserbase key and project UUID.');const value={key:key.trim(),project};await atomicJSON('browser.encrypted.json',{encrypted:safeStorage.encryptString(JSON.stringify(value)).toString('base64')});browserConfiguration=value;return {configured:true};});
  handle('browser:remove',async()=>{if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing browser access.');await atomicJSON('browser.encrypted.json',null);browserConfiguration=null;return {configured:false};});
@@ -325,5 +340,5 @@ app.whenReady().then(() => {
   window.loadFile(rendererFile);
   (async()=>{try{await ensureState();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
 });
-app.on('before-quit',()=>{quitting=true;cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
+app.on('before-quit',()=>{quitting=true;mirror.stop();cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
 app.on('window-all-closed', () => {if(!cloud.active)app.quit();});

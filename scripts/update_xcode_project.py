@@ -75,7 +75,7 @@ for configuration in ('Debug','Release'):
     objects[uid('app'+configuration)]['buildSettings']['CURRENT_PROJECT_VERSION'] = '9'
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
-shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',team_shared,glass,avatar]+remote_shared
+shared = ['GrokBot/Remote/RemoteController.swift','GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift','GrokBot/Core/CLIProtocol.swift',team_shared,glass,avatar]+remote_shared
 tests = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotTests').glob('*.swift'))
 add_to_group(uid('testgroup'), [reference(p) for p in tests])
 for path in tests:

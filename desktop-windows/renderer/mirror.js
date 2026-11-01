@@ -1,0 +1,41 @@
+const api=window.mirror,$=s=>document.querySelector(s);
+const make=(tag,text)=>{const element=document.createElement(tag);if(text!=null)element.textContent=text;return element;};
+const action=(label,callback)=>{const button=make('button',label);button.type='button';button.addEventListener('click',()=>Promise.resolve().then(callback).catch(error=>{$('#feedback').textContent=error.message;}));return button;};
+const result=async promise=>{const response=await promise;if(!response.ok)throw new Error(response.error);return response.value;};
+let status={},selected=null,selectedHost=null,sending=false,follow=true,lastTop=0,content,signature='',lastRequest;
+const drafts=new Map();
+const bot=()=>status.snapshot?.workspace.bots.find(x=>x.id===selected);
+const key=()=>selectedHost+'|'+selected;
+$('#draft').addEventListener('input',()=>{drafts.set(key(),$('#draft').value);});
+function bottom(){if(follow)requestAnimationFrame(()=>{if(follow)$('#messages').scrollTop=$('#messages').scrollHeight;});}
+$('#messages').addEventListener('scroll',()=>{const top=$('#messages').scrollTop;if(top<lastTop-1)follow=false;else if(top>lastTop)follow=$('#messages').scrollHeight-top-$('#messages').clientHeight<70;lastTop=top;},{passive:true});
+new ResizeObserver(bottom).observe($('#messages'));
+function render(value){
+ status=value;$('#status').textContent=value.phase;$('#fingerprint').textContent=value.fingerprint?'Controller fingerprint: '+value.fingerprint:'';
+ if(value.hostID!==selectedHost){drafts.set(key(),$('#draft').value);selectedHost=value.hostID;selected=null;$('#draft').value='';signature='';}
+ const picker=$('#hosts');picker.replaceChildren();const placeholder=make('option','Choose a computer');placeholder.value='';picker.append(placeholder);
+ for(const host of value.hosts||[]){const option=make('option',host.name+(host.online?' · online':' · offline'));option.value=host.id;picker.append(option);}picker.value=value.hostID||'';
+ const bots=[...(value.snapshot?.workspace.bots||[])].sort((a,b)=>Number(b.isPinned??b.isMain??false)-Number(a.isPinned??a.isMain??false));
+ if(selected&&!bots.some(x=>x.id===selected)){selected=null;$('#draft').value='';}
+ $('#bots').replaceChildren();for(const item of bots){const row=action((item.isPinned??item.isMain?'★ ':'')+item.name,()=>{drafts.set(key(),$('#draft').value);selected=item.id;$('#draft').value=drafts.get(key())||'';follow=true;signature='';render(status);});row.classList.toggle('selected',item.id===selected);$('#bots').append(row);}
+ const current=bot();$('#heading').replaceChildren();
+ if(current){
+  $('#heading').append(make('strong',current.name),action(current.isPinned??current.isMain?'Unpin':'Pin',async()=>{await result(api.pin(current.id,!(current.isPinned??current.isMain??false)));}),action('Provider',async()=>{const provider=prompt('Provider: codex, claude, grok, opencode or gemini',current.aiConfiguration?.activeProvider||value.snapshot.defaultProvider||'codex');if(provider==null)return;if(!['codex','claude','grok','opencode','gemini'].includes(provider))throw new Error('Choose a supported provider.');const model=prompt('Model ID (blank uses provider default)','');if(model==null)return;await command({action:'configure_bot',botID:current.id,configuration:{providers:[{provider,model}],activeProvider:provider,replyMode:'one'}});}));
+  if(!current.isMain)$('#heading').append(action('Delete',async()=>{if(confirm('Delete '+current.name+' and its conversations on the server?'))await command({action:'delete_bot',botID:current.id});}));
+ }
+ const entries=current?(value.snapshot.workspace.entries||[]).filter(x=>x.botID===current.id):[];
+ const next=JSON.stringify([selected,entries]);if(signature!==next){signature=next;if(!content){content=make('div');content.id='content';$('#messages').replaceChildren(content);new ResizeObserver(bottom).observe(content);}content.replaceChildren();for(const entry of entries){const bubble=make('div',entry.text||'Working…');bubble.className='bubble '+entry.kind;content.append(bubble);}if(!current)content.append(make('p','Choose a server, then a Bot. Work runs on the selected server.'));bottom();}
+ $('#send').disabled=!current||sending||!value.snapshot;$('#stop').disabled=!current||!value.snapshot?.running.includes(current.id);$('#new').disabled=!value.snapshot;
+}
+async function command(value){await result(api.command(value));}
+$('#hosts').addEventListener('change',async()=>{try{if(!$('#hosts').value)return;$('#feedback').textContent='Connecting…';render(await result(api.select($('#hosts').value)));$('#feedback').textContent='';}catch(error){$('#feedback').textContent=error.message;}});
+$('#refresh').addEventListener('click',async()=>{try{render(await result(api.discover()));}catch(error){$('#feedback').textContent=error.message;}});
+$('#local').addEventListener('click',()=>api.close());
+$('#new').addEventListener('click',async()=>{try{const name=prompt('New Bot name');if(!name)return;const purpose=prompt('What should this Bot do?','');if(purpose==null)return;await command({action:'create_bot',name,purpose,color:'purple'});}catch(error){$('#feedback').textContent=error.message;}});
+$('#stop').addEventListener('click',async()=>{try{if(bot())await command({action:'stop',botID:bot().id});}catch(error){$('#feedback').textContent=error.message;}});
+$('#composer').addEventListener('submit',async event=>{
+ event.preventDefault();const current=bot(),text=$('#draft').value.trim(),host=selectedHost;if(sending||!current||!text)return;
+ const request=lastRequest?.host===host&&lastRequest.bot===current.id&&lastRequest.text===text?lastRequest:{host,bot:current.id,text,id:crypto.randomUUID()};lastRequest=request;sending=true;follow=true;render(status);
+ try{await command({requestID:request.id,action:'send',botID:current.id,text});if(selectedHost===host&&selected===current.id&&$('#draft').value.trim()===text){$('#draft').value='';drafts.delete(key());}lastRequest=null;$('#feedback').textContent='Message accepted by server.';}catch(error){$('#feedback').textContent=error.message;}finally{sending=false;render(status);}
+});
+api.onChange(render);result(api.discover()).then(render).catch(error=>{$('#feedback').textContent=error.message;});

@@ -21,21 +21,21 @@ function keyFor(local, peer, owner) {
   return Buffer.from(crypto.hkdfSync('sha256', shared, Buffer.from(lower(owner)), Buffer.from('OpenGrokBot/relay/v1|' + peers), 32));
 }
 function context(owner, sender, recipient, id, kind) { return Buffer.from(`OpenGrokBot/1|${owner}|${sender}|${recipient}|${id}|${kind}`.toLowerCase()); }
-function seal(local, peer, owner, id, body) {
+function seal(local, peer, owner, id, body, kind = 'response') {
   const data = Buffer.from(JSON.stringify(body));
   if (data.length > 5900000) throw new Error('The workspace is too large to send. Export older conversations first.');
   const expiry = Buffer.alloc(8); expiry.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 1000) + 90));
   const nonce = crypto.randomBytes(12), cipher = crypto.createCipheriv('aes-256-gcm', keyFor(local, peer, owner), nonce);
-  cipher.setAAD(context(owner, local.id, peer.id, id, 'response'));
+  cipher.setAAD(context(owner, local.id, peer.id, id, kind));
   return Buffer.concat([nonce, cipher.update(Buffer.concat([expiry, data])), cipher.final(), cipher.getAuthTag()]).toString('base64');
 }
-function open(local, peer, owner, packet) {
-  if (!uuid(packet.id) || lower(packet.sender) !== lower(peer.id) || lower(packet.recipient) !== lower(local.id) || packet.kind !== 'request' || !Number.isFinite(Date.parse(packet.created_at)) || Math.abs(Date.now() - Date.parse(packet.created_at)) >= 120000) throw new Error('Unverified phone message.');
+function open(local, peer, owner, packet, kind = 'request') {
+  if (!uuid(packet.id) || lower(packet.sender) !== lower(peer.id) || lower(packet.recipient) !== lower(local.id) || packet.kind !== kind || !Number.isFinite(Date.parse(packet.created_at)) || Math.abs(Date.now() - Date.parse(packet.created_at)) >= 120000) throw new Error('Unverified phone message.');
   if (typeof packet.ciphertext !== 'string' || packet.ciphertext.length > 8000048) throw new Error('Invalid message size.');
   const bytes = Buffer.from(packet.ciphertext, 'base64');
   if (bytes.length < 36 || bytes.length > 6000036) throw new Error('Invalid encrypted message.');
   const decipher = crypto.createDecipheriv('aes-256-gcm', keyFor(local, peer, owner), bytes.subarray(0, 12));
-  decipher.setAAD(context(owner, peer.id, local.id, packet.id, 'request')); decipher.setAuthTag(bytes.subarray(-16));
+  decipher.setAAD(context(owner, peer.id, local.id, packet.id, kind)); decipher.setAuthTag(bytes.subarray(-16));
   const data = Buffer.concat([decipher.update(bytes.subarray(12, -16)), decipher.final()]);
   const expiry = Number(data.readBigUInt64BE());
   if (expiry <= Date.now() / 1000 || expiry >= Date.now() / 1000 + 120) throw new Error('Expired phone message.');

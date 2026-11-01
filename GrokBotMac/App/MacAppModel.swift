@@ -33,6 +33,7 @@ final class MacAppModel: ObservableObject {
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
     @Published var showSearch = false
+    @Published var showMirror = false
     @Published var showBotInspector = false
     @Published var drafts: [UUID: String] = [:] { didSet { scheduleDraftSave() } }
     private var draftSave: Task<Void,Never>?

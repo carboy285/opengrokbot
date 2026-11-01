@@ -307,7 +307,7 @@ function showSettings(tab = 'General') {
     for (const [value,label] of [['system','Follow System'],['dark','Dark'],['light','Light']]) { const option=node('option','',label); option.value=value; select.append(option); } select.value=localStorage.getItem('appearance') || 'dark'; select.addEventListener('change',()=>applyTheme(select.value));
     append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),node('span','muted','Bot color')),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
     append(page,promo,node('p','settings-label','Account'),account,node('p','settings-label','Appearance'),appearance,button('Reset conversations…',()=>confirmReset()));
-  } else if (tab === 'Computer') { page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderCloudBrowser(page); }
+  } else if (tab === 'Computer') { page.append(button('View another computer on this account',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}})); page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderCloudBrowser(page); }
   else if (tab === 'Permissions') page.append(unavailable('CLI tool permissions', 'Codex runs with read-only workspace access. Other CLIs retain their own permissions. The app does not add approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
@@ -389,3 +389,5 @@ async function renderCloudBrowser(page){
  append(card,status,key,project,button('Save connection',async()=>{try{await result(bridge.browserConfigure(key.value,project.value));key.value='';status.textContent='Connection configuration saved. Ask a Bot to read an HTTPS page.';}catch(error){status.textContent=error.message;}}),button('Disconnect',async()=>{try{await result(bridge.browserRemove());status.textContent='Not connected';}catch(error){status.textContent=error.message;}}));page.append(card);
  try{const value=await result(bridge.browserStatus());status.textContent=value.configured?'Connection configuration saved':'Not connected';}catch(error){status.textContent=error.message;}
 }
+
+if(bridge.openMirror){const switcher=button('This computer ▾',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}});switcher.className='folder-filter';switcher.setAttribute('aria-label','Switch to another computer on this account');$('#search-slot').before(switcher);}
