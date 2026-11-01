@@ -87,6 +87,7 @@ jobs:
       - run: npm run test:desktop
       - run: node scripts/test-electron.cjs
       - run: npm run dist:windows
+      - run: node scripts/test-packaged-helper.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: OpenGrokBot-Windows

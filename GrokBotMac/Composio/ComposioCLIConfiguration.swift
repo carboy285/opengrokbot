@@ -32,14 +32,14 @@ struct ComposioCLIConfiguration {
             switch provider {
             case .codex:
                 // TOML strings use JSON-compatible escaping for ordinary path strings.
-                let quoted = String(data: try JSONSerialization.data(withJSONObject: [helper]), encoding: .utf8)!.dropFirst().dropLast()
+                let quoted = String(data: try JSONSerialization.data(withJSONObject: [helper], options: [.withoutEscapingSlashes]), encoding: .utf8)!.dropFirst().dropLast()
                 config.arguments = ["-c", "mcp_servers.\(name).command=\(quoted)", "-c", "mcp_servers.\(name).env_vars=[\"\(variable)\"]"]
             case .claude:
                 let filename = ".composio-\(UUID().uuidString).json"
                 try write(filename, bytes: json(["mcpServers":[name:server]]))
                 config.arguments = ["--mcp-config",directory.appendingPathComponent(filename).path]
             case .grok:
-                let quoted = String(data: try JSONSerialization.data(withJSONObject: [helper]), encoding: .utf8)!.dropFirst().dropLast()
+                let quoted = String(data: try JSONSerialization.data(withJSONObject: [helper], options: [.withoutEscapingSlashes]), encoding: .utf8)!.dropFirst().dropLast()
                 try write(".grok/config.toml", bytes: Data("[mcp_servers.\(name)]\ncommand = \(quoted)\n[mcp_servers.\(name).env]\n\(variable) = \"${\(variable)}\"\n".utf8))
             case .opencode:
                 let filename = ".composio-\(UUID().uuidString).json"

@@ -46,6 +46,10 @@
       "artifactName": "OpenGrokBot-${version}-Windows-${arch}-Setup.${ext}",
       "installerIcon": "desktop-windows/app/icon.ico",
       "uninstallerIcon": "desktop-windows/app/icon.ico"
-    }
+    },
+    "asarUnpack": [
+      "desktop-windows/app/composio-bridge.cjs",
+      "desktop-windows/app/composio.cjs"
+    ]
   }
 }

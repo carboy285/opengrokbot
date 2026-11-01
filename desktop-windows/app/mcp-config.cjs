@@ -3,7 +3,7 @@ const {trustedURL,variable}=require('./composio.cjs');
 async function configure(provider,directory,url){
   if(!url)return {arguments:[],environment:{},cleanup:async()=>{}};
   if(!trustedURL(url))throw new Error('Set up Composio again.');
-  const helper=path.join(__dirname,'composio-bridge.cjs'),name='opengrokbot-composio',command=process.execPath,args=[helper];
+  const helper=path.join(__dirname.replace('app.asar'+path.sep,'app.asar.unpacked'+path.sep),'composio-bridge.cjs'),name='opengrokbot-composio',command=process.execPath,args=[helper];
   const environment={[variable]:url};const result={arguments:[],environment};const files=[];
   result.cleanup=async()=>{for(const file of files)await fs.rm(file,{force:true}).catch(()=>{});};
   const write=async(relative,body)=>{const file=path.join(directory,relative);await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});try{await fs.writeFile(file,body,{flag:'wx',mode:0o600});}catch(error){if(error.code!=='EEXIST'||await fs.readFile(file,'utf8')!==body)throw error;}files.push(file);return file;};

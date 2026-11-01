@@ -52,6 +52,30 @@ final class MacComposioTests: XCTestCase {
         let link = try await client.link(sessionID: session.session_id, toolkit: "github")
         XCTAssertEqual(link.host, "connect.composio.dev")
     }
+    func testBundledHelperAndAllProviderConfigsKeepCapabilitiesOutOfDiskAndArguments() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capability = "https://connect.composio.dev/mcp/private-test-capability"
+        for provider in CLIProvider.allCases {
+            let config = try ComposioCLIConfiguration.make(provider: provider, directory: root, sessionURL: capability)
+            defer { config.cleanup() }
+            XCTAssertEqual(config.environment["OPENGROKBOT_COMPOSIO_MCP_URL"], capability)
+            XCTAssertFalse(config.arguments.joined().contains(capability))
+            // JSON's optional escaped slash is invalid in a TOML basic string.
+            if provider == .codex { XCTAssertFalse(config.arguments.joined().contains("\\/")) }
+            let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey])!
+            for case let file as URL in files {
+                if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                    let body = try String(contentsOf: file, encoding: .utf8)
+                    XCTAssertFalse(body.contains(capability))
+                    if file.pathExtension == "toml" { XCTAssertFalse(body.contains("\\/")) }
+                }
+            }
+            config.cleanup()
+        }
+    }
+
     func testRejectsCredentialRedirectAndRedactsServiceErrors() async {
         for url in ["http://connect.composio.dev/x", "https://composio.dev.evil.example/x", "https://user:secret@composio.dev/x", "https://composio.dev:8443/x"] { XCTAssertNil(ComposioClient.trustedURL(url)) }
         let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [ComposioMockProtocol.self]
