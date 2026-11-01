@@ -77,6 +77,7 @@ final class AppModel: ObservableObject {
     /// Applies only completed assistant output; all mutations save together before publishing.
     @discardableResult
     func applyBotActions(_ response: String, replyID: UUID, bot: Bot, configuration: BotAIConfiguration, delivery: TeamMessage?) -> Bool {
+        guard workspace.bots.contains(where: { $0.id == bot.id }) else { return false }
         let parsed = BotTeamwork.parse(response)
         return commit { value in
             if let index = value.entries.firstIndex(where: { $0.id == replyID }) {

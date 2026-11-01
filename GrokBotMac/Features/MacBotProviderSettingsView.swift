@@ -14,6 +14,11 @@ struct MacBotProviderSettingsView: View {
             Text("Providers & models").font(.system(size: 17, weight: .medium))
             Text("Choose available providers, then select the one provider and model that answers for this Bot. Model access follows each CLI’s account.")
                 .font(.system(size: 13)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            if configuration.providers.count > 1 {
+                Picker("Active provider", selection: Binding(get: { configuration.activeProvider ?? configuration.providers[0].provider }, set: { provider in update { $0.activeProvider = provider } })) {
+                    ForEach(configuration.providers) { choice in Text(choice.provider.name).tag(choice.provider) }
+                }.disabled(busy).accessibilityIdentifier("bot-active-provider")
+            }
             ForEach(CLIProvider.allCases) { provider in
                 let installed = desktop.installedCLIs.first { $0.provider == provider }
                 let choice = configuration.providers.first { $0.provider == provider }
@@ -59,11 +64,6 @@ struct MacBotProviderSettingsView: View {
                         if let note = desktop.modelCatalogFeedback[provider] { Text(note).font(.system(size: 11)).foregroundStyle(MacTheme.secondary) }
                     }
                 }.padding(14).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 14))
-            }
-            if configuration.providers.count > 1 {
-                Picker("Active provider", selection: Binding(get: { configuration.activeProvider ?? configuration.providers[0].provider }, set: { provider in update { $0.activeProvider = provider } })) {
-                    ForEach(configuration.providers) { choice in Text(choice.provider.name).tag(choice.provider) }
-                }.disabled(busy).accessibilityIdentifier("bot-active-provider")
             }
             Text("Only the active provider’s selected model responds to this Bot’s messages.")
                 .font(.system(size: 12)).foregroundStyle(MacTheme.secondary)

@@ -2,7 +2,7 @@
 
 Install the x64 Setup EXE from [Downloads](DOWNLOADS.md). It is an unsigned development build. The installer supports a per-user destination, a Start menu entry, and a desktop shortcut. It does not install AI CLIs automatically.
 
-Follow [Setup](SETUP.md) on first launch: choose a local CLI, install/sign in using its own guide, then optionally connect a Composio project. The initial workspace contains one empty Grok Bot. Chat, saved provider sessions, stop/retry, manual Bot creation, export, appearance settings, and the device vault are implemented.
+Follow [Setup](SETUP.md) on first launch: choose a local CLI, install/sign in using its own guide, then optionally connect a Composio project. The initial workspace contains one empty Grok Bot. Chat, saved provider sessions, stop/retry, chat-based and manual Bot creation, asynchronous teamwork, groups, memory, per-Bot model selection, export, appearance settings, and the device vault are implemented.
 
 ## Build
 
