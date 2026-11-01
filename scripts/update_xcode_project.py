@@ -42,6 +42,11 @@ reference(glass)
 glass_build = add('build'+glass, isa='PBXBuildFile', fileRef=uid(glass))
 objects[uid('sources')]['files'] = list(dict.fromkeys(objects[uid('sources')]['files']+[glass_build]))
 add_to_group(uid('appgroup'), [uid(glass)])
+ios_entitlements = 'GrokBot/Resources/GrokBot.entitlements'
+reference(ios_entitlements, 'text.plist.entitlements')
+add_to_group(uid('appgroup'), [uid(ios_entitlements)])
+for configuration in ('Debug','Release'):
+    objects[uid('app'+configuration)]['buildSettings']['CODE_SIGN_ENTITLEMENTS'] = ios_entitlements
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
 shared = ['GrokBot/App/AppModel.swift','GrokBot/Core/Models.swift','GrokBot/Core/WorkspaceStore.swift','GrokBot/Security/KeychainSecretStore.swift',glass]

@@ -291,6 +291,7 @@
 					"@executable_path/Frameworks",
 				);
 				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"CODE_SIGN_ENTITLEMENTS" = "GrokBot/Resources/GrokBot.entitlements";
 			};
 			"name" = "Debug";
 		};
@@ -313,6 +314,7 @@
 					"@executable_path/Frameworks",
 				);
 				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"CODE_SIGN_ENTITLEMENTS" = "GrokBot/Resources/GrokBot.entitlements";
 			};
 			"name" = "Release";
 		};
@@ -420,6 +422,7 @@
 				"CFC363919F9F7413947BFD12",
 				"58046A86A73E2D753AC18BB4",
 				"7A3BA4BE97D2BE335CC9E2E0",
+				"0382A7C5DF1AAC957280C3E0",
 			);
 			"name" = "GrokBot";
 			"sourceTree" = "<group>";
@@ -1024,6 +1027,12 @@
 			"productName" = "GrokBotMacUITests";
 			"productReference" = "49EC37C2492B97E97CE59762";
 			"productType" = "com.apple.product-type.bundle.ui-testing";
+		};
+		"0382A7C5DF1AAC957280C3E0" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.plist.entitlements";
+			"path" = "GrokBot/Resources/GrokBot.entitlements";
+			"sourceTree" = "<group>";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";

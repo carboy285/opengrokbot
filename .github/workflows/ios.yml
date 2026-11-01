@@ -5,9 +5,13 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   ios:
     runs-on: macos-26
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Show selected Xcode
@@ -29,7 +33,7 @@ jobs:
           xcodebuild -project GrokBot.xcodeproj -scheme GrokBot
           -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_ID"
           -resultBundlePath build/Tests.xcresult
-          CODE_SIGNING_ALLOWED=NO test
+          CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
