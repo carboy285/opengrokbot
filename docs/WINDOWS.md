@@ -31,4 +31,4 @@ CHROMIUM_PATH=/path/to/chromium npm run test:ui
 
 These browser checks use an explicit test IPC fixture to exercise setup, chat rendering, persistence, draft recovery, text escaping, theme/reduced-motion behavior, and focus protection for revealed secrets. Native subprocess and encrypted-storage checks run separately on Windows. A normal browser cannot launch local CLIs and shows that limitation.
 
-Native Apple Liquid Glass is available only on the Apple targets. Windows uses translucent styling that follows the same reference layout. Voice, file attachments, cloud-computer control, and iPhone host pairing are not implemented.
+Native Apple Liquid Glass is available only on the Apple targets. Windows uses translucent styling that follows the same reference layout. The iPhone remotely controls this workspace through [Tailscale, Funnel, Wi-Fi or HTTPS](REMOTE_ACCESS.md). With remote access enabled, closing the window keeps the app in the system tray; Quit stops hosting. Voice, file attachment upload, remote screen sharing, power/wake management and cloud-computer control are not implemented.

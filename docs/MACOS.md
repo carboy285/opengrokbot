@@ -14,7 +14,7 @@ Native CI compiles the app and helper, runs unit/UI tests, and packages a univer
 
 ## Install a built DMG
 
-Open `OpenGrokBot-0.4.0-mac-universal.dmg` and drag **OpenGrokBot** to **Applications**. The image also contains an Applications shortcut and a Read Me. Launch your installed copy from Applications.
+Open `OpenGrokBot-0.5.0-mac-universal.dmg` and drag **OpenGrokBot** to **Applications**. The image also contains an Applications shortcut and a Read Me. Launch your installed copy from Applications.
 
 The CI package is ad-hoc signed and **not notarized**. If macOS blocks a development copy you have reviewed, use **System Settings > Privacy & Security > Open Anyway** for that app and confirm the system prompt. Apple documents this [per-app opening workflow](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac). macOS may block a downloaded copy under Gatekeeper. A local Xcode build is the predictable development path; a public distribution build requires a Developer ID certificate and Apple notarization. Do not disable Gatekeeper globally. The package does not replace, modify, or launch the official Grok Bot app.
 
@@ -45,4 +45,4 @@ See [SETUP.md](SETUP.md) for the full walkthrough. Codex, Claude Code, Grok Buil
 
 Conversations are stored under `~/Library/Application Support/OpenGrokBot/`. Prior sandbox preview data is copied from the app container on first migration, with a backup retained. Normal conversation files are not a secret vault.
 
-The app starts with one empty Grok Bot. Extra Bots are created through the user’s requests in chat or the New Bot form. Each specialist has its own selected provider/model, memory and conversation; Bots can message each other and participate in groups. Voice, file attachments, the proprietary Grok Bot cloud computer, and an iPhone host bridge are not implemented.
+The app starts with one empty Grok Bot. Extra Bots are created through the user’s requests in chat or the New Bot form. Each specialist has its own selected provider/model, memory and conversation; Bots can message each other and participate in groups. The iPhone remotely controls this same workspace through [Tailscale, Funnel, Wi-Fi or HTTPS](REMOTE_ACCESS.md). Voice, file attachment upload, remote screen sharing, power/wake management and the proprietary Grok Bot cloud computer are not implemented.

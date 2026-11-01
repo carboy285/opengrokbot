@@ -32,7 +32,7 @@ The development Mac build is ad-hoc signed and not notarized. The Windows build 
 
 In desktop **Settings → Computer → iPhone remote control**, choose private Tailscale, public Funnel HTTPS, trusted Wi-Fi/private IP, or your own HTTPS proxy. Enable access and copy its pairing link. Open the link on the iPhone or paste it into **Connect Desktop** in the iOS app. Tailscale private access needs both devices on your tailnet; Funnel works without Tailscale on the phone. Keep the host awake with OpenGrokBot running.
 
-The phone controls the same Bots, chats, memories, active models and running tasks; it does not save an independent local workspace. Work continues when the phone disconnects. The controller reconnects after network changes and suppresses duplicate sends after a lost acknowledgment. Every request needs a revocable random pairing key, stored in Keychain/Windows device encryption. Direct Wi-Fi HTTP is an explicit unencrypted option for trusted private networks; public endpoints require HTTPS. See the [connection guide](docs/REMOTE_ACCESS.md).
+The phone controls the same Bots, chats, memories, active models and running tasks; it does not save an independent local workspace. Work continues when the phone disconnects. The controller reconnects after network changes and suppresses duplicate sends after a lost acknowledgment. Every request needs a revocable random pairing key, stored in Keychain/Windows device encryption. Direct Wi-Fi HTTP is an explicit unencrypted option for trusted private networks; the controller requires HTTPS for public addresses. See the [connection guide](docs/REMOTE_ACCESS.md).
 
 ## Bots, models and teamwork
 
