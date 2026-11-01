@@ -182,7 +182,9 @@ final class RemoteController: ObservableObject {
         do {
             _ = try await client.fetch(peer,target:"/v1/command",command:command)
             guard current == epoch else { return false }
-            try? await refresh(); return true
+            // The regular state poll publishes the result. Acknowledged commands
+            // must not keep the composer busy waiting for another relay exchange.
+            return true
         } catch { self.error = error.localizedDescription; return false }
     }
     func send(_ text: String, bot: Bot) async -> Bool {

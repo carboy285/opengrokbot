@@ -117,7 +117,7 @@ struct RootView: View {
     }
 
     private func pinnedTile(_ bot: Bot, large: Bool) -> some View {
-        Button { inspectedBot = bot } label: {
+        NavigationLink(value: bot) {
             VStack(spacing: large ? 17 : 12) {
                 ZStack(alignment: .bottomTrailing) {
                     BotAvatar(color: bot.color, size: large ? min(heroSize, 140) : 64, appearance: bot.appearance)
@@ -129,7 +129,7 @@ struct RootView: View {
                 Text(bot.name).font(large ? .title3 : .subheadline).foregroundStyle(.primary)
                     .multilineTextAlignment(.center).lineLimit(2)
             }.frame(maxWidth: .infinity).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel("\(bot.name), pinned. Open Bot details")
+        }.buttonStyle(.plain).accessibilityLabel("\(bot.name), pinned. Open chat")
             .contextMenu { botActions(bot) }
     }
 

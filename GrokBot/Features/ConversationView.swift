@@ -111,6 +111,7 @@ struct ConversationView: View {
                     Image(systemName: "plus").font(.system(size: 21, weight: .regular))
                         .foregroundStyle(.secondary).frame(width: 36, height: 36)
                         .background(.primary.opacity(0.06), in: Circle())
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Message options")
                 TextField("Ask \(bot.name)", text: draft, axis: .vertical)
                     .font(.body).lineLimit(1...6).focused($composing).padding(.vertical, 7)
@@ -122,17 +123,29 @@ struct ConversationView: View {
                         Image(systemName: "stop.fill").font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Palette.background).frame(width: 38, height: 38)
                             .background(.primary, in: Circle())
-                    }.disabled(!remote.online).accessibilityLabel("Stop response")
+                            .frame(width: 48, height: 48).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(!remote.online).accessibilityLabel("Stop response")
                 } else {
                     Button { send() } label: {
-                        Image(systemName: "arrow.up").font(.system(size: 21, weight: .semibold))
-                            .foregroundStyle(canSend ? Palette.background : Color.secondary)
-                            .frame(width: 38, height: 38)
-                            .background(canSend ? Color.primary : Color.primary.opacity(0.06), in: Circle())
-                    }.disabled(!canSend).accessibilityLabel("Send message")
+                        ZStack {
+                            Circle().fill(canSend || sending ? Color.primary : Color.primary.opacity(0.06))
+                                .frame(width: 38, height: 38)
+                            if sending {
+                                ProgressView().controlSize(.small).tint(Palette.background)
+                            } else {
+                                Image(systemName: "arrow.up").font(.system(size: 21, weight: .semibold))
+                                    .foregroundStyle(canSend ? Palette.background : Color.secondary)
+                            }
+                        }.frame(width: 48, height: 48).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(!canSend).accessibilityLabel(sending ? "Sending message" : "Send message")
                 }
             }
-            .padding(9).glassChrome(in: RoundedRectangle(cornerRadius: 30))
+            .padding(5)
+            .background {
+                RoundedRectangle(cornerRadius: 30).fill(.clear)
+                    .glassChrome(in: RoundedRectangle(cornerRadius: 30), interactive: false)
+                    .allowsHitTesting(false)
+            }
             .shadow(color: .black.opacity(0.035), radius: 14, y: 4)
             Text(remote.online ? "Runs on \(remote.hostName)" : "Reconnecting to \(remote.hostName)…")
                 .font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity)

@@ -2,11 +2,11 @@
 
 ## Latest iPhone layout source
 
-[Download the latest Xcode project](https://github.com/carboy285/opengrokbot/archive/refs/heads/codex/macos-client.zip) for **0.6.2 (build 3)**. This source update includes pinned Bot tiles, a floating search bar, glass navigation controls, rounded avatars and chat bubbles, and shorter connection polling waits. Open `GrokBot.xcodeproj`, select the **GrokBot** scheme and your iPhone, then choose **Product → Run** to replace the installed app. In the iPhone app, open **Settings** and confirm that **App version** shows **0.6.2**. Unzipping the project alone does not update the installed app.
+[Download the latest Xcode project](https://github.com/carboy285/opengrokbot/archive/refs/heads/codex/macos-client.zip) for **0.6.3 (build 4)**. This source update includes pinned Bot tiles, a floating search bar, glass navigation controls, rounded avatars and chat bubbles, and shorter connection polling waits. Open `GrokBot.xcodeproj`, select the **GrokBot** scheme and your iPhone, then choose **Product → Run** to replace the installed app. In the iPhone app, open **Settings** and confirm that **App version** shows **0.6.3**. Unzipping the project alone does not update the installed app.
 
-Long-press any Bot to **Pin to top** or **Unpin Bot**, or use the button in Bot details. Pins are saved on this iPhone separately for each account and Mac. Pinned tiles have no arrows and open Bot details. Unpinned rows have arrows and open conversations. The main assistant is initially pinned. The phone remembers its Mac for a direct reconnect; the new Mac source also polls more frequently while the phone is active. Update both apps from this project for all latency changes.
+Long-press any Bot to **Pin to top** or **Unpin Bot**, or use the button in Bot details. Pins are saved on this iPhone separately for each account and Mac. Pinned tiles have no arrows and open conversations, just like unpinned rows. Use the long-press menu or the chat title to open Bot details. The send and stop buttons now have full 48-point tap areas, the decorative composer background ignores taps, and sending completes on the Mac’s acknowledgment instead of waiting for a second workspace refresh. The main assistant is initially pinned. The phone remembers its Mac for a direct reconnect; the new Mac source also polls more frequently while the phone is active. Update both apps from this project for all latency changes.
 
-Version 0.6.2 has not been compiled or tested at the user's request. Connection latency and appearance on a physical phone remain unverified. The versioned 0.6.1 DMG and ZIP below predate this update.
+Version 0.6.3 has not been compiled or tested at the user's request. Connection latency and appearance on a physical phone remain unverified. The versioned 0.6.1 DMG and ZIP below predate this update.
 
 ## Published Apple downloads
 

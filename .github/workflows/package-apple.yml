@@ -30,10 +30,10 @@ jobs:
       - name: Compile universal Mac app and package DMG
         run: ./scripts/build-macos.sh
       - name: Archive matching Xcode sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.6.2-Xcode/ --output=artifacts/OpenGrokBot-0.6.2-Xcode.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.6.3-Xcode/ --output=artifacts/OpenGrokBot-0.6.3-Xcode.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenGrokBot-0.6.2-Apple
+          name: OpenGrokBot-0.6.3-Apple
           path: |
             artifacts/macos/*.dmg
             artifacts/macos/*.sha256
@@ -44,10 +44,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > /tmp/opengrokbot-release.md <<'NOTES'
-          Updated iPhone layout with pinned Bot tiles, floating search, glass navigation controls, rounded avatars and chat bubbles, and shorter connection waits. Long-press a Bot to pin or unpin it. Pinned tiles open Bot details; unpinned rows open chats. Includes the avatar picker and encrypted Mac/iPhone account connection.
+          Updated iPhone layout with pinned Bot tiles, floating search, glass navigation controls, rounded avatars and chat bubbles, and shorter connection waits. Long-press a Bot to pin or unpin it. Both pinned tiles and unpinned rows open chats; pinned tiles have no arrows. The send and stop controls have full 48-point tap areas, and the composer background does not intercept taps. Includes the avatar picker and encrypted Mac/iPhone account connection.
 
           Install the Mac DMG and rebuild the iPhone app from the matching Xcode ZIP. Open GrokBot.xcodeproj, choose the GrokBot scheme, and select your signing team and iPhone.
 
           The Mac app is ad-hoc signed and is not notarized. This development build was compiled and packaged without running unit tests, UI tests, or other test suites, as requested. Physical Mac/iPhone behavior remains unverified.
           NOTES
-          gh release create v0.6.2 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.6.2 · Apple update' --prerelease --notes-file /tmp/opengrokbot-release.md artifacts/macos/*.dmg artifacts/macos/*.sha256 artifacts/*-Xcode.zip
+          gh release create v0.6.3 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.6.3 · Apple update' --prerelease --notes-file /tmp/opengrokbot-release.md artifacts/macos/*.dmg artifacts/macos/*.sha256 artifacts/*-Xcode.zip
