@@ -45,4 +45,4 @@ See [SETUP.md](SETUP.md) for the full walkthrough. Codex, Claude Code, Grok Buil
 
 Conversations are stored under `~/Library/Application Support/OpenGrokBot/`. Prior sandbox preview data is copied from the app container on first migration, with a backup retained. Normal conversation files are not a secret vault.
 
-The app starts with one empty Grok Bot. Extra Bots are created only by the user. Voice, file attachments, the proprietary Grok Bot cloud computer, and an iPhone host bridge are not implemented.
+The app starts with one empty Grok Bot. Extra Bots are created through the user’s requests in chat or the New Bot form. Each specialist has its own selected provider/model, memory and conversation; Bots can message each other and participate in groups. Voice, file attachments, the proprietary Grok Bot cloud computer, and an iPhone host bridge are not implemented.

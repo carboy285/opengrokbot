@@ -71,7 +71,13 @@ struct MacConversationView: View {
                     .disableAutocorrection(!spellChecking).focused($composing)
                     .padding(.vertical, 9)
                     .onKeyPress(keys: [.return], phases: .down) { press in
-                        if press.modifiers.contains(.shift) { return .ignored }
+                        if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.hasMarkedText() { return .ignored }
+                        if press.modifiers.contains(.shift) {
+                            if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
+                                editor.insertText("\n", replacementRange: editor.selectedRange())
+                            } else { draft.wrappedValue += "\n" }
+                            return .handled
+                        }
                         sendMessage(); return .handled
                     }
                     .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showBotInspector = false } }
@@ -82,7 +88,7 @@ struct MacConversationView: View {
                     Button { sendMessage() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(.black)
                             .frame(width: 38, height: 38).background(.white, in: Circle())
-                    }.buttonStyle(.plain).disabled(bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty).keyboardShortcut(.return, modifiers: [])
+                    }.buttonStyle(.plain).disabled(bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty)
                         .help("Send message").accessibilityLabel("Send message")
                 } else {
                     Image(systemName: "mic").font(.system(size: 21)).foregroundStyle(MacTheme.secondary)

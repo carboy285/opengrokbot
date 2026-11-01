@@ -29,6 +29,7 @@ struct MacWorkspaceView: View {
                         emptyWorkspace.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
+                .disabled(desktop.panel != nil)
                 .allowsHitTesting(desktop.panel == nil)
                 .accessibilityHidden(desktop.panel != nil)
                 if let panel = desktop.panel {
