@@ -85,7 +85,7 @@ jobs:
       - run: npm ci
       - name: Package Windows installer
         shell: pwsh
-        run: npm run dist:windows -- -c.win.signExecutable=$env:SIGNED -c.forceCodeSigning=$env:SIGNED
+        run: npm run dist:windows
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows

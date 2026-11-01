@@ -9,7 +9,7 @@
   "scripts": {
     "start:windows": "electron .",
     "test:desktop": "node --test desktop-windows/app/*.test.cjs",
-    "dist:windows": "electron-builder --win nsis --x64",
+    "dist:windows": "electron-builder --win nsis --x64 --config scripts/desktop-build.cjs --publish never",
     "preview:desktop": "python3 -m http.server 4173 --bind 127.0.0.1 --directory desktop-windows/renderer",
     "test:ui": "node scripts/test-desktop-ui.cjs",
     "test:cloud": "node scripts/test-cloud-db.cjs"
