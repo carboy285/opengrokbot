@@ -17,6 +17,7 @@ function render(value){
  for(const host of value.hosts||[]){const option=make('option',host.name+(host.online?' · online':' · offline'));option.value=host.id;picker.append(option);}picker.value=value.hostID||'';
  const bots=[...(value.snapshot?.workspace.bots||[])].sort((a,b)=>Number(b.isPinned??b.isMain??false)-Number(a.isPinned??a.isMain??false));
  if(selected&&!bots.some(x=>x.id===selected)){selected=null;$('#draft').value='';}
+ if(!selected&&bots.length){selected=bots[0].id;$('#draft').value=drafts.get(key())||'';follow=true;}
  $('#bots').replaceChildren();for(const item of bots){const row=action((item.isPinned??item.isMain?'★ ':'')+item.name,()=>{drafts.set(key(),$('#draft').value);selected=item.id;$('#draft').value=drafts.get(key())||'';follow=true;signature='';render(status);});row.classList.toggle('selected',item.id===selected);$('#bots').append(row);}
  const current=bot();$('#heading').replaceChildren();
  if(current){
@@ -25,7 +26,7 @@ function render(value){
  }
  const entries=current?(value.snapshot.workspace.entries||[]).filter(x=>x.botID===current.id):[];
  const next=JSON.stringify([selected,entries]);if(signature!==next){signature=next;if(!content){content=make('div');content.id='content';$('#messages').replaceChildren(content);new ResizeObserver(bottom).observe(content);}content.replaceChildren();for(const entry of entries){const bubble=make('div',entry.text||'Working…');bubble.className='bubble '+entry.kind;content.append(bubble);}if(!current)content.append(make('p','Choose a server, then a Bot. Work runs on the selected server.'));bottom();}
- $('#send').disabled=!current||sending||!value.snapshot;$('#stop').disabled=!current||!value.snapshot?.running.includes(current.id);$('#new').disabled=!value.snapshot;
+ $('#send').disabled=!current||sending||value.stage!=='connected';$('#stop').disabled=!current||value.stage!=='connected'||!value.snapshot?.running.includes(current.id);$('#new').disabled=value.stage!=='connected';
 }
 async function command(value){await result(api.command(value));}
 $('#hosts').addEventListener('change',async()=>{try{if(!$('#hosts').value)return;$('#feedback').textContent='Connecting…';render(await result(api.select($('#hosts').value)));$('#feedback').textContent='';}catch(error){$('#feedback').textContent=error.message;}});
@@ -39,3 +40,5 @@ $('#composer').addEventListener('submit',async event=>{
  try{await command({requestID:request.id,action:'send',botID:current.id,text});if(selectedHost===host&&selected===current.id&&$('#draft').value.trim()===text){$('#draft').value='';drafts.delete(key());}lastRequest=null;$('#feedback').textContent='Message accepted by server.';}catch(error){$('#feedback').textContent=error.message;}finally{sending=false;render(status);}
 });
 api.onChange(render);result(api.discover()).then(render).catch(error=>{$('#feedback').textContent=error.message;});
+
+$('#reconnect').addEventListener('click',async()=>{try{render(await result(api.retry()));$('#feedback').textContent='';}catch(error){$('#feedback').textContent=error.message;}});

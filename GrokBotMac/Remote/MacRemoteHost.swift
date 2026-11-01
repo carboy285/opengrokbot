@@ -131,8 +131,8 @@ final class MacRemoteHost: ObservableObject {
                             if self.pendingPhoneApproval == nil, self.promptedPhones.insert(peer.id).inserted {
                                 self.pendingPhoneApproval = peer
                             }
-                            self.connectionState = "Waiting for phone approval"
-                            let denied = RemoteHostResponse.error(403,"Approve this phone in Mac Settings → Computer. Compare its fingerprint before approving.")
+                            self.connectionState = "Waiting for device approval"
+                            let denied = RemoteHostResponse.error(403,"Approve this device in Mac Settings → Computer. Compare its fingerprint before approving.")
                             try? await self.account.send(CloudCoding.encoder().encode(CloudResponse(status:denied.status,body:denied.body)),to:peer,id:packet.id,kind:"response")
                             try? await self.account.acknowledge(packet); continue
                         }
@@ -144,19 +144,28 @@ final class MacRemoteHost: ObservableObject {
                             let response: CloudResponse
                             if let cached = self.replies[cacheKey] { response = cached }
                             else {
-                                let request = try CloudCoding.decoder().decode(CloudRequest.self,from:data)
-                                guard packet.kind == "request", request.target.count <= 2048, request.body.count <= 131072 else { throw CloudError.invalidPacket }
-                                response = await self.respond(request,peer:peer)
+                                if let request = try? CloudCoding.decoder().decode(CloudRequest.self,from:data), request.target.count <= 2048, request.body.count <= 131072 {
+                                    response = await self.respond(request,peer:peer)
+                                } else {
+                                    let error = RemoteHostResponse.error(400, "The remote request format is unsupported. Update both devices to 0.7.2.")
+                                    response = CloudResponse(status: error.status, body: error.body)
+                                }
                                 if self.replies.count >= 128 { self.replies.removeAll() }; self.replies[cacheKey] = response
                             }
                             // An approval revoked while a CLI model lookup awaited must also block its result.
                             guard self.enabled, self.account.approved(peer) else { continue }
-                            try await self.account.send(CloudCoding.encoder().encode(response),to:peer,id:packet.id,kind:"response")
+                            let encoded = try CloudCoding.encoder().encode(response)
+                            if encoded.count <= 5_900_000 {
+                                try await self.account.send(encoded,to:peer,id:packet.id,kind:"response")
+                            } else {
+                                let error = RemoteHostResponse.error(413, "This computer's workspace is too large for the encrypted relay. Export older conversations on the host and try again.")
+                                try await self.account.send(CloudCoding.encoder().encode(CloudResponse(status: error.status, body: error.body)),to:peer,id:packet.id,kind:"response")
+                            }
                             try await self.account.acknowledge(packet)
                         } catch { try? await self.account.acknowledge(packet) }
                     }
-                    if self.connectionState != "Waiting for phone approval" { self.connectionState = self.lastPhoneRequest.map { Date().timeIntervalSince($0) < 10 ? "Connected" : "Ready for approved phones" } ?? "Ready for approved phones" }
-                    let message = self.connectionState == "Waiting for phone approval" ? "Compare the phone’s fingerprint below, then choose Approve phone." : "Phone access is ready. Keep this Mac awake."
+                    if self.connectionState != "Waiting for device approval" { self.connectionState = self.lastPhoneRequest.map { Date().timeIntervalSince($0) < 10 ? "Connected" : "Ready for approved phones" } ?? "Ready for approved phones" }
+                    let message = self.connectionState == "Waiting for device approval" ? "Compare the device’s fingerprint below, then choose Approve device." : "Phone access is ready. Keep this Mac awake."
                     retryDelay = 1000
                     if self.feedback != message { self.feedback = message }
                 } catch { if Task.isCancelled || !self.enabled { return }; self.connectionState = "Offline · retrying"; self.feedback = error.localizedDescription; nextHeartbeat = .distantPast; retrying = true; retryDelay = min(15000, retryDelay * 2) }
@@ -189,6 +198,10 @@ final class MacRemoteHost: ObservableObject {
     }
     private func respond(_ request: CloudRequest, peer: CloudDevice) async -> CloudResponse {
         if request.method == "GET", let parts = URLComponents(string:request.target), parts.path == "/v1/state", let next = snapshot() {
+            if parts.queryItems?.contains(where: { $0.name == "overview" && $0.value == "true" }) == true {
+                do { return CloudResponse(status: 200, body: try CloudCoding.encoder().encode(CloudStatePatch(snapshot: next.botOverview(), baseRevision: nil, removedEntries: []))) }
+                catch { return CloudResponse(status: 500, body: Data()) }
+            }
             let since = parts.queryItems?.first(where:{$0.name == "since"})?.value
             if since == next.revision { return CloudResponse(status:204,body:Data()) }
             let baseline = baselines[peer.id].flatMap { $0.revision == since ? $0:nil }
@@ -196,7 +209,10 @@ final class MacRemoteHost: ObservableObject {
                 let patch = try CloudStatePatch.make(next,previous:baseline)
                 let data = try CloudCoding.encoder().encode(patch); baselines[peer.id] = next
                 return CloudResponse(status:200,body:data)
-            } catch { return CloudResponse(status:500,body:Data()) }
+            } catch {
+                let error = RemoteHostResponse.error(500, "The hosting computer could not prepare its workspace. Open it on the host and resolve any saved-workspace error before reconnecting.")
+                return CloudResponse(status: error.status, body: error.body)
+            }
         }
         let response = await dispatch(RemoteHostRequest(method:request.method,target:request.target,body:request.body))
         return CloudResponse(status:response.status,body:response.body)

@@ -37,14 +37,14 @@ struct GrokBotMacApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in desktop.flushDrafts(); desktop.stopAll(immediately: true) }
                 .onReceive(desktop.updates.objectWillChange) { _ in desktop.objectWillChange.send() }
                 .onReceive(desktop.remote.objectWillChange) { _ in desktop.objectWillChange.send() }
-                .alert("Allow this iPhone to use your Bots?", isPresented: Binding(
+                .alert("Allow this device to use your Bots?", isPresented: Binding(
                     get: { desktop.remote.pendingPhoneApproval != nil },
                     set: { if !$0 { desktop.remote.pendingPhoneApproval = nil } }
                 ), presenting: desktop.remote.pendingPhoneApproval) { phone in
-                    Button("Approve phone") { desktop.remote.approve(phone, allowed: true) }
+                    Button("Approve device") { desktop.remote.approve(phone, allowed: true) }
                     Button("Not now", role: .cancel) { desktop.remote.pendingPhoneApproval = nil }
                 } message: { phone in
-                    Text("\(phone.name) is signed in to your account. Compare this fingerprint with the one shown on your iPhone before approving:\n\n\(phone.fingerprint)\n\nApproval lets this phone view your Bots and chats and run work on this Mac.")
+                    Text("\(phone.name) is signed in to your account. Compare this fingerprint with the one shown on the viewing device before approving:\n\n\(phone.fingerprint)\n\nApproval lets this device view your Bots and chats and run work on this Mac.")
                 }
                 .alert("Couldn’t complete that action", isPresented: Binding(get: { app.errorMessage != nil }, set: { if !$0 { app.errorMessage = nil } })) {
                     Button("OK") { app.errorMessage = nil }

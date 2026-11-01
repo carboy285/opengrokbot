@@ -24,6 +24,20 @@ struct RemoteSnapshot: Codable, Sendable {
     var running: [UUID]
     var providers: [RemoteProvider]
     var defaultProvider: CLIProvider?
+    var overview: Bool? = nil
+
+    func botOverview() -> RemoteSnapshot {
+        var result = self
+        result.overview = true; result.revision = "overview-" + revision
+        var latest: [UUID:Entry] = [:]
+        for entry in workspace.entries { latest[entry.botID] = entry }
+        result.workspace.entries = workspace.bots.compactMap { bot in
+            guard var entry = latest[bot.id] else { return nil }; entry.text = String(entry.text.prefix(1000)); return entry
+        }
+        result.workspace.sharedMemory = nil; result.workspace.teamMessages = nil
+        for index in result.workspace.bots.indices { result.workspace.bots[index].memory = nil; result.workspace.bots[index].schedules = nil }
+        return result
+    }
 }
 struct RemoteCommand: Codable, Sendable {
     var requestID: UUID = UUID()

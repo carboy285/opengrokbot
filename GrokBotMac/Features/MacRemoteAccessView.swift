@@ -16,7 +16,7 @@ struct MacRemoteAccessView: View {
                 if let local = remote.account.localDevice {
                     Text("This Mac · " + local.fingerprint).font(.system(.caption,design:.monospaced)).textSelection(.enabled)
                 }
-                Text("Your phones").font(.headline)
+                Text("Your devices").font(.headline)
                 if remote.account.controllers.isEmpty { Text("Sign in on your iPhone to make it appear here.").foregroundStyle(.secondary) }
                 ForEach(remote.account.controllers) { phone in
                     HStack {
@@ -25,7 +25,7 @@ struct MacRemoteAccessView: View {
                             Text(phone.fingerprint).font(.system(.caption,design:.monospaced)).textSelection(.enabled)
                             Text(remote.account.approved(phone) ? "Approved":"Compare this fingerprint with the phone before approving.").font(.caption).foregroundStyle(.secondary)
                         }; Spacer()
-                        Button(remote.account.approved(phone) ? "Revoke":"Approve phone") { remote.approve(phone,allowed:!remote.account.approved(phone)) }
+                        Button(remote.account.approved(phone) ? "Revoke":"Approve device") { remote.approve(phone,allowed:!remote.account.approved(phone)) }
                     }.padding(.vertical,8)
                 }
                 if let feedback = remote.feedback { Text(feedback).font(.callout).foregroundStyle(.secondary) }

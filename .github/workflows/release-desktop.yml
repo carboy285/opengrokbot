@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.7.1/ --output=artifacts/OpenGrokBot-0.7.1-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.7.2/ --output=artifacts/OpenGrokBot-0.7.2-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -119,9 +119,9 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.7.1: chats open at the newest message and follow generated replies on iPhone, Mac and Windows. Includes server-backed pin sync, iPhone edge-swipe back, safer workspace/auth/avatar handling, persistent scheduled tasks with catch-up, optional isolated hosted page reading through Browserbase, and account-based desktop mirroring. Select your server from the desktop workspace switcher and approve the viewing device on that server. Update both iPhone and desktop for shared pins.
+          0.7.2 fixes remote workspace loading between Windows, Mac and iPhone. Loads a small Bot roster first, then transfers conversation history. Accepts both earlier full-workspace replies and current delta envelopes, retries lost mailbox requests without replaying commands, preserves errors instead of looping through loading messages, adds Windows reconnect, and labels approvals for phones and PCs.
 
-          Ask a Bot to schedule one-time, hourly, daily or weekly work. Incoming Bot messages are the supported event trigger. Your desktop app must be running with its CLI configured. Cloud browsing requires your Browserbase account, API key and project UUID in desktop Settings → Computer; sessions are isolated, temporary, and do not use the desktop browser.
+          Update the hosting computer and viewing devices to 0.7.2. Keep the host awake with remote/phone access enabled and approve each viewing device after comparing its fingerprint. iPhone is a viewer; select the hosting Mac or Windows PC from it.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -137,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.1" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.2" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.7.1 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.1 · Fixes, scrolling & scheduled tasks' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.7.2 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.2 · Remote connection fixes' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

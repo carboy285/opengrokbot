@@ -116,7 +116,7 @@ class CloudHost {
     if (!request || !['GET', 'POST'].includes(request.method) || typeof request.target !== 'string' || request.target.length > 2048 || !request.target.startsWith('/') || request.target.startsWith('//')) throw new Error('Invalid phone request.');
     const url = new URL(request.target, BASE);
     if (request.method === 'GET') {
-      if (url.pathname === '/v1/state') { const snapshot = this.snapshot(); return url.searchParams.get('since') === snapshot.revision ? { status: 204, body: '' } : this.response(200, { snapshot, removedEntries: [] }); }
+      if (url.pathname === '/v1/state') { let snapshot = this.snapshot(); if(url.searchParams.get('overview')==='true'){const latest=new Map();for(const entry of snapshot.workspace.entries)latest.set(entry.botID,entry);snapshot={...snapshot,overview:true,revision:'overview-'+snapshot.revision,workspace:{...snapshot.workspace,sharedMemory:undefined,teamMessages:undefined,bots:snapshot.workspace.bots.map(({memory,schedules,...bot})=>bot),entries:snapshot.workspace.bots.map(bot=>latest.get(bot.id)).filter(Boolean).map(entry=>({...entry,text:entry.text.slice(0,1000)}))}};} return url.searchParams.get('since') === snapshot.revision ? { status: 204, body: '' } : this.response(200, { snapshot, removedEntries: [] }); }
       if (url.pathname === '/v1/models') return this.response(200, await this.models(url.searchParams.get('provider')));
       if (url.pathname === '/v1/files') return this.response(200, await this.files(url.searchParams.get('bot')));
     }

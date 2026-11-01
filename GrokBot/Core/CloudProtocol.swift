@@ -89,6 +89,14 @@ struct CloudStatePatch: Codable, Sendable {
         let present = Set(next.workspace.entries.map(\.id))
         return CloudStatePatch(snapshot: result, baseRevision: previous.revision, removedEntries: previous.workspace.entries.map(\.id).filter { !present.contains($0) })
     }
+    static func decode(_ data: Data) throws -> CloudStatePatch {
+        let decoder = CloudCoding.decoder()
+        if let patch = try? decoder.decode(CloudStatePatch.self, from: data) { return patch }
+        if let snapshot = try? decoder.decode(RemoteSnapshot.self, from: data) {
+            return CloudStatePatch(snapshot: snapshot, baseRevision: nil, removedEntries: [])
+        }
+        throw CloudError.message("The computer returned an unsupported workspace response. Update the hosting computer and this device to 0.7.2, then reconnect.")
+    }
     func applying(to previous: RemoteSnapshot?) throws -> RemoteSnapshot {
         guard let baseRevision else { try snapshot.workspace.validateIdentities(); return snapshot }
         guard let previous, previous.revision == baseRevision else { throw CloudError.resync }
@@ -124,7 +132,7 @@ enum CloudError: LocalizedError {
         case .invalidPacket: "The device message could not be verified."
         case .resync: "Refreshing the desktop workspace…"
         case .signedOut: "Sign in to your OpenGrokBot account."
-        case .timeout: "The desktop did not respond. Keep it awake, enable phone access, and approve this phone on the desktop."
+        case .timeout: "The hosting computer did not reply. Keep it awake, enable remote/phone access, and approve this viewing device after comparing its fingerprint."
         case .approvalRequired: "Your computer is connected, but this iPhone needs approval. On the computer, open Settings → Computer, compare this phone’s fingerprint, and choose Approve phone. Your Bots will load automatically."
         }
     }

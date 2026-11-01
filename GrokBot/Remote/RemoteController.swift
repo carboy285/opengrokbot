@@ -33,6 +33,7 @@ final class RemoteController: ObservableObject {
     private var subscriptions: Set<AnyCancellable> = []
     private var active = true
     private var epoch = UUID()
+    private var initialLoadFailed = false
 
     init(account: CloudAccount = CloudAccount(kind:"controller"), secrets: KeychainSecretStore = KeychainSecretStore(service:"org.opengrokbot.ios.cloud-selection")) {
         self.account = account; self.client = CloudRelayClient(account:account); self.secrets = secrets
@@ -59,7 +60,7 @@ final class RemoteController: ObservableObject {
         clearState(); status = "Choose your desktop"; startPolling(autoSelect:false)
     }
     private func clearState() {
-        epoch = UUID(); polling?.cancel(); polling = nil; connection = nil; state = nil
+        epoch = UUID(); initialLoadFailed = false; polling?.cancel(); polling = nil; connection = nil; state = nil
         online = false; hasSnapshot = false; needsApproval = false; running = []; providers = []; defaultProvider = nil; pinnedBotIDs = nil
         drafts = [:]; pendingSends = [:]; serverPins = [:]; pendingPins = [:]; legacyPins = []; pinSyncNotice = nil
         model?.applyRemoteSnapshot(Workspace()); model?.leavePreview()
@@ -103,7 +104,7 @@ final class RemoteController: ObservableObject {
                         }
                     }
                     if connection != nil {
-                        if !hasSnapshot, !needsApproval { status = "Loading Bots from \(hostName)…" }
+                        if !hasSnapshot, !needsApproval, !initialLoadFailed { status = "Loading Bots from \(hostName)…" }
                         try await refresh()
                         if hasSnapshot, Date() >= nextPinSync {
                             do { try await syncPins(); nextPinSync = Date().addingTimeInterval(2) }
@@ -116,11 +117,11 @@ final class RemoteController: ObservableObject {
                     }
                 } catch {
                     if Task.isCancelled || current != epoch { return }
-                    online = false; status = error.localizedDescription
+                    online = false; initialLoadFailed = true; status = error.localizedDescription + " Retrying…"
                     nextDiscovery = Date.distantPast
                     if let cloudError = error as? CloudError {
                         if case .approvalRequired = cloudError { needsApproval = true }
-                        if case .timeout = cloudError, !hasSnapshot { connection = nil; state = nil }
+                        if case .timeout = cloudError, !hasSnapshot { state = nil }
                     }
                 }
                 let interval: Duration = !online ? .seconds(2) : running.isEmpty ? .milliseconds(700) : .milliseconds(250)
@@ -131,14 +132,15 @@ final class RemoteController: ObservableObject {
     private func refresh() async throws {
         guard let peer = connection else { return }; let current = epoch
         var parts = URLComponents(); parts.path = "/v1/state"
-        if let revision = state?.revision { parts.queryItems = [URLQueryItem(name:"since",value:revision)] }
+        if !hasSnapshot { parts.queryItems = [URLQueryItem(name: "overview", value: "true")] }
+        else if let revision = state?.revision { parts.queryItems = [URLQueryItem(name:"since",value:revision)] }
         guard let target = parts.string else { throw CloudError.invalidPacket }
         let response = try await client.fetch(peer,target:target)
         try Task.checkCancellation(); guard current == epoch else { return }
         if response.status == 204, state == nil || !hasSnapshot { throw CloudError.resync }
         if response.status != 204 {
             do {
-                let patch = try CloudCoding.decoder().decode(CloudStatePatch.self,from:response.body)
+                let patch = try CloudStatePatch.decode(response.body)
                 let snapshot = try patch.applying(to:state)
                 guard snapshot.protocolVersion == 1 else { throw RemoteError.incompatible }
                 state = snapshot; hostName = snapshot.hostName; running = Set(snapshot.running)
@@ -153,7 +155,7 @@ final class RemoteController: ObservableObject {
                 hasSnapshot = true
             } catch { state = nil; throw error }
         }
-        needsApproval = false; online = true; status = "Connected to \(hostName)"
+        needsApproval = false; initialLoadFailed = false; online = true; status = "Connected to \(hostName)" + (state?.overview == true ? " · loading chat history…" : "")
     }
     private func restoreHost() {
         guard connection == nil, let owner = account.session?.user.id else { return }

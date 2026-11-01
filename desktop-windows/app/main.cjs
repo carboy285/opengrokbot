@@ -201,6 +201,7 @@ async function remoteCommand(command){
 }
 function configureIPC() {
  handle('workspace:mirror',async()=>{await ensureState();if(!cloud.data.session)throw new PublicError('Sign in under Settings → Computer first.');openMirror();});
+ handle('mirror:retry',()=>mirrorAction(async()=>{if(!mirror.peer)return mirror.discover();return mirror.select(mirror.peer.id);}));
  handle('mirror:discover',()=>mirrorAction(()=>mirror.discover()));
  handle('mirror:select',id=>mirrorAction(()=>mirror.select(id)));
  handle('mirror:command',command=>mirrorAction(()=>{if(!command||typeof command!=='object'||JSON.stringify(command).length>131072||!['send','stop','retry','create_bot','delete_bot','configure_bot','update_avatar','cancel_task'].includes(command.action))throw new Error('Unsupported remote command.');return mirror.command(command);}));
