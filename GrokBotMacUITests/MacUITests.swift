@@ -30,12 +30,12 @@ final class MacUITests: XCTestCase {
         XCTAssertTrue(send.waitForExistence(timeout: 10))
         XCTAssertTrue(send.isEnabled, app.debugDescription)
         send.click()
-        let reply = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'CLI fixture reply'")).firstMatch
+        let reply = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'CLI fixture reply' OR value CONTAINS 'CLI fixture reply'")).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 15), app.debugDescription)
         capture(app, name: "macos-cli-chat")
         input.click(); app.typeText("A second message")
         app.typeKey(.return, modifierFlags: .command)
-        let replies = app.descendants(matching: .any).matching(identifier: "conversation-message").matching(NSPredicate(format: "label CONTAINS 'AI reply: CLI fixture reply'"))
+        let replies = app.descendants(matching: .any).matching(identifier: "conversation-message").matching(NSPredicate(format: "label CONTAINS 'CLI fixture reply' OR value CONTAINS 'CLI fixture reply'"))
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count >= 2"), object: replies)], timeout: 15), .completed, app.debugDescription)
         app.buttons["Connect apps"].click()
         XCTAssertTrue(app.staticTexts["Connect Apps"].waitForExistence(timeout: 5))

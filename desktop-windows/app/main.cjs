@@ -139,7 +139,7 @@ function configureIPC() {
   handle('composio:link',async slug=>{if(!composioConfiguration||!connectedTools.some(x=>x.slug===slug&&x.enabled))throw new PublicError('Choose a tool in your configured project.');try{await shell.openExternal(await composio.link(composioConfiguration.key,composioConfiguration.session.session_id,slug));}catch(error){throw new PublicError(error.message.startsWith('Composio')?error.message:'The authorization page could not be opened.');}});
   handle('composio:remove',async()=>{if(composioBusy)throw new PublicError('Wait for Composio setup to finish.');if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing tool access.');requireVault();await atomicJSON('composio.encrypted.json',null);composioConfiguration=null;connectedTools=[];return composioStatus();});
   handle('workspace:export', async text => {
-    if (typeof text !== 'string' || text.length > 2000000) throw new Error('Invalid export');
+    if (typeof text !== 'string' || text.length > 32 * 1024 * 1024) throw new Error('Invalid export');
     const result = await dialog.showSaveDialog(window, { defaultPath: 'OpenGrokBot-conversation.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
     if (result.canceled) return false;
     await writeFile(result.filePath, text, { encoding: 'utf8', mode: 0o600 });

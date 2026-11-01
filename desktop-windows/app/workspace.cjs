@@ -12,7 +12,7 @@ function validateWorkspace(value) {
   }
   const entries = new Set();
   for (const entry of value.entries) {
-    if (typeof entry.id !== 'string' || entries.has(entry.id) || !ids.has(entry.botID) || !KINDS.has(entry.kind) || typeof entry.text !== 'string' || entry.text.length > 100000) throw new Error('Invalid entry');
+    if (typeof entry.id !== 'string' || entries.has(entry.id) || !ids.has(entry.botID) || !KINDS.has(entry.kind) || typeof entry.text !== 'string' || entry.text.length > (entry.kind === 'bot' ? 32 * 1024 * 1024 : 100000)) throw new Error('Invalid entry');
     if(entry.state!==undefined&&!['streaming','complete','stopped','failed'].includes(entry.state))throw new Error('Invalid message state');
     entries.add(entry.id);
   }
