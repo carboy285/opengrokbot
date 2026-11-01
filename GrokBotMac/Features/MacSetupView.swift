@@ -12,11 +12,11 @@ struct MacSetupView: View {
             HStack {
                 Text("Set up Grok Bot").font(.system(size: 21, weight: .medium))
                 Spacer()
-                Text("\(step + 1) of 5").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                Text("\(step + 1) of 6").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
                 Button { desktop.panel = nil } label: { Image(systemName: "xmark").frame(width: 34, height: 34) }.buttonStyle(.plain).accessibilityLabel("Close setup")
             }
             HStack(spacing: 7) {
-                ForEach(0..<5) { index in Capsule().fill(index <= step ? Color.primary : MacTheme.raised).frame(height: 3) }
+                ForEach(0..<6) { index in Capsule().fill(index <= step ? Color.primary : MacTheme.raised).frame(height: 3) }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 23) {
@@ -25,6 +25,7 @@ struct MacSetupView: View {
                     case 1: choose
                     case 2: install
                     case 3: signIn
+                    case 4: MacComposioSetupView(service: desktop.composio)
                     default: ready
                     }
                 }.frame(maxWidth: 650, alignment: .leading).padding(.vertical, 20).frame(maxWidth: .infinity)
@@ -33,8 +34,8 @@ struct MacSetupView: View {
                 if step > 0 { MacPillButton(title: "Back") { step -= 1 } }
                 else { Button("Finish later") { desktop.panel = nil }.buttonStyle(.link) }
                 Spacer()
-                if step < 4 {
-                    MacPillButton(title: "Continue", prominent: true) {
+                if step < 5 {
+                    MacPillButton(title: step == 4 ? "Continue to chat" : "Continue", prominent: true) {
                         if let installation { desktop.chooseCLI(installation.id) }
                         step += 1
                     }.disabled((step == 2 && installation == nil) || (step == 3 && (!desktop.loginVerified || installation == nil)))

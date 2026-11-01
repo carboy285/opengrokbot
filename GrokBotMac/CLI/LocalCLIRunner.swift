@@ -25,17 +25,17 @@ final class LocalCLIRun: @unchecked Sendable {
         }
     }
 
-    static func stream(cli: InstalledCLI, prompt: String, session: String?, directory: URL) -> AsyncThrowingStream<CLIEvent, Error> {
+    static func stream(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil) -> AsyncThrowingStream<CLIEvent, Error> {
         let run = LocalCLIRun()
         return AsyncThrowingStream { continuation in
             continuation.onTermination = { @Sendable _ in run.cancel() }
             DispatchQueue.global(qos: .userInitiated).async {
-                run.execute(cli: cli, prompt: prompt, session: session, directory: directory, continuation: continuation)
+                run.execute(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, continuation: continuation)
             }
         }
     }
 
-    private func execute(cli: InstalledCLI, prompt: String, session: String?, directory: URL, continuation: AsyncThrowingStream<CLIEvent, Error>.Continuation) {
+    private func execute(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String?, continuation: AsyncThrowingStream<CLIEvent, Error>.Continuation) {
         var promptFile: URL?
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -46,12 +46,14 @@ final class LocalCLIRun: @unchecked Sendable {
                 promptFile = file
             }
             defer { if let promptFile { try? FileManager.default.removeItem(at: promptFile) } }
+            let mcp = try ComposioCLIConfiguration.make(provider: cli.provider, directory: directory, sessionURL: mcpURL)
+            defer { mcp.cleanup() }
             let command = CLICommand.chat(provider: cli.provider, prompt: prompt, session: session, promptFile: promptFile?.path)
             let input = Pipe(), output = Pipe(), error = Pipe()
             process.executableURL = URL(fileURLWithPath: cli.path)
-            process.arguments = command.arguments
+            process.arguments = command.arguments + mcp.arguments
             process.currentDirectoryURL = directory
-            process.environment = CLIInstallationScanner.environment
+            process.environment = CLIInstallationScanner.environment.merging(mcp.environment) { _, new in new }
             process.standardInput = input; process.standardOutput = output; process.standardError = error
             // A child exiting before consuming stdin must not terminate the GUI with SIGPIPE.
             _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)

@@ -24,6 +24,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
 @MainActor
 final class MacAppModel: ObservableObject {
+    let composio = ComposioModel()
     @Published var selectedID: UUID?
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
@@ -149,7 +150,8 @@ extension MacAppModel {
         let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/OpenGrokBot/Conversations/\(bot.id.uuidString)")
         tasks[bot.id] = Task {
             do {
-                for try await event in LocalCLIRun.stream(cli: cli, prompt: prompt, session: session, directory: directory) {
+                let mcpURL = try composio.mcpURL()
+                for try await event in LocalCLIRun.stream(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL) {
                     try Task.checkCancellation()
                     switch event {
                     case .session(let id): app.setSession(id, for: key)

@@ -63,6 +63,9 @@ final class MacUITests: XCTestCase {
         app.buttons["Check sign-in"].click()
         XCTAssertTrue(app.staticTexts["Codex is signed in and ready."].waitForExistence(timeout: 15))
         app.buttons["Continue"].click()
+        XCTAssertTrue(app.secureTextFields["composio-project-key"].waitForExistence(timeout: 5))
+        capture(app, name: "macos-composio-setup")
+        app.buttons["Continue to chat"].click()
         app.buttons["Start chatting"].click()
         XCTAssertTrue(app.buttons["Search Bots"].waitForExistence(timeout: 5))
     }

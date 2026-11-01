@@ -1,9 +1,7 @@
 import Foundation
 import Security
 
-/// Device-only secret storage, used by the local macOS secure-note vault.
-/// This store does not provision or forward service credentials. Grok Bot
-/// authentication still requires a verified credential and provisioning contract.
+/// Device-only secret storage for secure notes and Composio project configuration.
 struct KeychainSecretStore {
     let service: String
 

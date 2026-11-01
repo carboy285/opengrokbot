@@ -85,7 +85,22 @@ ui_group = add('mac-ui-group',isa='PBXGroup',children=[uid(ui_path)],name='GrokB
 add_to_group(uid('main'),[ui_group])
 ui_configs = configs('mac-ui',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac.uitests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_TARGET_NAME':'GrokBotMac'})
 objects[ui_id]={'isa':'PBXNativeTarget','buildConfigurationList':ui_configs,'buildPhases':[phase('mac-ui-sources',[ui_path],'PBXSourcesBuildPhase'),phase('mac-ui-frameworks',[],'PBXFrameworksBuildPhase')],'buildRules':[],'dependencies':[dep],'name':'GrokBotMacUITests','productName':'GrokBotMacUITests','productReference':ui_product,'productType':'com.apple.product-type.bundle.ui-testing'}
-objects[project['rootObject']]['targets']=list(dict.fromkeys(objects[project['rootObject']]['targets']+[mac_id,test_id,ui_id]))
+# Package a native stdio MCP helper; no shell or extra runtime is required on macOS.
+helper_id = uid('composio-helper-target')
+helper_path = 'ComposioBridge/main.swift'
+helper_product = add('composio-helper-product', isa='PBXFileReference', explicitFileType='compiled.mach-o.executable', includeInIndex='0', path='ComposioBridge', sourceTree='BUILT_PRODUCTS_DIR')
+add_to_group(uid('products'), [helper_product])
+helper_group = add('composio-helper-group',isa='PBXGroup',children=[reference(helper_path)],name='ComposioBridge',sourceTree='<group>')
+add_to_group(uid('main'),[helper_group])
+helper_configs = configs('composio-helper',base|{'PRODUCT_NAME':'ComposioBridge','PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.composiobridge','ENABLE_HARDENED_RUNTIME':'YES','SKIP_INSTALL':'YES'})
+objects[helper_id] = {'isa':'PBXNativeTarget','buildConfigurationList':helper_configs,'buildPhases':[phase('helper-sources',[helper_path],'PBXSourcesBuildPhase'),phase('helper-frameworks',[],'PBXFrameworksBuildPhase')],'buildRules':[],'dependencies':[],'name':'ComposioBridge','productName':'ComposioBridge','productReference':helper_product,'productType':'com.apple.product-type.tool'}
+helper_proxy = add('helper-proxy',isa='PBXContainerItemProxy',containerPortal=project['rootObject'],proxyType='1',remoteGlobalIDString=helper_id,remoteInfo='ComposioBridge')
+helper_dep = add('helper-dep',isa='PBXTargetDependency',target=helper_id,targetProxy=helper_proxy)
+helper_build = add('helper-copy-build',isa='PBXBuildFile',fileRef=helper_product,settings={'ATTRIBUTES':['CodeSignOnCopy']})
+helper_copy = add('helper-copy-phase',isa='PBXCopyFilesBuildPhase',buildActionMask='2147483647',dstPath='$(CONTENTS_FOLDER_PATH)/Helpers',dstSubfolderSpec='16',files=[helper_build],runOnlyForDeploymentPostprocessing='0')
+objects[mac_id]['dependencies'].append(helper_dep)
+objects[mac_id]['buildPhases'].append(helper_copy)
+objects[project['rootObject']]['targets']=list(dict.fromkeys(objects[project['rootObject']]['targets']+[mac_id,test_id,ui_id,helper_id]))
 
 def encode(value,indent=0):
     if isinstance(value,dict): return '{\n'+''.join('\t'*(indent+1)+json.dumps(k)+' = '+encode(v,indent+1)+';\n' for k,v in value.items())+'\t'*indent+'}'

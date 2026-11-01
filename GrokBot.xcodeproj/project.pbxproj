@@ -159,6 +159,7 @@
 				"2EFF8104F59877AC0FBF9399",
 				"872015344FAA5E5095005F29",
 				"BEB6B360B7B3AC0990DADF74",
+				"166CBFC81A4D508FABCD3858",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -198,6 +199,7 @@
 				"AC5944B62ABC111254C6361A",
 				"BCB0EBD2ADA4E1560B278A6E",
 				"B77E8610D6612A1CC14A85C8",
+				"6A647BA6FF201D320BA911C1",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -423,6 +425,7 @@
 				"58046A86A73E2D753AC18BB4",
 				"7A3BA4BE97D2BE335CC9E2E0",
 				"0382A7C5DF1AAC957280C3E0",
+				"FC06DDBD68E8C2F0988AA290",
 			);
 			"name" = "GrokBot";
 			"sourceTree" = "<group>";
@@ -434,6 +437,9 @@
 				"DB2AB786C58F8ECA95F8A1CE",
 				"BA52E79E515061E9B6B99C72",
 				"724BE92F39477F5EF78124E7",
+				"F6FD79410D4F56EA6F29DD17",
+				"F112D150E2067EF6904298BC",
+				"11D870A7BD5197C7470C28BF",
 			);
 			"name" = "GrokBotTests";
 			"sourceTree" = "<group>";
@@ -446,6 +452,7 @@
 				"563222CAD436A0B15D309F4A",
 				"9B6121C65A466ACFE6B2F313",
 				"49EC37C2492B97E97CE59762",
+				"4E210EEEEC88B741801C50FB",
 			);
 			"name" = "Products";
 			"sourceTree" = "<group>";
@@ -458,6 +465,7 @@
 				"0A3E27B8CA818264D75C8D81",
 				"C443DACDC7602DD178BF742C",
 				"2EC44201541E2DA9ACCD026E",
+				"88CB25FB2485A330E6117141",
 			);
 			"sourceTree" = "<group>";
 		};
@@ -494,6 +502,7 @@
 				"E9D9CCD71B08802CD0D11F93",
 				"4A31FD47B9A67A6916664094",
 				"BC00EBB9C90D27B434D0E1F5",
+				"ED78AE19615720F357B136E9",
 			);
 		};
 		"7A3BA4BE97D2BE335CC9E2E0" = {
@@ -603,12 +612,18 @@
 			"children" = (
 				"D14958065752B19FA10F8D42",
 				"2A9A7D8DBAA316656F85483E",
+				"766E3FDF506E8113F963EF4E",
+				"F638DE05C1ED8B8833F652CC",
+				"3A8B70C37FF60F6AABE37B74",
+				"3DEA50AA78FE01821D02F9B5",
+				"EA0842497B18391588DDF15D",
 				"5390FA98154A37DA434C08C9",
 				"115B423994EE16794928F78B",
 				"200A90E0F7F7986FBE968CE7",
 				"C58337069736B15D0E00E8BB",
 				"A3BF796C0BDB7A2845A13929",
 				"D42190AB321F4E1303BCF0FF",
+				"1BC4BA355E16ACC96C4605D6",
 				"5B1865B379D5FA54681B5596",
 				"61A4A8267719830E5E94DBE6",
 				"8B4322010C9EAA5209B347E0",
@@ -634,10 +649,10 @@
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CURRENT_PROJECT_VERSION" = "2";
-				"MARKETING_VERSION" = "0.2.0";
+				"MARKETING_VERSION" = "0.3.0";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
-				"ENABLE_APP_SANDBOX" = "YES";
+				"ENABLE_APP_SANDBOX" = "NO";
 				"LD_RUNPATH_SEARCH_PATHS" = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -661,10 +676,10 @@
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CURRENT_PROJECT_VERSION" = "2";
-				"MARKETING_VERSION" = "0.2.0";
+				"MARKETING_VERSION" = "0.3.0";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
-				"ENABLE_APP_SANDBOX" = "YES";
+				"ENABLE_APP_SANDBOX" = "NO";
 				"LD_RUNPATH_SEARCH_PATHS" = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -814,18 +829,25 @@
 			"files" = (
 				"8D954521084C130FAC759AFE",
 				"394DA17948BB29EDBFF7EF0E",
+				"BA8AC1D111B92E33E6F89766",
+				"EE90F5FD7C4881813C2776B2",
+				"BB6310715D2E538425304F0F",
+				"AC97C178D7A935CA9CDB05F5",
+				"65DEEE97C7F2483E3BB079F0",
 				"2EF166BD2A0E5399D674A842",
 				"0AF02B150DB09BC7CBA558E8",
 				"EF365B831E09B570C639A2D0",
 				"333B048E86A4D85ACF8C963E",
 				"F796A2E471E6D134EC1C5559",
 				"A00D89FA4A8867714FD4EA32",
+				"11C6327260FC7C9DA9A9039B",
 				"5A7C5FBC54E845C9F3F0A30A",
 				"30CDB99032FF9992913397E5",
 				"2C4677CC952887F9C36F014F",
 				"5D566C4BC493AA411BDD56ED",
 				"AA4368729CE344CCE3A22104",
 				"57C52D0B7107881447CA354A",
+				"13069DF629571FB53188D9D2",
 				"F46FB84C7BA32BCF20016587",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
@@ -861,10 +883,12 @@
 				"8F4D6558D8592407F1A47BD9",
 				"D3F48A0E52CC8B8EAFFB94D6",
 				"CAC7612DFE4C1457CB5E9B24",
+				"F6202341CF5249A6F1A7EEDC",
 			);
 			"buildRules" = (
 			);
 			"dependencies" = (
+				"2A962064405B6F61C4FF9616",
 			);
 			"name" = "GrokBotMac";
 			"productName" = "OpenGrokBot";
@@ -888,8 +912,11 @@
 			"buildActionMask" = "2147483647";
 			"files" = (
 				"C8F0B97E774109CCB65823EB",
+				"2E960B70C54D42052F60F97B",
 				"28C6BBB4D6021F6DB62AB59D",
 				"0126694C861E25269C743807",
+				"24767BD2BEDC50F4E47136C8",
+				"EC93B56BDEE035C7E39628B2",
 				"CABA21E860827AEDC2F53D27",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
@@ -1033,6 +1060,244 @@
 			"lastKnownFileType" = "text.plist.entitlements";
 			"path" = "GrokBot/Resources/GrokBot.entitlements";
 			"sourceTree" = "<group>";
+		};
+		"FC06DDBD68E8C2F0988AA290" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBot/Core/CLIProtocol.swift";
+			"sourceTree" = "<group>";
+		};
+		"166CBFC81A4D508FABCD3858" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "FC06DDBD68E8C2F0988AA290";
+		};
+		"F6FD79410D4F56EA6F29DD17" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotTests/CLIProtocolTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"F112D150E2067EF6904298BC" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotTests/LocalCLIRunnerTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"766E3FDF506E8113F963EF4E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/CLI/LocalCLIRunner.swift";
+			"sourceTree" = "<group>";
+		};
+		"1BC4BA355E16ACC96C4605D6" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacSetupView.swift";
+			"sourceTree" = "<group>";
+		};
+		"BA8AC1D111B92E33E6F89766" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "766E3FDF506E8113F963EF4E";
+		};
+		"11C6327260FC7C9DA9A9039B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "1BC4BA355E16ACC96C4605D6";
+		};
+		"13069DF629571FB53188D9D2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "FC06DDBD68E8C2F0988AA290";
+		};
+		"2E960B70C54D42052F60F97B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F6FD79410D4F56EA6F29DD17";
+		};
+		"24767BD2BEDC50F4E47136C8" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F112D150E2067EF6904298BC";
+		};
+		"6A647BA6FF201D320BA911C1" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F6FD79410D4F56EA6F29DD17";
+		};
+		"F638DE05C1ED8B8833F652CC" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Composio/ComposioCLIConfiguration.swift";
+			"sourceTree" = "<group>";
+		};
+		"3A8B70C37FF60F6AABE37B74" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Composio/ComposioClient.swift";
+			"sourceTree" = "<group>";
+		};
+		"3DEA50AA78FE01821D02F9B5" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Composio/ComposioModel.swift";
+			"sourceTree" = "<group>";
+		};
+		"EA0842497B18391588DDF15D" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Composio/MacComposioSetupView.swift";
+			"sourceTree" = "<group>";
+		};
+		"EE90F5FD7C4881813C2776B2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F638DE05C1ED8B8833F652CC";
+		};
+		"BB6310715D2E538425304F0F" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "3A8B70C37FF60F6AABE37B74";
+		};
+		"AC97C178D7A935CA9CDB05F5" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "3DEA50AA78FE01821D02F9B5";
+		};
+		"65DEEE97C7F2483E3BB079F0" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "EA0842497B18391588DDF15D";
+		};
+		"4E210EEEEC88B741801C50FB" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "compiled.mach-o.executable";
+			"includeInIndex" = "0";
+			"path" = "ComposioBridge";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"2FC517C4FD7E549FC35C5E1C" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "ComposioBridge/main.swift";
+			"sourceTree" = "<group>";
+		};
+		"88CB25FB2485A330E6117141" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"2FC517C4FD7E549FC35C5E1C",
+			);
+			"name" = "ComposioBridge";
+			"sourceTree" = "<group>";
+		};
+		"5B9B73A976007AC99CC98588" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"MACOSX_DEPLOYMENT_TARGET" = "14.0";
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"SWIFT_VERSION" = "6.0";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"PRODUCT_NAME" = "ComposioBridge";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "org.opengrokbot.composiobridge";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"SKIP_INSTALL" = "YES";
+			};
+			"name" = "Debug";
+		};
+		"C60F37931EB5B1DA19B8635B" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"MACOSX_DEPLOYMENT_TARGET" = "14.0";
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"SWIFT_VERSION" = "6.0";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"PRODUCT_NAME" = "ComposioBridge";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "org.opengrokbot.composiobridge";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"SKIP_INSTALL" = "YES";
+			};
+			"name" = "Release";
+		};
+		"5737195352741633154DFE87" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"5B9B73A976007AC99CC98588",
+				"C60F37931EB5B1DA19B8635B",
+			);
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+		};
+		"452E2DB4AC96F8DB257B789D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2FC517C4FD7E549FC35C5E1C";
+		};
+		"789C8B243A1080A0A4971343" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+				"452E2DB4AC96F8DB257B789D",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"02E739B70DF163355C910B9D" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"ED78AE19615720F357B136E9" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "5737195352741633154DFE87";
+			"buildPhases" = (
+				"789C8B243A1080A0A4971343",
+				"02E739B70DF163355C910B9D",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"name" = "ComposioBridge";
+			"productName" = "ComposioBridge";
+			"productReference" = "4E210EEEEC88B741801C50FB";
+			"productType" = "com.apple.product-type.tool";
+		};
+		"803932F7A97FAA234D9EF5B9" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "244210E48437B6556980A702";
+			"proxyType" = "1";
+			"remoteGlobalIDString" = "ED78AE19615720F357B136E9";
+			"remoteInfo" = "ComposioBridge";
+		};
+		"2A962064405B6F61C4FF9616" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "ED78AE19615720F357B136E9";
+			"targetProxy" = "803932F7A97FAA234D9EF5B9";
+		};
+		"E4350D680DAFFDF47C642EAA" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4E210EEEEC88B741801C50FB";
+			"settings" = {
+				"ATTRIBUTES" = (
+					"CodeSignOnCopy",
+				);
+			};
+		};
+		"F6202341CF5249A6F1A7EEDC" = {
+			"isa" = "PBXCopyFilesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"dstPath" = "$(CONTENTS_FOLDER_PATH)/Helpers";
+			"dstSubfolderSpec" = "16";
+			"files" = (
+				"E4350D680DAFFDF47C642EAA",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"11D870A7BD5197C7470C28BF" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotTests/MacComposioTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"EC93B56BDEE035C7E39628B2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "11D870A7BD5197C7470C28BF";
 		};
 	};
 	"rootObject" = "244210E48437B6556980A702";
