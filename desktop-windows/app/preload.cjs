@@ -1,5 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
+  configureBot:(id,value)=>ipcRenderer.invoke('bot:configure',id,value),
+  listModels:provider=>ipcRenderer.invoke('models:list',provider),
+  listFiles:id=>ipcRenderer.invoke('files:list',id),
+  openBotFolder:id=>ipcRenderer.invoke('files:open-folder',id),
+  revealBotFile:(id,name)=>ipcRenderer.invoke('files:reveal',id,name),
   setupStatus:()=>ipcRenderer.invoke('setup:status'),
   scanCLIs:()=>ipcRenderer.invoke('setup:scan'),
   chooseCLI:id=>ipcRenderer.invoke('setup:choose',id),

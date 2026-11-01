@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron');
-const { readFile, writeFile, mkdir, rename } = require('node:fs/promises');
+const { readFile, writeFile, mkdir, rename, readdir, lstat } = require('node:fs/promises');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { randomUUID } = require('node:crypto');
@@ -9,6 +9,7 @@ if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userD
 
 const cli=require('./local-cli.cjs');
 const composio=require('./composio.cjs');
+const teamwork=require('./teamwork.cjs');
 class PublicError extends Error {}
 let state,settings,installed=[],composioConfiguration,connectedTools=[],composioBusy=false;
 const active=new Map(),pendingBots=new Set();
@@ -57,6 +58,7 @@ async function initializeState(){
   if(loaded.version===1)await atomicJSON('legacy-workspace-backup.json',loaded);
   const migrated=migrateWorkspace(loaded);
   for(const entry of migrated.entries)if(entry.state==='streaming')entry.state='stopped';
+  for(const message of migrated.teamMessages||[])if(message.status==='running')message.status='failed';
   settings=await loadJSON('settings.json',{complete:false,selected:'',overrides:{},composioUserID:'opengrokbot-'+randomUUID()});
   settings.composioUserID||='opengrokbot-'+randomUUID();settings.overrides||={};
   const encrypted=await loadJSON('composio.encrypted.json',null);
@@ -68,33 +70,55 @@ function selectedCLI(){return installed.find(x=>x.id===settings?.selected);}
 function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete};}
 function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
 function notify(){if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
-async function startChat(botID,text){
-  const bot=state.bots.find(x=>x.id===botID),installation=selectedCLI();
-  if(composioBusy)throw new PublicError('Wait for Composio setup to finish before sending a message.');
-  if(!bot)throw new PublicError('Choose a Bot.');if(!installation)throw new PublicError('Set up an installed AI CLI first.');
-  if(active.has(botID)||pendingBots.has(botID))throw new PublicError('A response is already running.');
-  if(!text&&!state.entries.some(x=>x.botID===botID&&x.kind==='user'))throw new PublicError('Send your first message first.');
-  pendingBots.add(botID);
-  try {
-  const key=botID+'|'+installation.id;
-  const session=state.sessions?.[key];
-  if(text)state.entries.push({id:randomUUID(),botID,kind:'user',text});
-  // Store the user message before launching any process.
+function botDirectory(id){return file(path.join('Conversations',id));}
+function configuredProviders(bot){
+ const fallback=selectedCLI();const config=bot.aiConfiguration||{providers:fallback?[{provider:fallback.provider,model:''}]:[],activeProvider:fallback?.provider,replyMode:'one'};
+ const choices=[config.providers.find(x=>x.provider===config.activeProvider)||config.providers[0]].filter(Boolean);
+ return choices.map(choice=>({choice,installation:installed.find(x=>x.provider===choice.provider)}));
+}
+async function startChat(botID,text,delivery){
+ const bot=state.bots.find(x=>x.id===botID);
+ if(composioBusy)throw new PublicError('Wait for Composio setup to finish before sending a message.');
+ if(!bot)throw new PublicError('Choose a Bot.');
+ if(bot.memberIDs){if(!text)throw new PublicError('Send a message to the group.');teamwork.group(state,bot,text);await atomicJSON('preview-workspace.json',state);notify();await deliverQueued();return;}
+
+ const providers=configuredProviders(bot);
+ if(!providers.length||providers.some(x=>!x.installation))throw new PublicError('Choose and set up providers in this Bot’s side panel.');
+ if(active.has(botID)||pendingBots.has(botID))throw new PublicError('A response is already running.');
+ if(!text&&!delivery&&!state.entries.some(x=>x.botID===botID&&x.kind==='user'))throw new PublicError('Send your first message first.');
+ pendingBots.add(botID);
+ try{
+  if(delivery)teamwork.begin(state,delivery);else if(text)state.entries.push({id:randomUUID(),botID,kind:'user',text});
   await atomicJSON('preview-workspace.json',state);
   const history=state.entries.filter(x=>x.botID===botID&&!['failed','stopped'].includes(x.state)&&x.text).slice(-30);
-  const prompt=session?history.findLast(x=>x.kind==='user').text:`You are ${bot.name}. ${bot.purpose}\nRespond to the user's latest message.\n\n`+history.map(x=>`${x.kind==='user'?'User':bot.name}: ${x.text}`).join('\n\n').slice(-100000);
-  const reply={id:randomUUID(),botID,kind:'bot',provider:installation.name,text:'',state:'streaming'};state.entries.push(reply);
-  const run=cli.runCLI({installation,prompt,session,directory:file(path.join('Conversations',botID)),mcpURL:composioConfiguration?.session.mcp.url,onEvent:event=>{
+  const runs=new Set();active.set(botID,runs);
+  for(const {choice,installation} of providers){
+   const key=botID+'|'+installation.id+(choice.model?'|'+choice.model:'');const session=state.sessions?.[key];
+   const latest=delivery?`Bot request (not human approval): ${delivery.text}`:history.findLast(x=>x.kind==='user')?.text||'';
+   const prompt=teamwork.instructions(bot,state,!!delivery)+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
+   let finalText='';
+
+   const reply={id:randomUUID(),botID,kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
+   const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
-    if(event.type==='text'){reply.text=event.text;notify();}
-  }});
-  active.set(botID,run);notify();
-  run.done.then(()=>{reply.state='complete';},error=>{reply.state=error.message==='Response stopped.'?'stopped':'failed';reply.error=error.message;if(!reply.text)reply.text=error.message;}).finally(async()=>{
-    active.delete(botID);
+    if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notify();}
+   }});
+   runs.add(run);
+   run.done.then(()=>{teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');},error=>{reply.state=error.message==='Response stopped.'?'stopped':'failed';reply.error=error.message;if(!reply.text)reply.text=error.message;if(delivery)teamwork.finish(state,delivery,reply.state);}).finally(async()=>{
+    runs.delete(run);if(!runs.size)active.delete(botID);
     try{await atomicJSON('preview-workspace.json',state);}catch{reply.state='failed';reply.error='The response could not be saved. Check available storage.';}
-    notify();
-  });
-  } finally {pendingBots.delete(botID);}
+    notify();await deliverQueued();
+   });
+  }
+  notify();
+ }finally{pendingBots.delete(botID);}
+}
+
+async function deliverQueued(){
+ for(const message of state.teamMessages||[]){
+  if(message.status!=='queued'||active.has(message.to)||pendingBots.has(message.to))continue;
+  try{await startChat(message.to,undefined,message);}catch{teamwork.finish(state,message,'failed');await atomicJSON('preview-workspace.json',state);notify();}
+ }
 }
 
 function configureIPC() {
@@ -102,9 +126,27 @@ function configureIPC() {
   handle('workspace:save', async value => {
     await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before changing Bots.');
     validateWorkspace(value);if(!value.bots.some(x=>x.isMain===true&&x.name==='Grok Bot'))throw new PublicError('The main Grok Bot must be kept.');
+    // Provenance, delivery queues, private memory and sessions belong to the main process.
+    const retained=new Set(value.bots.map(x=>x.id));
+    value.teamMessages=(state.teamMessages||[]).filter(x=>retained.has(x.from)&&retained.has(x.to));value.sharedMemory=state.sharedMemory||[];
+    for(const bot of value.bots){bot.memory=state.bots.find(x=>x.id===bot.id)?.memory||[];if(bot.memberIDs)bot.memberIDs=bot.memberIDs.filter(id=>retained.has(id));}
     // Session IDs belong to the main process; renderer CRUD cannot forge them.
     value.sessions=Object.fromEntries(Object.entries(state.sessions||{}).filter(([key])=>value.bots.some(bot=>key.startsWith(bot.id+'|'))));await atomicJSON('preview-workspace.json',value);state=value;notify();
   });
+  handle('bot:configure',async(id,configuration)=>{
+    await ensureState();if(active.has(id)||pendingBots.has(id))throw new PublicError('Stop this Bot’s responses before changing providers.');
+    const index=state.bots.findIndex(x=>x.id===id);if(index<0)throw new PublicError('Choose a Bot.');
+    const bot={...state.bots[index],aiConfiguration:{...configuration,replyMode:"one"}};validateWorkspace({...state,bots:state.bots.map((x,i)=>i===index?bot:x)});
+    state.bots[index]=bot;await atomicJSON('preview-workspace.json',state);notify();return state;
+  });
+  handle('models:list',async provider=>{await ensureState();const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];});
+  handle('files:list',async id=>{
+    await ensureState();if(!state.bots.some(x=>x.id===id))throw new Error('Unknown Bot');
+    let names;try{names=await readdir(botDirectory(id),{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}
+    return names.filter(x=>!x.name.startsWith('.')&&x.isFile()).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,500).map(x=>({name:x.name}));
+  });
+  handle('files:open-folder',async id=>{await ensureState();if(!state.bots.some(x=>x.id===id))throw new Error('Unknown Bot');const directory=botDirectory(id);await mkdir(directory,{recursive:true});if(await shell.openPath(directory))throw new PublicError('The working folder could not be opened.');});
+  handle('files:reveal',async(id,name)=>{await ensureState();if(!state.bots.some(x=>x.id===id)||typeof name!=='string'||path.basename(name)!==name||name.startsWith('.'))throw new Error('Invalid file');const target=path.join(botDirectory(id),name);if(!(await lstat(target)).isFile())throw new Error('Missing file');shell.showItemInFolder(target);});
   handle('setup:status',async()=>{await ensureState();return setupStatus();});
   handle('setup:scan',async()=>{await ensureState();installed=await cli.discover(settings.overrides);if(!installed.some(x=>x.id===settings.selected))settings.selected=installed[0]?.id||'';await saveSettings();return setupStatus();});
   handle('setup:choose',async id=>{await ensureState();if(!installed.some(x=>x.id===id))throw new PublicError('Choose an installed CLI.');settings.selected=id;await saveSettings();return setupStatus();});
@@ -118,7 +160,7 @@ function configureIPC() {
   handle('setup:complete',async()=>{if(!selectedCLI())throw new PublicError('Choose an installed CLI first.');settings.complete=true;await saveSettings();});
   handle('chat:send',async(botID,text)=>{await ensureState();if(typeof text!=='string'||!text.trim()||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');await startChat(botID,text);return state;});
   handle('chat:retry',async botID=>{await ensureState();await startChat(botID);return state;});
-  handle('chat:stop',async botID=>{active.get(botID)?.cancel();});
+  handle('chat:stop',async botID=>{for(const run of active.get(botID)||[])run.cancel();});
   handle('composio:status',async()=>{await ensureState();return composioStatus();});
   handle('composio:connect',async(key,toolkits)=>{
     await ensureState();requireVault();
@@ -184,5 +226,5 @@ app.whenReady().then(() => {
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.loadFile(rendererFile);
 });
-app.on('before-quit',()=>{for(const run of active.values())run.cancel(true);});
+app.on('before-quit',()=>{for(const runs of active.values())for(const run of runs)run.cancel(true);});
 app.on('window-all-closed', () => app.quit());

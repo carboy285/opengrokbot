@@ -23,7 +23,7 @@ struct MacBotInspectorView: View {
                     Image(systemName: "square.and.arrow.up").font(.system(size: 19))
                         .frame(width: 42, height: 42).glassChrome(in: Circle())
                 }.buttonStyle(.plain).accessibilityLabel("Share conversation").help("Share conversation")
-                MacCircleButton(symbol: "xmark", label: "Close bot details") { desktop.showBotInspector = false }
+                MacCircleButton(symbol: "xmark", label: "Close bot details") { desktop.showBotInspector = false }.keyboardShortcut(.cancelAction)
             }.padding(18)
             VStack(spacing: 0) {
                     MacBotAvatar(color: bot.color, size: 86).padding(.top, 14)
@@ -54,7 +54,6 @@ struct MacBotInspectorView: View {
             }
         }
         .frame(maxHeight: .infinity).background(MacTheme.canvas)
-        .accessibilityIdentifier("bot-inspector")
         .onChange(of: desktop.runningBots) { _, running in if !running.contains(bot.id), tab == .library { refreshFiles() } }
     }
 

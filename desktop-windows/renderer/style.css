@@ -21,3 +21,31 @@
 .composio-settings .setting-row .pill { margin-left:auto; }
 .connection-details>.setting-row { padding:14px 18px; border-radius:14px; background:var(--raised); width:100%; text-align:left; }
 .connection-details pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:16px; background:var(--raised); border-radius:14px; user-select:text; }
+
+/* The Bot profile is a persistent companion to the conversation. */
+[hidden] { display:none !important; }
+#workspace.inspector-open { grid-template-columns:clamp(270px,26vw,350px) minmax(0,1fr) clamp(340px,31vw,440px); }
+.chat-heading { -webkit-app-region:no-drag; max-width:90%; } .chat-heading>span:last-child { overflow:hidden; text-overflow:ellipsis; }
+.window-actions { position:fixed; }
+#bot-inspector { min-width:0; min-height:0; border-left:1px solid var(--line); display:flex; flex-direction:column; background:var(--bg); padding-top:30px; }
+.inspector-actions { display:flex; justify-content:flex-end; gap:10px; padding:12px 18px; }
+.inspector-profile { display:flex; flex-direction:column; align-items:center; gap:30px; padding:14px 24px 0; text-align:center; }
+.inspector-profile>.avatar { --size:86px; } .inspector-profile h2 { font-size:24px; overflow-wrap:anywhere; }
+.inspector-tabs { display:flex; justify-content:center; gap:4px; margin:30px 10px 38px; }
+.inspector-tabs button { border-radius:99px; padding:9px 13px; color:var(--muted); }
+.inspector-tabs button.active { background:var(--panel); color:var(--text); }
+.inspector-body { overflow:auto; min-height:0; padding:7px 28px 30px; display:flex; flex-direction:column; gap:18px; }
+.inspector-body h3 { font-size:17px; } .inspector-body p { font-size:13px; overflow-wrap:anywhere; }
+.provider-card { background:var(--panel); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:12px; }
+.provider-label { display:flex; align-items:center; gap:8px; font-size:14px; }
+.provider-label input { accent-color:var(--primary); } .provider-card .field { font-size:12px; padding:8px; width:100%; min-width:0; }
+.model-entry { display:flex; gap:8px; } .model-entry .pill { font-size:12px; padding:6px 10px; }
+.provider-card>button { font-size:12px; text-align:left; }
+.library-files { display:flex; flex-direction:column; gap:15px; text-align:center; }
+.file-row { padding:15px; background:var(--panel); border-radius:14px; text-align:left; overflow-wrap:anywhere; }
+.message-body { max-width:88%; min-width:0; display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+.message-body>.bubble { max-width:100%; } .message-body>small { font-size:11px; padding:0 5px; }
+.activity { white-space:pre-wrap; overflow-wrap:anywhere; } .activity>span { min-width:0; }
+@media (max-width:1179px) { #workspace.inspector-open { grid-template-columns:minmax(0,1fr) 340px; } #workspace.inspector-open>.sidebar { display:none; } }
+.chat-heading:active:not(:disabled) { transform:translateX(-50%) scale(.975); }
+@media (prefers-reduced-motion:reduce) { .chat-heading:active:not(:disabled) { transform:translateX(-50%); } }

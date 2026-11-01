@@ -67,5 +67,55 @@ final class LocalCLIRunnerTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 15)
     }
 
+    @MainActor
+    func testChatCreatesSpecialistAndReturnsOnlyItsSelectedModelReply() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let app = AppModel(store: WorkspaceStore(url: root.appendingPathComponent("workspace.json")))
+        app.enterPreview()
+        let desktop = MacAppModel()
+        defer {
+            desktop.stopAll(immediately: true)
+            for bot in app.workspace.bots { try? FileManager.default.removeItem(at: desktop.workingDirectory(for: bot)) }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let executable = root.appendingPathComponent("codex-team-fixture")
+        let create = "Creating a specialist.\n```opengrokbot-action\n{\"action\":\"create_bot\",\"name\":\"Travel\",\"purpose\":\"Plan trips without booking\"}\n```\n```opengrokbot-action\n{\"action\":\"message_bot\",\"to\":\"Travel\",\"text\":\"Suggest a weekend trip\"}\n```"
+        func event(_ text: String) throws -> String {
+            let data = try JSONSerialization.data(withJSONObject: ["type":"item.completed", "item":["id":"reply", "type":"agent_message", "text":text]])
+            return String(decoding: data, as: UTF8.self).replacingOccurrences(of: "'", with: "'\\''")
+        }
+        let script = """
+        #!/bin/sh
+        printf '%s\\n' "$@" >> '\(root.path)/arguments.txt'
+        prompt=$(cat)
+        case "$prompt" in
+          'You are Travel.'*) printf '%s\\n' '\(try event("Specialist weekend plan"))' ;;
+          *) printf '%s\\n' '\(try event(create))' ;;
+        esac
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions:0o755], ofItemAtPath: executable.path)
+        desktop.installedCLIs = [InstalledCLI(provider: .codex, path: executable.path, version: "fixture"), InstalledCLI(provider: .claude, path: "/does/not/run", version: "fixture")]
+        desktop.selectedCLIID = desktop.installedCLIs[0].id
+        let main = try XCTUnwrap(app.workspace.bots.first)
+        let config = BotAIConfiguration(providers: [BotAIProvider(provider: .codex, model: "chosen-model"), BotAIProvider(provider: .claude, model: "never-called")], activeProvider: .codex, replyMode: .all)
+        XCTAssertTrue(app.setAIConfiguration(config, for: main))
+        XCTAssertTrue(desktop.send("Make Travel and ask for a trip", to: try XCTUnwrap(app.workspace.bots.first), app: app))
+        for _ in 0..<100 {
+            if app.workspace.teamMessages?.first?.status == .complete { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(app.workspace.teamMessages?.first?.status, .complete)
+        let travel = try XCTUnwrap(app.workspace.bots.first { $0.name == "Travel" })
+        XCTAssertEqual(travel.aiConfiguration?.activeProvider, .codex)
+        XCTAssertEqual(app.entries(for: main).last?.senderBotID, travel.id)
+        XCTAssertEqual(app.entries(for: main).last?.text, "Specialist weekend plan")
+        XCTAssertEqual(desktop.providersToRun(for: travel).count, 1)
+        let arguments = try String(contentsOf: root.appendingPathComponent("arguments.txt"), encoding: .utf8)
+        XCTAssertEqual(arguments.components(separatedBy: "--model\nchosen-model").count - 1, 2)
+        XCTAssertFalse(arguments.contains("never-called"))
+    }
+
 }
 #endif

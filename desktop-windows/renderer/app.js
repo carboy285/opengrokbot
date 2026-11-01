@@ -21,6 +21,8 @@ let workspace = structuredClone(preview);
 let selected = workspace.bots[0]?.id;
 let setup={providers:[],installed:[],selected:'',complete:false};
 let running=new Set();
+let inspectorOpen=false,inspectorTab="Details",inspectorSignature="",inspectorGeneration=0;
+const modelCatalogs=new Map();
 let search = '';
 let toastTimer;
 let focusGeneration = 0;
@@ -64,18 +66,70 @@ function render() {
   $('#draft').placeholder = `Message ${bot.name}`;
   for (const entry of entries(bot)) {
     if (entry.kind === 'activity') {
-      append($('#messages'), append(node('div', 'activity'), node('span', '', entry.text.split(' · ')[0]), avatar('ochre'), node('span', '', 'School')));
+      append($('#messages'), append(node('div', 'activity'), node('span', '', entry.text)));
     } else {
       const bubble = node('div', 'bubble', entry.text || (entry.state==='streaming'?'Thinking…':''));
       bubble.setAttribute('aria-label', `${entry.kind === 'user' ? 'You' : 'AI reply'}: ${entry.text}`);
-      append($('#messages'), append(node('div', `message-row ${entry.kind}`), bubble));
+      const body=node('div','message-body');if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.provider)body.append(node('small','muted',entry.provider));body.append(bubble);append($('#messages'), append(node('div', `message-row ${entry.kind}`), body));
     }
   }
   if(entries(bot).at(-1)?.state==='failed')$('#messages').append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));
   if(running.has(bot.id))$('#messages').append(button('Stop response',()=>bridge.stop(bot.id)));
   const activeCLI=setup.installed.find(x=>x.id===setup.selected);$('#status-button').textContent=activeCLI?`${activeCLI.name} · On this device`:'Set up an AI CLI';
   if (!entries(bot).length) $('#messages').append(node('div', 'empty', 'Send your first message to start chatting with an AI CLI on this device.'));
+  renderInspector();
 }
+function configuration(bot){const active=setup.installed.find(x=>x.id===setup.selected);return bot.aiConfiguration||{providers:active?[{provider:active.provider,model:''}]:[],activeProvider:active?.provider,replyMode:'one'};}
+function toggleInspector(open=!inspectorOpen){inspectorOpen=open;renderInspector();}
+async function configureBot(bot,value){try{value.replyMode='one';workspace=await result(bridge.configureBot(bot.id,value));inspectorSignature='';renderInspector();}catch(error){toast(error.message);}}
+function renderInspector(){
+ const pane=$('#bot-inspector'),bot=currentBot();pane.hidden=!inspectorOpen||!bot;$('#workspace').classList.toggle('inspector-open',!pane.hidden);$('#chat-heading').setAttribute('aria-expanded',String(!pane.hidden));
+ if(pane.hidden){inspectorSignature='';inspectorGeneration++;return;}
+ const config=configuration(bot),busy=running.has(bot.id),signature=JSON.stringify([bot,inspectorTab,busy,setup.installed,modelCatalogs.size,workspace.sharedMemory]);
+ if(signature===inspectorSignature)return;inspectorSignature=signature;const generation=++inspectorGeneration;
+ pane.replaceChildren();
+ const controls=node('div','inspector-actions');const share=button('↑',()=>exportConversation(bot),'circle glass');share.setAttribute('aria-label','Share conversation');const close=button('×',()=>toggleInspector(false),'circle glass');close.setAttribute('aria-label','Close bot details');append(controls,share,close);
+ const profile=append(node('div','inspector-profile'),avatar(bot.color),node('h2','',bot.name));
+ const tabs=node('nav','inspector-tabs');tabs.setAttribute('aria-label','Bot details tabs');
+ for(const name of ['Details','Library','Computer']){const tab=button(name,()=>{inspectorTab=name;renderInspector();},name===inspectorTab?'active':'');tab.setAttribute('aria-current',String(name===inspectorTab));tabs.append(tab);}
+ const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
+ if(inspectorTab==='Details'){
+  if(bot.memberIDs){body.append(node('h3','','Group members'));for(const member of workspace.bots.filter(x=>bot.memberIDs.includes(x.id)))body.append(button(member.name,()=>selectBot(member.id)));body.append(node('p','muted','Each member answers with its own provider and model.'));}
+  else{
+   append(body,node('h3','','Providers & models'),node('p','muted','Choose available providers and select the one provider and model that answers for this Bot.'));
+   for(const provider of setup.providers){
+    const choice=config.providers.find(x=>x.provider===provider.id),installed=setup.installed.find(x=>x.provider===provider.id),card=node('div','provider-card');
+    const check=node('input');check.type='checkbox';check.checked=!!choice;check.disabled=busy||(!installed&&!choice);check.setAttribute('aria-label',`Enable ${provider.name}`);
+    check.addEventListener('change',()=>{const value=structuredClone(config);if(check.checked){value.providers.push({provider:provider.id,model:''});value.activeProvider||=provider.id;}else{value.providers=value.providers.filter(x=>x.provider!==provider.id);if(value.activeProvider===provider.id)value.activeProvider=value.providers[0]?.provider;}configureBot(bot,value);});
+    const label=append(node('label','provider-label'),check,node('strong','',provider.name));card.append(label);
+    if(!installed)append(card,node('small','muted','Not installed on this device'),button('Set up',()=>showConnection()));
+    if(choice){
+     const models=modelCatalogs.get(provider.id)||[];
+     if(models.length){const picker=node('select','field');picker.setAttribute('aria-label',`${provider.name} model`);const options=[{id:'',name:'CLI default'},...models];if(choice.model&&!models.some(x=>x.id===choice.model))options.push({id:choice.model,name:choice.model});for(const model of options){const option=node('option','',model.name);option.value=model.id;picker.append(option);}picker.value=choice.model;picker.disabled=busy;picker.addEventListener('change',()=>saveModel(picker.value));card.append(picker);}
+     const field=node('input','field');field.placeholder='Model ID · blank uses CLI default';field.value=choice.model;field.maxLength=200;field.disabled=busy;field.setAttribute('aria-label',`${provider.name} model ID`);
+     const saveModel=value=>{if(/[\r\n]/.test(value)||value.length>200){toast('Enter a model ID of up to 200 characters.');return;}const next=structuredClone(config);next.providers.find(x=>x.provider===provider.id).model=value.trim();configureBot(bot,next);};
+     const apply=button('Apply',()=>saveModel(field.value));apply.disabled=busy;apply.setAttribute('aria-label',`Apply ${provider.name} model`);card.append(append(node('div','model-entry'),field,apply));
+     if(['codex','opencode'].includes(provider.id)){const load=button('Load available models',async()=>{load.disabled=true;load.textContent='Loading models…';try{const models=await result(bridge.listModels(provider.id));modelCatalogs.set(provider.id,models);inspectorSignature='';renderInspector();if(!models.length)toast('No model list returned. Enter an exact model ID.');}catch(error){toast(error.message);load.disabled=false;}});load.disabled=!installed;load.setAttribute('aria-label',`Load ${provider.name} models`);card.append(load);}
+    }body.append(card);
+   }
+   if(config.providers.length>1){const select=node('select','field');select.setAttribute('aria-label','Active provider');for(const choice of config.providers){const option=node('option','',setup.providers.find(x=>x.id===choice.provider)?.name||choice.provider);option.value=choice.provider;select.append(option);}select.value=config.activeProvider||config.providers[0].provider;select.disabled=busy;select.addEventListener('change',()=>configureBot(bot,{...config,activeProvider:select.value}));append(body,node('label','','Active provider'),select);}
+   body.append(node('p','muted','Only the active provider’s selected model responds to this Bot’s messages.'));
+  }
+  if(!bot.isMain)body.append(node('p','',bot.purpose));
+  for(const [title,memory] of [['This Bot’s memory',bot.memory],['Shared memory',workspace.sharedMemory]])if(memory?.length){body.append(node('h3','',title));for(const fact of memory)body.append(node('p','memory-fact',fact));}
+  body.append(node('p','muted','This Bot has no scheduled routines.'));
+ }else if(inspectorTab==='Computer'){
+  const choice=config.providers.find(x=>x.provider===config.activeProvider)||config.providers[0],provider=setup.providers.find(x=>x.id===choice?.provider);
+  append(body,node('h3','','Runs on this device'),node('p','',provider?.name||'Choose an AI CLI'),node('p','muted',choice?.model||'CLI default model'),node('p','muted',busy?'Working…':'Each Bot keeps its own working folder.'),button('AI CLI setup',()=>showConnection()),button('Open working folder',()=>bridge.openBotFolder(bot.id)));
+ }else{
+  const files=node('div','library-files');body.append(files);
+  const refresh=async()=>{try{const list=await result(bridge.listFiles(bot.id));if(generation!==inspectorGeneration)return;files.replaceChildren();if(!list.length)append(files,node('h3','','No files yet'),node('p','muted','Files created in this Bot’s working folder appear here.'));for(const file of list)files.append(button(file.name,()=>bridge.revealBotFile(bot.id,file.name),'file-row'));}catch(error){if(generation===inspectorGeneration)files.textContent=error.message;}};
+  append(body,button('Refresh',refresh),button('Open folder',()=>bridge.openBotFolder(bot.id)));refresh();
+ }
+}
+$('#chat-heading').addEventListener('click',()=>toggleInspector());
+$('#draft').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();event.stopPropagation();$('#composer').requestSubmit();}});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!dialog.open&&inspectorOpen){event.preventDefault();toggleInspector(false);}});
 function panel(title) {
   dialog.replaceChildren();
   const content = node('div', 'panel-content');
@@ -187,7 +241,7 @@ function showSettings(tab = 'General') {
   } else if (tab === 'Computer') page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot. Their model settings and account configuration remain with the CLI.'));
   else if (tab === 'Permissions') page.append(unavailable('CLI tool permissions', 'Codex runs with read-only workspace access. Other CLIs retain their own permissions. The app does not add approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
-  else if (tab === 'Updates') append(page,unavailable('OpenGrokBot 0.3.0','Install a new build from the project’s release artifacts. This app does not update the official Grok Bot application.'),button('Open project ↗',()=>bridge.openDocs('https://github.com/carboy285/opengrokbot')));
+  else if (tab === 'Updates') append(page,unavailable('OpenGrokBot 0.4.0','Install a new build from the project’s release artifacts. This app does not update the official Grok Bot application.'),button('Open project ↗',()=>bridge.openDocs('https://github.com/carboy285/opengrokbot')));
   else if (tab === 'Vault') renderVault(page);
 }
 async function renderVault(page) {
@@ -208,7 +262,7 @@ async function renderVault(page) {
 function showDeleteSecret(item) { const content=panel('Delete secure note?'); append(content,node('p','','This removes the encrypted note from this device.'),button('Delete secure note',async()=>{try {await result(bridge.vaultDelete(item.id));showSettings('Vault');}catch(error){toast(error.message);}}),button('Cancel',()=>showSettings('Vault'))); }
 function confirmReset() { const content=panel('Reset conversations?'); append(content,node('p','','This removes local conversations and additional Bots. Your CLI login, Composio setup, and vault notes are kept.'),button('Reset conversations',async()=>{if(await persist(structuredClone(preview))){selected=workspace.bots[0].id;drafts.clear();render();dialog.close();}}),button('Cancel',()=>showSettings())); }
 function showBotActions(bot) { const content=panel(bot.name); append(content,button('Export conversation…',()=>exportConversation(bot)),!bot.isMain?button('Delete Bot',async()=>{const next=structuredClone(workspace);next.bots=next.bots.filter(x=>x.id!==bot.id);next.entries=next.entries.filter(x=>x.botID!==bot.id);if(await persist(next)){selected=workspace.bots[0]?.id;render();dialog.close();}}):null); }
-async function exportConversation(bot=currentBot()) { if(!bot)return; const text='OpenGrokBot — Local AI conversation\n\n'+entries(bot).map(x=>`${x.kind==='user'?'You':bot.name}: ${x.text}`).join('\n\n'); try { if(await result(bridge.export(text)))toast('Conversation exported.'); }catch(error){toast(error.message);} }
+async function exportConversation(bot=currentBot()) { if(!bot)return; const text='OpenGrokBot — Local AI conversation\n\n'+entries(bot).map(x=>`${x.kind==='user'?'You':x.senderName||bot.name}: ${x.text}`).join('\n\n'); try { if(await result(bridge.export(text)))toast('Conversation exported.'); }catch(error){toast(error.message);} }
 $('#composer').addEventListener('submit',async event=>{
   event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||!text||running.has(bot.id))return;
   if(!window.desktop){showConnection();return;}

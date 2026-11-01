@@ -37,7 +37,7 @@ struct ConversationView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 10) { BotAvatar(color: bot.color, size: 24); Text(bot.name).font(.headline).lineLimit(1) }
+                Button { info = true } label: { HStack(spacing: 10) { BotAvatar(color: bot.color, size: 24); Text(bot.name).font(.headline).lineLimit(1) } }.accessibilityLabel("Bot details for \(bot.name)")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { info = true } label: { Image(systemName: "info.circle").frame(width: 44, height: 44) }.accessibilityLabel("Connection details")
@@ -80,6 +80,8 @@ private struct MessageRow: View {
             HStack {
                 if entry.kind == .user { Spacer(minLength: 35) }
                 VStack(alignment: .leading, spacing: 8) {
+                    if let sender = entry.senderName { Text("Message from \(sender)").font(.caption).foregroundStyle(.secondary) }
+                    if let provider = entry.provider { Text(provider).font(.caption2).foregroundStyle(.secondary) }
                     Text(entry.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(16)

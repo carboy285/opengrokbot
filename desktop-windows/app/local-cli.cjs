@@ -40,15 +40,15 @@ function invocation(file, definition) {
   return {executable:file,prefix:[],extraEnv:{}};
 }
 function environment(extra={}) {return {...process.env,PATH:directories().join(path.delimiter),...extra};}
-function capture(installation,args,timeout=4000) {
+function capture(installation,args,timeout=4000,limit=4096) {
   return new Promise(resolve=>{
     let child, output='', done=false;
-    const finish=(exit)=>{if(done)return;done=true;clearTimeout(timer);resolve({exit,text:output.slice(0,4096)});};
+    const finish=(exit)=>{if(done)return;done=true;clearTimeout(timer);resolve({exit,text:output.slice(0,limit)});};
     const timer=setTimeout(()=>{if(child)child.kill();finish(-1);},timeout);
     try {
       const call=invocation(installation.path,provider(installation.provider));
       child=spawn(call.executable,[...call.prefix,...args],{env:environment(call.extraEnv),stdio:['ignore','pipe','pipe'],windowsHide:true,shell:false});
-      child.stdout.on('data',data=>{if(output.length<4096)output+=data.toString('utf8');});child.stderr.resume();
+      child.stdout.on('data',data=>{if(output.length<limit)output+=data.toString('utf8');});child.stderr.resume();
       child.on('error',()=>finish(-1));child.on('close',code=>finish(code??-1));
     }catch{finish(-1);}
   });
@@ -67,7 +67,7 @@ async function discover(overrides={}) {
   }
   return result;
 }
-function command(id,session,promptFile) {
+function command(id,session,promptFile,model='') {
   let args=[];
   if(id==='codex') {args=['exec','--sandbox','read-only'];if(session)args.push('resume',session);args.push('--json','--skip-git-repo-check','-');}
   else if(id==='claude'){args=['-p','--output-format','stream-json','--verbose','--include-partial-messages'];if(session)args.push('--resume',session);}
@@ -75,6 +75,7 @@ function command(id,session,promptFile) {
   else if(id==='opencode'){args=['run','--format','json'];if(session)args.push('--session',session);}
   else if(id==='gemini'){args=['--output-format','stream-json'];if(session)args.push('--resume',session);}
   else throw new Error('Unknown provider');
+  if(model)args.push('--model',model);
   return args;
 }
 class EventParser {
@@ -97,7 +98,7 @@ class EventParser {
   }
   part(id,text){if(!this.parts.has(id))this.order.push(id);this.parts.set(id,text);this.text=this.order.map(x=>this.parts.get(x)).join('\n\n');}
 }
-function runCLI({installation,prompt,session,directory,onEvent,mcpURL,timeout=600000}) {
+function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',timeout=600000}) {
   let child, cancelled=false, timedOut=false, cancelTimer;
   const cancel=(immediately=false)=>{cancelled=true;if(child&&child.exitCode===null){if(immediately){child.kill('SIGKILL');return;}if(!child.killed){child.kill('SIGINT');cancelTimer=setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},2000);cancelTimer.unref();}}};
   const done=(async()=>{
@@ -113,7 +114,7 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,timeout=60
       return await new Promise((resolve,reject)=>{
         const timer=setTimeout(()=>{timedOut=true;cancel();},timeout);timer.unref();
         const clean=()=>{clearTimeout(timer);clearTimeout(cancelTimer);};
-        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
+        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile,model),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
         const decoder=new StringDecoder('utf8');
         const consume=line=>{for(const event of parser.parse(line)){if(event.type==='failed')protocolFailed=true;onEvent(event);}};
         child.stdout.on('data',data=>{
@@ -138,4 +139,4 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,timeout=60
   })();
   return {done,cancel};
 }
-module.exports={providers,discover,capture,command,EventParser,runCLI,invocation};
+module.exports={environment,providers,discover,capture,command,EventParser,runCLI,invocation};

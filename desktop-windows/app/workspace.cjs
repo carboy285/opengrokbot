@@ -5,9 +5,15 @@ const KINDS = new Set(['bot', 'user', 'activity']);
 function validateWorkspace(value) {
   if (!value || ![1,2].includes(value.version) || !Array.isArray(value.bots) || !Array.isArray(value.entries) || value.bots.length > 100 || value.entries.length > 10000) throw new Error('Invalid workspace');
   if(value.sessions!==undefined&&(typeof value.sessions!=='object'||value.sessions===null||Array.isArray(value.sessions)||Object.keys(value.sessions).length>1000||Object.values(value.sessions).some(x=>typeof x!=='string'||!/^[-_a-zA-Z0-9]{1,200}$/.test(x))))throw new Error('Invalid sessions');
+  const memory=value=>value===undefined||value===null||(Array.isArray(value)&&value.length<=100&&value.every(x=>typeof x==='string'&&x.length<=2000));
+  if(!memory(value.sharedMemory))throw new Error('Invalid shared memory');
   const ids = new Set();
   for (const bot of value.bots) {
     if (typeof bot.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(bot.id) || ids.has(bot.id) || typeof bot.name !== 'string' || !bot.name.trim() || bot.name.length > 200 || typeof bot.purpose !== 'string' || bot.purpose.length > 2000 || !COLORS.has(bot.color)) throw new Error('Invalid Bot');
+    if(bot.aiConfiguration!==undefined&&bot.aiConfiguration!==null){const config=bot.aiConfiguration;
+      if(!Array.isArray(config.providers)||config.providers.length>5||!['one','all'].includes(config.replyMode)||new Set(config.providers.map(x=>x.provider)).size!==config.providers.length||config.providers.some(x=>!['codex','claude','grok','opencode','gemini'].includes(x.provider)||typeof x.model!=='string'||x.model.length>200||/[\r\n]/.test(x.model))||(config.activeProvider!=null&&!config.providers.some(x=>x.provider===config.activeProvider)))throw new Error('Invalid provider settings');
+    }
+    if(!memory(bot.memory)||bot.memberIDs!==undefined&&(!Array.isArray(bot.memberIDs)||bot.memberIDs.length>8||bot.memberIDs.some(x=>typeof x!=='string')))throw new Error('Invalid Bot memory or group');
     ids.add(bot.id);
   }
   const entries = new Set();
@@ -16,6 +22,7 @@ function validateWorkspace(value) {
     if(entry.state!==undefined&&!['streaming','complete','stopped','failed'].includes(entry.state))throw new Error('Invalid message state');
     entries.add(entry.id);
   }
+  if(value.teamMessages!==undefined){if(!Array.isArray(value.teamMessages)||value.teamMessages.length>10000||value.teamMessages.some(x=>!ids.has(x.from)||!ids.has(x.to)||typeof x.id!=='string'||typeof x.rootID!=='string'||typeof x.text!=='string'||x.text.length>8000||!Number.isInteger(x.depth)||x.depth<1||x.depth>4||!['queued','running','complete','failed','stopped'].includes(x.status)))throw new Error('Invalid teamwork queue');}
   return value;
 }
 
