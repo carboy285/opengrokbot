@@ -84,8 +84,9 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { update(); feedback = "Page navigation failed. Retry or choose another page."; if navigation === readerNavigation { finish(.failure(error)) } }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { self.webView(webView, didFail: navigation, withError: error) }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(Self.allowed(navigationAction.request.url) ? .allow : .cancel)
+        decisionHandler(Self.allowed(navigationAction.request.url) && !navigationAction.shouldPerformDownload ? .allow : .cancel)
     }
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) { decisionHandler(.deny) }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if Self.allowed(navigationAction.request.url) { webView.load(navigationAction.request) }; return nil
     }
