@@ -1,4 +1,17 @@
-# Development downloads
+# Downloads · 0.7.0
+
+[Release notes and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.7.0).
+
+| Download | Contents |
+| --- | --- |
+| [Mac universal installer](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-mac-universal.dmg) | Native Apple Silicon/Intel app; macOS 14+ |
+| [Windows installer](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-Windows-x64-Setup.exe) | Windows x64 Setup EXE |
+| [Matching source and Xcode project](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-Source.zip) | Open `GrokBot.xcodeproj`; **GrokBot** for iPhone, **GrokBotMac** for Mac; also includes Windows sources |
+| [Mac DMG checksum](https://github.com/carboy285/opengrokbot/releases/download/v0.7.0/OpenGrokBot-0.7.0-mac-universal.dmg.sha256) | SHA-256 checksum; not an installer |
+
+Runtime source commit: `4f5c16e23ce65dbe266b37a0940e5c5f89f1c0bb`. The [packaging run](https://github.com/carboy285/opengrokbot/actions/runs/41336381049) compiled the universal Mac app, created both desktop installers, and published the matching source ZIP. Unit tests, UI tests, database checks, protocol interoperability, and physical-device behavior were not tested, as requested. Compilation and installer packaging do not verify runtime behavior.
+
+Development signatures: the Mac app is ad-hoc signed and not notarized; the Windows installer is unsigned. The release workflow supports trusted signatures after the owner configures publisher credentials. See [Desktop workspace 0.7](DESKTOP_0_7.md) for features, setup, and signing requirements.
 
 ## Latest desktop and iPhone source
 
@@ -10,7 +23,7 @@ For iPhone, open `GrokBot.xcodeproj`, choose **GrokBot** and your iPhone, keep y
 
 Unit, UI, database, protocol-interoperability, and physical-device checks have not been run for this update, at the user's request. Build/package results will be recorded with published downloads. Trusted installer signing requires the owner’s certificates and credentials; development builds are labeled accordingly.
 
-## Published Apple downloads
+## Previous Apple release · 0.6.1
 
 [Release and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.6.1).
 

@@ -33,4 +33,4 @@ The Apple certificate must be a Developer ID Application identity with its priva
 
 ## Verification status
 
-No unit tests, UI tests, browser checks, database queries, protocol interoperability checks, or physical-device validation were run for this change, as requested. Installer compilation/packaging does not establish runtime correctness. Windows/iPhone interoperability and new UI behavior require device validation. Signing cannot be completed without the owner’s publisher credentials.
+The [0.7.0 packaging run](https://github.com/carboy285/opengrokbot/actions/runs/41336381049) successfully compiled the universal Mac app and built both desktop installers from runtime commit `4f5c16e23ce65dbe266b37a0940e5c5f89f1c0bb`. No unit tests, UI tests, browser checks, database queries, protocol interoperability checks, or physical-device validation were run for this change, as requested. Installer compilation/packaging does not establish runtime correctness. Windows/iPhone interoperability and new UI behavior require device validation. Signing cannot be completed without the owner’s publisher credentials.
