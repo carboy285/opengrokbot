@@ -33,7 +33,9 @@
       "target": [
         "nsis"
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true,
+      "signExecutable": false,
+      "icon": "desktop-windows/app/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -41,7 +43,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "artifactName": "OpenGrokBot-${version}-Windows-${arch}-Setup.${ext}"
+      "artifactName": "OpenGrokBot-${version}-Windows-${arch}-Setup.${ext}",
+      "installerIcon": "desktop-windows/app/icon.ico",
+      "uninstallerIcon": "desktop-windows/app/icon.ico"
     }
   }
 }

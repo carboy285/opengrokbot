@@ -12,7 +12,7 @@ struct MacWorkspaceView: View {
         GeometryReader { geometry in
             ZStack {
                 HStack(spacing: 0) {
-                    sidebar.frame(width: min(310, max(260, geometry.size.width * 0.255)))
+                    sidebar.frame(width: min(370, max(280, geometry.size.width * 0.268)))
                     Rectangle().fill(MacTheme.line).frame(width: 1)
                     if let bot = desktop.selected(in: app) {
                         MacConversationView(bot: bot).id(bot.id)

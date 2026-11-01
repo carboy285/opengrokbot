@@ -5,6 +5,8 @@ const { fileURLToPath } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { validateWorkspace, previewWorkspace } = require('./workspace.cjs');
 
+if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userData', process.env.OPENGROKBOT_TEST_DATA_DIR);
+
 let window;
 const rendererFile = path.resolve(__dirname, '../renderer/index.html');
 const documentation = new Set(['https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot']);
