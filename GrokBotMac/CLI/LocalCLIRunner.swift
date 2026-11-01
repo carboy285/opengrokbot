@@ -8,13 +8,14 @@ final class LocalCLIRun: @unchecked Sendable {
     private var cancelled = false
     private var timedOut = false
 
-    func cancel(timeout: Bool = false) {
+    func cancel(timeout: Bool = false, immediately: Bool = false) {
         lock.lock()
         cancelled = true
         timedOut = timedOut || timeout
         let running = process.isRunning
         lock.unlock()
         if running {
+            if immediately { Darwin.kill(process.processIdentifier, SIGKILL); return }
             process.interrupt()
             DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [self] in
                 if process.isRunning { process.terminate() }
@@ -26,7 +27,11 @@ final class LocalCLIRun: @unchecked Sendable {
     }
 
     static func stream(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil) -> AsyncThrowingStream<CLIEvent, Error> {
-        let run = LocalCLIRun()
+        LocalCLIRun().events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL)
+    }
+
+    func events(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil) -> AsyncThrowingStream<CLIEvent, Error> {
+        let run = self
         return AsyncThrowingStream { continuation in
             continuation.onTermination = { @Sendable _ in run.cancel() }
             DispatchQueue.global(qos: .userInitiated).async {

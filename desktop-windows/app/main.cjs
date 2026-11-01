@@ -10,7 +10,7 @@ if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userD
 const cli=require('./local-cli.cjs');
 const composio=require('./composio.cjs');
 class PublicError extends Error {}
-let state,settings,installed=[],composioConfiguration,connectedTools=[];
+let state,settings,installed=[],composioConfiguration,connectedTools=[],composioBusy=false;
 const active=new Map(),pendingBots=new Set();
 let initialization;
 let window;
@@ -70,6 +70,7 @@ function composioStatus(){return {configured:!!composioConfiguration,toolkits:co
 function notify(){if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
 async function startChat(botID,text){
   const bot=state.bots.find(x=>x.id===botID),installation=selectedCLI();
+  if(composioBusy)throw new PublicError('Wait for Composio setup to finish before sending a message.');
   if(!bot)throw new PublicError('Choose a Bot.');if(!installation)throw new PublicError('Set up an installed AI CLI first.');
   if(active.has(botID)||pendingBots.has(botID))throw new PublicError('A response is already running.');
   if(!text&&!state.entries.some(x=>x.botID===botID&&x.kind==='user'))throw new PublicError('Send your first message first.');
@@ -102,7 +103,7 @@ function configureIPC() {
     await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before changing Bots.');
     validateWorkspace(value);if(!value.bots.some(x=>x.isMain===true&&x.name==='Grok Bot'))throw new PublicError('The main Grok Bot must be kept.');
     // Session IDs belong to the main process; renderer CRUD cannot forge them.
-    value.sessions=state.sessions;await atomicJSON('preview-workspace.json',value);state=value;notify();
+    value.sessions=Object.fromEntries(Object.entries(state.sessions||{}).filter(([key])=>value.bots.some(bot=>key.startsWith(bot.id+'|'))));await atomicJSON('preview-workspace.json',value);state=value;notify();
   });
   handle('setup:status',async()=>{await ensureState();return setupStatus();});
   handle('setup:scan',async()=>{await ensureState();installed=await cli.discover(settings.overrides);if(!installed.some(x=>x.id===settings.selected))settings.selected=installed[0]?.id||'';await saveSettings();return setupStatus();});
@@ -123,6 +124,8 @@ function configureIPC() {
     await ensureState();requireVault();
     if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing tool access.');
     if(typeof key!=='string'||!key.trim()||key.length>4096||!Array.isArray(toolkits)||!toolkits.length||toolkits.length>30||toolkits.some(x=>typeof x!=='string'||!/^[_a-z0-9]{1,100}$/.test(x)))throw new PublicError('Enter a project key and choose tools.');
+    if(composioBusy)throw new PublicError('Composio setup is already running.');
+    composioBusy=true;
     try{
       const session=await composio.create(key.trim(),settings.composioUserID,toolkits);
       const config={key:key.trim(),session,toolkits};
@@ -130,11 +133,11 @@ function configureIPC() {
       composioConfiguration=config;connectedTools=[];
       connectedTools=await composio.toolkits(config.key,session.session_id);
       return composioStatus();
-    }catch(error){throw new PublicError(error.message.startsWith('Composio')?error.message:'Composio configuration could not be saved. Unlock this device and try again.');}
+    }catch(error){throw new PublicError(error.message.startsWith('Composio')?error.message:'Composio configuration could not be saved. Unlock this device and try again.');}finally{composioBusy=false;}
   });
   handle('composio:refresh',async()=>{await ensureState();if(composioConfiguration){try{connectedTools=await composio.toolkits(composioConfiguration.key,composioConfiguration.session.session_id);}catch(error){throw new PublicError(error.message);}}return composioStatus();});
   handle('composio:link',async slug=>{if(!composioConfiguration||!connectedTools.some(x=>x.slug===slug&&x.enabled))throw new PublicError('Choose a tool in your configured project.');try{await shell.openExternal(await composio.link(composioConfiguration.key,composioConfiguration.session.session_id,slug));}catch(error){throw new PublicError(error.message.startsWith('Composio')?error.message:'The authorization page could not be opened.');}});
-  handle('composio:remove',async()=>{if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing tool access.');requireVault();await atomicJSON('composio.encrypted.json',null);composioConfiguration=null;connectedTools=[];return composioStatus();});
+  handle('composio:remove',async()=>{if(composioBusy)throw new PublicError('Wait for Composio setup to finish.');if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing tool access.');requireVault();await atomicJSON('composio.encrypted.json',null);composioConfiguration=null;connectedTools=[];return composioStatus();});
   handle('workspace:export', async text => {
     if (typeof text !== 'string' || text.length > 2000000) throw new Error('Invalid export');
     const result = await dialog.showSaveDialog(window, { defaultPath: 'OpenGrokBot-conversation.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
@@ -181,5 +184,5 @@ app.whenReady().then(() => {
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.loadFile(rendererFile);
 });
-app.on('before-quit',()=>{for(const run of active.values())run.cancel();});
+app.on('before-quit',()=>{for(const run of active.values())run.cancel(true);});
 app.on('window-all-closed', () => app.quit());

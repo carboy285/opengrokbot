@@ -17,7 +17,7 @@ struct MacComposioSetupView: View {
                     ForEach(ComposioModel.choices, id: \.slug) { choice in
                         Toggle(choice.name, isOn: Binding(get: { service.selected.contains(choice.slug) }, set: { enabled in
                             if enabled { service.selected.insert(choice.slug) } else { service.selected.remove(choice.slug) }
-                        })).toggleStyle(.checkbox)
+                        })).toggleStyle(.checkbox).disabled(service.busy)
                     }
                 }
                 MacPillButton(title: service.busy ? "Connecting…" : "Connect project", prominent: true) { service.connect(projectKey: projectKey); projectKey = "" }

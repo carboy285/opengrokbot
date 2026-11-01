@@ -63,6 +63,10 @@ struct MacConversationView: View {
                     .textFieldStyle(.plain).font(.system(size: 18)).lineLimit(1...7)
                     .disableAutocorrection(!spellChecking).focused($composing)
                     .padding(.vertical, 9)
+                    .onKeyPress(.return) { press in
+                        if press.modifiers.contains(.command) { sendMessage(); return .handled }
+                        return .ignored
+                    }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
                 if desktop.runningBots.contains(bot.id) {
                     Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").frame(width: 38, height: 38) }.buttonStyle(.plain).help("Stop response")

@@ -99,13 +99,14 @@ class EventParser {
 }
 function runCLI({installation,prompt,session,directory,onEvent,mcpURL,timeout=600000}) {
   let child, cancelled=false, timedOut=false, cancelTimer;
-  const cancel=()=>{cancelled=true;if(child&&!child.killed){child.kill('SIGINT');cancelTimer=setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},2000);cancelTimer.unref();}};
+  const cancel=(immediately=false)=>{cancelled=true;if(child&&child.exitCode===null){if(immediately){child.kill('SIGKILL');return;}if(!child.killed){child.kill('SIGINT');cancelTimer=setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},2000);cancelTimer.unref();}}};
   const done=(async()=>{
     await fsp.mkdir(directory,{recursive:true});
     const promptFile=path.join(directory,'.prompt-'+randomUUID()+'.txt');
     if(installation.provider==='grok')await fsp.writeFile(promptFile,prompt,{mode:0o600});
-    const mcp=await require('./mcp-config.cjs').configure(installation.provider,directory,mcpURL);
+    let mcp;
     try {
+      mcp=await require('./mcp-config.cjs').configure(installation.provider,directory,mcpURL);
       if(cancelled)throw new Error('Response stopped.');
       const call=invocation(installation.path,provider(installation.provider));
       const parser=new EventParser();let pending='',bytes=0,stderr='',protocolFailed=false;
@@ -133,7 +134,7 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,timeout=60
         });
         child.stdin.end(installation.provider==='grok'?'':prompt);
       });
-    } finally {await mcp.cleanup();if(installation.provider==='grok')await fsp.rm(promptFile,{force:true}).catch(()=>{});}
+    } finally {await mcp?.cleanup();if(installation.provider==='grok')await fsp.rm(promptFile,{force:true}).catch(()=>{});}
   })();
   return {done,cancel};
 }

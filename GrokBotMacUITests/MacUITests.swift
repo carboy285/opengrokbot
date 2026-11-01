@@ -18,10 +18,8 @@ final class MacUITests: XCTestCase {
         try script.write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let app = XCUIApplication()
-        app.launchArguments = ["-localCLISetupComplete", setup ? "NO" : "YES"]
-        app.launchEnvironment["OPENGROKBOT_TEST_SETUP"] = setup ? "1" : "0"
-        app.launchEnvironment["OPENGROKBOT_TEST_CODEX_PATH"] = executable.path
-        app.launchEnvironment["OPENGROKBOT_TEST_WORKSPACE_DIR"] = directory.appendingPathComponent("data").path
+        app.launchArguments = ["-localCLISetupComplete", setup ? "NO" : "YES", "--opengrokbot-test-cli", executable.path, "--opengrokbot-test-data", directory.appendingPathComponent("data").path, "--opengrokbot-test-setup", setup ? "1" : "0"]
+        app.launchEnvironment = ["OPENGROKBOT_TEST_SETUP":setup ? "1" : "0", "OPENGROKBOT_TEST_CODEX_PATH":executable.path, "OPENGROKBOT_TEST_WORKSPACE_DIR":directory.appendingPathComponent("data").path]
         return (app, directory)
     }
 
@@ -44,6 +42,10 @@ final class MacUITests: XCTestCase {
         let reply = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'CLI fixture reply'")).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 15), app.debugDescription)
         capture(app, name: "macos-cli-chat")
+        input.click(); app.typeText("A second message")
+        app.typeKey(.return, modifierFlags: .command)
+        let replies = app.descendants(matching: .any).matching(identifier: "conversation-message").matching(NSPredicate(format: "label CONTAINS 'AI reply: CLI fixture reply'"))
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count >= 2"), object: replies)], timeout: 15), .completed, app.debugDescription)
         app.buttons["Connect apps"].click()
         XCTAssertTrue(app.staticTexts["Connect Apps"].waitForExistence(timeout: 5))
         capture(app, name: "macos-connect-apps")

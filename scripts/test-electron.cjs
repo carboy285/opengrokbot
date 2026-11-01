@@ -9,6 +9,7 @@ const {_electron:electron}=require('@playwright/test');const fs=require('node:fs
  if(args[0]==='login'){process.exit(0);}
  let text='';process.stdin.setEncoding('utf8');process.stdin.on('data',data=>text+=data);process.stdin.on('end',()=>{
  fs.appendFileSync(${JSON.stringify(path.join(directory,'invocations.jsonl'))},JSON.stringify({args,text})+'\\n');
+ if(text.includes('slow stop test')){console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:'Partial fixture reply'}}));setInterval(()=>{},1000);return;}
  console.log(JSON.stringify({type:'thread.started',thread_id:'native-fixture-session'}));
  console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:'Native CLI reply 🌎'}}));});
  `);
@@ -29,10 +30,12 @@ const {_electron:electron}=require('@playwright/test');const fs=require('node:fs
   await page.locator('#draft').fill('Remember this conversation');await page.locator('#draft').press('Control+Enter');
   await page.waitForFunction(()=>document.querySelectorAll('.bubble').length===4&&!document.querySelector('#messages').textContent.includes('Stop response'));
   const calls=(await fs.readFile(path.join(directory,'invocations.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);assert.equal(calls.length,2);assert.ok(calls[1].args.includes('resume'));assert.ok(calls[1].args.includes('native-fixture-session'));assert.equal(calls[1].text,'Remember this conversation');assert.ok(!calls[0].args.join(' ').includes('Native IPC'));
+  await page.locator('#draft').fill('slow stop test');await page.locator('#draft').press('Control+Enter');await page.locator('.bubble').getByText('Partial fixture reply',{exact:true}).waitFor();await page.getByRole('button',{name:'Stop response',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#messages').textContent.includes('Stop response'));
+  assert.equal((await page.evaluate(()=>window.desktop.load())).value.entries.at(-1).state,'stopped');
   const secret='encrypted-smoke-'+Date.now();assert.equal((await page.evaluate(value=>window.desktop.vaultSave('Test secret',value),secret)).ok,true);
   const item=(await page.evaluate(()=>window.desktop.vaultList())).value.find(x=>x.title==='Test secret');assert.ok(item);assert.equal((await page.evaluate(id=>window.desktop.vaultRead(id),item.id)).value,secret);assert.equal((await fs.readFile(path.join(directory,'vault.json'),'utf8')).includes(secret),false);
   await page.evaluate(id=>window.desktop.vaultDelete(id),item.id);assert.deepEqual(errors,[]);
   await desktop.close();desktop=await launch();const relaunched=await desktop.firstWindow();await relaunched.locator('.bubble').getByText('Remember this conversation',{exact:true}).waitFor();
-  console.log('PASS: native setup, single empty Bot, real fixture CLI subprocess, Unicode reply, resumed session, isolated renderer, persistence, encrypted vault.');
+  console.log('PASS: native setup, single empty Bot, real fixture CLI subprocess, Unicode reply, resumed session, cancellation, isolated renderer, persistence, encrypted vault.');
  }finally{if(desktop)await desktop.close();await fs.rm(directory,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

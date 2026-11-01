@@ -29,7 +29,7 @@ final class ComposioModel: ObservableObject {
 
     func connect(projectKey: String) {
         let clean = projectKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !busy, !clean.isEmpty, clean.count < 4096, !selected.isEmpty else { feedback = "Enter a project key and choose at least one tool."; return }
+        guard !busy, !clean.isEmpty, clean.count < 4096, !clean.contains(where: { $0.isWhitespace || $0.isNewline }), !selected.isEmpty else { feedback = "Enter a project key and choose at least one tool."; return }
         busy = true; feedback = nil
         let requested = selected.sorted(), requestGeneration = generation
         var userID = UserDefaults.standard.string(forKey: "composioUserID")

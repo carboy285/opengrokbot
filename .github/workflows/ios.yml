@@ -1,6 +1,7 @@
 name: iOS and inspection tools
 on:
   push:
+    branches: [main]
     paths-ignore: ['**/*.md', 'LICENSE']
   pull_request:
     paths-ignore: ['**/*.md', 'LICENSE']

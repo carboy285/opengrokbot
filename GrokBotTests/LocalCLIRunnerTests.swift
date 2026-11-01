@@ -27,5 +27,45 @@ final class LocalCLIRunnerTests: XCTestCase {
         XCTAssertFalse(arguments.contains("Keep this off argv"))
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("received-prompt.txt"), encoding: .utf8), "Keep this off argv")
     }
+    func testInstallationScannerFindsExplicitExecutable() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("codex-fixture")
+        try "#!/bin/sh\nprintf 'codex-cli fixture\\n'\n".write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions:0o755], ofItemAtPath: executable.path)
+        let captured = CLIInstallationScanner.capture(path: executable.path, arguments: ["--version"])
+        XCTAssertEqual(captured.exit, 0)
+        XCTAssertTrue(captured.text.contains("codex-cli fixture"))
+        let found = CLIInstallationScanner.scan(overrides: ["codex":executable.path])
+        XCTAssertEqual(found.first(where: { $0.provider == .codex })?.path, executable.path)
+    }
+
+    func testStopWaitsForOwnedSubprocessAndReportsStopped() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("slow-cli")
+        let script = """
+        #!/bin/sh
+        cat >/dev/null
+        printf '%s\\n' '{"type":"item.completed","item":{"id":"a","type":"agent_message","text":"Partial reply"}}'
+        exec sleep 30
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions:0o755], ofItemAtPath: executable.path)
+        let run = LocalCLIRun()
+        var received = false
+        let started = Date()
+        do {
+            for try await event in run.events(cli: InstalledCLI(provider: .codex, path: executable.path, version: "fixture"), prompt: "test", session: nil, directory: root) {
+                if case .text = event { received = true; run.cancel() }
+            }
+            XCTFail("Stopped processes must not complete successfully")
+        } catch { XCTAssertEqual(error as? CLIError, .stopped) }
+        XCTAssertTrue(received)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 15)
+    }
+
 }
 #endif

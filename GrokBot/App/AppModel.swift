@@ -26,6 +26,7 @@ final class AppModel: ObservableObject {
         previewEnabled = true
         for index in workspace.entries.indices where workspace.entries[index].state == .streaming {
             workspace.entries[index].state = .stopped
+            if workspace.entries[index].text.isEmpty { workspace.entries[index].text = "Response interrupted when the app closed." }
         }
     }
 

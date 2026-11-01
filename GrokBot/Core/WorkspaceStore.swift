@@ -6,7 +6,7 @@ struct WorkspaceStore {
 
     static var application: WorkspaceStore {
         #if DEBUG && os(macOS)
-        if let directory = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_WORKSPACE_DIR"] {
+        if let directory = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_WORKSPACE_DIR"] ?? Self.testArgument("--opengrokbot-test-data") {
             return WorkspaceStore(url: URL(fileURLWithPath: directory).appendingPathComponent("workspace.json"))
         }
         #endif
@@ -18,6 +18,14 @@ struct WorkspaceStore {
         return WorkspaceStore(url: directory.appending(path: "preview.json"))
         #endif
     }
+
+    #if DEBUG && os(macOS)
+    static func testArgument(_ key: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: key), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+    #endif
 
     func load() throws -> Workspace? {
         if !FileManager.default.fileExists(atPath: url.path), let legacyURL,

@@ -1,6 +1,7 @@
 name: Native macOS app and DMG
 on:
   push:
+    branches: [main]
     paths-ignore: ['**/*.md', 'LICENSE']
   pull_request:
     paths-ignore: ['**/*.md', 'LICENSE']
@@ -60,7 +61,10 @@ jobs:
         if: always()
         with:
           name: OpenGrokBot-macOS-visuals
-          path: artifacts/visuals
+          path: |
+            artifacts/visuals/**/*.png
+            artifacts/visuals/**/*.json
+            artifacts/visuals/**/*.txt
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()

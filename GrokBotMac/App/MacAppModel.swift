@@ -41,6 +41,7 @@ final class MacAppModel: ObservableObject {
     @Published var runErrors: [UUID:String] = [:]
     var cliOverrides = UserDefaults.standard.dictionary(forKey: "localCLIPaths") as? [String:String] ?? [:]
     var tasks: [UUID:Task<Void,Never>] = [:]
+    var runs: [UUID:LocalCLIRun] = [:]
 
     func selectFirst(in app: AppModel) {
         if selectedID == nil { selectedID = app.workspace.bots.first?.id }
@@ -75,7 +76,7 @@ extension MacAppModel {
         scanningCLIs = true
         var overrides = cliOverrides
         #if DEBUG
-        if let path = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_CODEX_PATH"] { overrides["codex"] = path }
+        if let path = ProcessInfo.processInfo.environment["OPENGROKBOT_TEST_CODEX_PATH"] ?? WorkspaceStore.testArgument("--opengrokbot-test-cli") { overrides["codex"] = path }
         #endif
         Task {
             let found = await Task.detached { [overrides] in CLIInstallationScanner.scan(overrides: overrides) }.value
@@ -132,8 +133,8 @@ extension MacAppModel {
         startReply(to: bot, cli: cli, app: app)
     }
 
-    func stop(botID: UUID) { tasks[botID]?.cancel() }
-    func stopAll() { for task in tasks.values { task.cancel() } }
+    func stop(botID: UUID) { runs[botID]?.cancel() }
+    func stopAll(immediately: Bool = false) { for run in runs.values { run.cancel(immediately: immediately) } }
 
     private func startReply(to bot: Bot, cli: InstalledCLI, app: AppModel) {
         let key = bot.id.uuidString + "|" + cli.id
@@ -148,10 +149,11 @@ extension MacAppModel {
         let replyID = app.beginReply(for: bot, provider: cli.provider.name)
         runningBots.insert(bot.id); runErrors[bot.id] = nil
         let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/OpenGrokBot/Conversations/\(bot.id.uuidString)")
+        let run = LocalCLIRun(); runs[bot.id] = run
         tasks[bot.id] = Task {
             do {
                 let mcpURL = try composio.mcpURL()
-                for try await event in LocalCLIRun.stream(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL) {
+                for try await event in run.events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL) {
                     try Task.checkCancellation()
                     switch event {
                     case .session(let id): app.setSession(id, for: key)
@@ -160,6 +162,7 @@ extension MacAppModel {
                     case .failed: throw CLIError.failed(1)
                     }
                 }
+                try Task.checkCancellation()
                 app.finishReply(replyID, state: .complete)
             } catch {
                 let stopped = Task.isCancelled || (error as? CLIError) == .stopped
@@ -167,7 +170,7 @@ extension MacAppModel {
                 app.finishReply(replyID, state: stopped ? .stopped : .failed, message: message)
                 if !stopped { runErrors[bot.id] = message }
             }
-            runningBots.remove(bot.id); tasks[bot.id] = nil
+            runningBots.remove(bot.id); tasks[bot.id] = nil; runs[bot.id] = nil
         }
     }
 }
