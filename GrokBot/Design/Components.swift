@@ -1,0 +1,92 @@
+import SwiftUI
+
+enum Palette {
+    static let background = Color(uiColor: .systemBackground)
+    static let card = Color(uiColor: .secondarySystemBackground)
+    static let userBubble = Color(uiColor: .systemGray4)
+    static func bot(_ name: String) -> Color {
+        switch name {
+        case "purple": Color(red: 0.57, green: 0.32, blue: 1)
+        case "pink": Color(red: 1, green: 0.16, blue: 0.6)
+        case "ochre": Color(red: 0.64, green: 0.43, blue: 0.23)
+        default: Color.primary
+        }
+    }
+}
+
+/// Original vector artwork. No proprietary assets are bundled.
+struct BotAvatar: View {
+    var color = "white"
+    var size: CGFloat = 48
+    var appearance: BotAppearance? = nil
+    var body: some View {
+        Group {
+            if let appearance {
+                CustomBotAvatar(appearance: appearance, size: size)
+            } else if color != "white" {
+                CustomBotAvatar(appearance: BotAppearance(
+                    shape: color == "pink" ? .circle : color == "ochre" ? .hexagon : .pebble,
+                    color: color), size: size)
+            } else {
+                ZStack {
+                    Circle().fill(Color.primary)
+                    HStack(spacing: size * 0.12) {
+                        Capsule().frame(width: size * 0.1, height: size * 0.25)
+                        Capsule().frame(width: size * 0.09, height: size * 0.23).offset(y: -size * 0.035)
+                    }
+                    .foregroundStyle(Palette.background).rotationEffect(.degrees(-28))
+                    .offset(x: size * 0.12, y: -size * 0.12)
+                }
+            }
+        }.frame(width: size, height: size).accessibilityHidden(true)
+    }
+}
+
+struct PreviewBanner: View {
+    var body: some View {
+        Label("DESKTOP HOST REQUIRED", systemImage: "iphone.slash")
+            .font(.caption2.weight(.semibold))
+            .tracking(1.1)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(Palette.card)
+            .accessibilityLabel("Desktop host connection required for AI chat on iPhone.")
+    }
+}
+
+struct RoundButton: View {
+    let symbol: String
+    let label: String
+    var action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 23, weight: .regular))
+                .frame(width: 50, height: 50)
+                .glassChrome(in: Circle())
+                .shadow(color: .black.opacity(0.035), radius: 12, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+}
+
+struct StatusCard: View {
+    var title: String
+    var detail: String
+    var symbol: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol).font(.title3).foregroundStyle(.secondary).frame(width: 24)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.headline)
+                Text(detail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.card, in: RoundedRectangle(cornerRadius: 22))
+    }
+}

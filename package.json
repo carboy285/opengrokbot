@@ -1,0 +1,57 @@
+{
+  "name": "opengrokbot-windows",
+  "version": "0.7.3",
+  "private": true,
+  "description": "Free desktop chat for local AI CLIs with optional Composio tools",
+  "author": "OpenGrokBot contributors",
+  "license": "MIT",
+  "main": "desktop-windows/app/main.cjs",
+  "scripts": {
+    "start:windows": "electron .",
+    "test:desktop": "node --test desktop-windows/app/*.test.cjs",
+    "dist:windows": "electron-builder --win nsis --x64 --config scripts/desktop-build.cjs --publish never",
+    "preview:desktop": "python3 -m http.server 4173 --bind 127.0.0.1 --directory desktop-windows/renderer",
+    "test:ui": "node scripts/test-desktop-ui.cjs",
+    "test:cloud": "node scripts/test-cloud-db.cjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.14",
+    "@playwright/test": "1.64.1",
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "org.opengrokbot.windows",
+    "productName": "OpenGrokBot",
+    "directories": {
+      "output": "artifacts/windows"
+    },
+    "files": [
+      "desktop-windows/app/**/*",
+      "desktop-windows/renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": true,
+      "signExecutable": false,
+      "icon": "desktop-windows/app/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "OpenGrokBot-${version}-Windows-${arch}-Setup.${ext}",
+      "installerIcon": "desktop-windows/app/icon.ico",
+      "uninstallerIcon": "desktop-windows/app/icon.ico"
+    },
+    "asarUnpack": [
+      "desktop-windows/app/composio-bridge.cjs",
+      "desktop-windows/app/composio.cjs"
+    ]
+  }
+}

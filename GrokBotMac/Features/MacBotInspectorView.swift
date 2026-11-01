@@ -1,0 +1,170 @@
+import AppKit
+import SwiftUI
+
+private enum BotInspectorTab: String, CaseIterable, Identifiable {
+    case details = "Details", library = "Library", computer = "Computer"
+    var id: String { rawValue }
+}
+
+/// A persistent companion to the conversation, rather than a modal over it.
+struct MacBotInspectorView: View {
+    let bot: Bot
+    @EnvironmentObject private var app: AppModel
+    @EnvironmentObject private var desktop: MacAppModel
+    @State private var tab = BotInspectorTab.details
+    @State private var files: [URL] = []
+    @State private var fileError: String?
+    @State private var editingAvatar = false
+    @State private var folderDraft = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Spacer()
+                ShareLink(item: desktop.conversationText(for: bot, app: app)) {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 19))
+                        .frame(width: 42, height: 42).glassChrome(in: Circle())
+                }.buttonStyle(.plain).accessibilityLabel("Share conversation").help("Share conversation")
+                MacCircleButton(symbol: "xmark", label: "Close bot details") { desktop.showBotInspector = false }.keyboardShortcut(.cancelAction)
+            }.padding(18)
+            if editingAvatar {
+                BotAvatarPicker(bot: bot, save: { appearance in app.setAppearance(appearance, for: bot) }, close: { editingAvatar = false })
+                    .id(bot.id)
+                Spacer(minLength: 0)
+            } else { VStack(spacing: 0) {
+                    Button { editingAvatar = true } label: {
+                        MacBotAvatar(color: bot.color, size: 86, appearance: bot.appearance)
+                    }.buttonStyle(.plain).help("Change Bot avatar").accessibilityLabel("Change Bot avatar").padding(.top, 14)
+                    Text(bot.name).font(.system(size: 24, weight: .medium))
+                        .multilineTextAlignment(.center).textSelection(.enabled)
+                        .padding(.horizontal, 24).padding(.top, 30)
+                    HStack(spacing: 4) {
+                        ForEach(BotInspectorTab.allCases) { item in
+                            Button { tab = item; if item == .library { refreshFiles() } } label: {
+                                Text(item.rawValue).font(.system(size: 16))
+                                    .foregroundStyle(tab == item ? Color.primary : MacTheme.secondary)
+                                    .padding(.horizontal, 13).padding(.vertical, 9)
+                                    .background(tab == item ? MacTheme.panel : .clear, in: Capsule())
+                            }.buttonStyle(.plain)
+                                .accessibilityIdentifier("bot-inspector-tab-\(item.rawValue.lowercased())")
+                                .accessibilityAddTraits(tab == item ? [.isSelected] : [])
+                        }
+                    }.padding(.top, 30).padding(.bottom, 46)
+                    ScrollView {
+                    VStack(spacing: 0) {
+                    switch tab {
+                    case .details: details
+                    case .library: library
+                    case .computer: computer
+                    }
+                }.frame(maxWidth: .infinity).padding(.bottom, 30)
+                    }
+            } }
+        }
+        .frame(maxHeight: .infinity).background(MacTheme.canvas)
+        .onChange(of: desktop.runningBots) { _, running in if !running.contains(bot.id), tab == .library { refreshFiles() } }
+        .onAppear { folderDraft = bot.folder ?? "" }
+        .onChange(of: bot.id) { _, _ in editingAvatar = false; folderDraft = bot.folder ?? "" }
+    }
+
+    private var details: some View {
+        VStack(spacing: 28) {
+            VStack(alignment: .leading, spacing: 14) {
+                Button((bot.isPinned ?? (bot.isMain == true)) ? "Unpin Bot" : "Pin to top") { desktop.remote.setPinned(bot, pinned: !(bot.isPinned ?? (bot.isMain == true))) }
+                TextField("Folder · blank for Unfiled", text: $folderDraft).textFieldStyle(.roundedBorder)
+                Button("Save folder") { _ = app.organize(bot, folder: folderDraft) }.disabled(folderDraft.count > 80)
+                Text("Drag Bots in the sidebar to change their order.").font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Button("Open local browser", systemImage: "globe") {
+                    do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription }
+                }
+                Text("This Bot has its own local browser profile. Its window is visible on this computer.").font(.caption).foregroundStyle(.secondary)
+                MacBotVMControls(bot: bot)
+                Text("Scheduled tasks").font(.headline)
+                Text("Ask this Bot to schedule a task at a time, repeat hourly/daily/weekly, or react to incoming Bot messages. This app must be running; missed times catch up once.").font(.caption).foregroundStyle(.secondary)
+                ForEach(bot.schedules ?? []) { task in
+                    Text(task.name)
+                    Text("\(task.enabled ? (task.nextRun ?? "Incoming Bot message") : "Paused") · \(task.recurrence) · \(task.timezone)").font(.caption)
+                    Button("Cancel task", role: .destructive) { _ = app.removeSchedule(task.id, botID: bot.id) }
+                }
+            }
+            if let members = bot.memberIDs {
+                Text("Group members").font(.headline)
+                ForEach(app.workspace.bots.filter { members.contains($0.id) }) { member in
+                    Button(member.name) { desktop.selectedID = member.id }
+                }
+                Text("Each member answers with its own selected provider and model.").font(.caption).foregroundStyle(MacTheme.secondary)
+            } else { MacBotProviderSettingsView(bot: bot) }
+            if !(bot.memory ?? []).isEmpty {
+                Text("This Bot’s memory").font(.headline)
+                ForEach(bot.memory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
+            }
+            if !(app.workspace.sharedMemory ?? []).isEmpty {
+                Text("Shared memory").font(.headline)
+                ForEach(app.workspace.sharedMemory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
+            }
+            if bot.isMain != true, !bot.purpose.isEmpty {
+                Text(bot.purpose).font(.system(size: 16)).textSelection(.enabled)
+            }
+            Text("This Bot has no scheduled routines.")
+                .font(.system(size: 17)).foregroundStyle(MacTheme.secondary)
+        }.multilineTextAlignment(.center).padding(.horizontal, 34).padding(.top, 7)
+    }
+
+    private var library: some View {
+        VStack(spacing: 18) {
+            if files.isEmpty {
+                Image(systemName: "doc.text").font(.system(size: 30, weight: .light)).foregroundStyle(MacTheme.secondary)
+                Text("No files yet").font(.system(size: 18, weight: .medium))
+                Text("Files created in this Bot’s working folder appear here.")
+                    .font(.system(size: 14)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
+            } else {
+                ForEach(files, id: \.path) { file in
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([file]) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.text").font(.system(size: 22))
+                            Text(file.lastPathComponent).font(.system(size: 14)).lineLimit(2).multilineTextAlignment(.leading)
+                            Spacer()
+                            Image(systemName: "arrow.up.right").foregroundStyle(MacTheme.secondary)
+                        }.padding(15).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 14))
+                    }.buttonStyle(.plain).help("Show \(file.lastPathComponent) in Finder")
+                }
+            }
+            if let fileError { Text(fileError).font(.caption).foregroundStyle(MacTheme.secondary) }
+            HStack {
+                Button("Refresh") { refreshFiles() }
+                Button("Open folder") { desktop.openWorkingDirectory(for: bot) }
+            }.controlSize(.small).padding(.top, 6)
+        }.padding(.horizontal, 28)
+    }
+
+    private var computer: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "desktopcomputer").font(.system(size: 34, weight: .light)).foregroundStyle(MacTheme.secondary)
+            Text("Runs on this Mac").font(.system(size: 18, weight: .medium))
+            if let provider = desktop.providersToRun(for: bot).first {
+                Label(provider.cli.provider.name, systemImage: "terminal").font(.system(size: 15))
+                Text(provider.choice.model.isEmpty ? "CLI default model" : provider.choice.model).font(.system(size: 13))
+                Text(desktop.runningBots.contains(bot.id) ? "Working…" : "Ready").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+            } else {
+                Text("Choose an AI CLI to start chatting.").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+            }
+            Text("Each Bot keeps its own working folder on this Mac.")
+                .font(.system(size: 14)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
+            Button("AI CLI setup") { desktop.panel = .setup }
+            Button("Open working folder") { desktop.openWorkingDirectory(for: bot) }
+        }.padding(.horizontal, 28)
+    }
+
+    private func refreshFiles() {
+        let directory = desktop.workingDirectory(for: bot)
+        guard FileManager.default.fileExists(atPath: directory.path) else { files = []; fileError = nil; return }
+        do {
+            files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+                .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+                .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            fileError = nil
+        } catch { files = []; fileError = "The files could not be read. Try opening the folder in Finder." }
+    }
+}

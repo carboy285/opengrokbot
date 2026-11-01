@@ -1,0 +1,63 @@
+name: iOS and inspection tools
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE']
+  pull_request:
+    paths-ignore: ['**/*.md', 'LICENSE']
+  workflow_dispatch:
+    inputs:
+      run_checks:
+        description: Explicitly run automated checks
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ios:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_checks
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show selected Xcode
+        run: xcodebuild -version
+      - name: Select an available iPhone simulator
+        run: |
+          xcrun simctl list devices available -j > /tmp/opengrokbot-simulators.json
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          with open('/tmp/opengrokbot-simulators.json') as stream:
+              devices = json.load(stream)['devices']
+          iphones = [d for runtime, group in devices.items() if 'iOS' in runtime for d in group if d.get('isAvailable') and d['name'].startswith('iPhone')]
+          if not iphones:
+              raise SystemExit('Install an iOS 18+ iPhone simulator runtime')
+          print('IOS_SIMULATOR_ID=' + iphones[0]['udid'])
+          PY
+      - name: Build and run XCTest
+        run: >-
+          xcodebuild -project GrokBot.xcodeproj -scheme GrokBot
+          -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_ID"
+          -resultBundlePath build/Tests.xcresult
+          CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xcode-test-results
+          path: build/Tests.xcresult
+          if-no-files-found: ignore
+  inspection:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r scripts/check-requirements.txt
+      - run: python3 scripts/check_project.py
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - run: bash -n scripts/inspect-dmg.sh
