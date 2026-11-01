@@ -11,7 +11,7 @@ final class DesktopUpdates: ObservableObject {
     @Published private(set) var message = "Check for a newer release. Your conversations stay on this Mac."
     @Published private(set) var releaseURL: URL?
     @Published private(set) var checkedAt: Date?
-    var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.7.0" }
+    var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.7.1" }
     private struct Release: Decodable { var tag_name: String; var html_url: String; var draft: Bool; var prerelease: Bool }
     func check(automatically: Bool = false) async {
         guard !checking else { return }

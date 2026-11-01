@@ -28,7 +28,7 @@ struct ConnectDesktopView: View {
                             }.disabled(!host.online)
                         }
                     }
-                    Section { Text(remote.status).font(.footnote).foregroundStyle(.secondary) }
+                    Section { Text(remote.status).font(.footnote).foregroundStyle(.secondary); if let notice = remote.pinSyncNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) } }
                 }
                 if let error = remote.error { Section { Text(error).foregroundStyle(.red) } }
                 Section { Text("Commands and replies are encrypted between devices. Your chats and CLI credentials stay on the computer. Keep it awake with OpenGrokBot running; phone disconnections do not stop its work.").font(.footnote).foregroundStyle(.secondary) }

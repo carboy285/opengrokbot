@@ -164,7 +164,7 @@ struct MacWorkspaceView: View {
 
     @ViewBuilder
     private func organizationActions(_ bot: Bot) -> some View {
-        Button(pinned(bot) ? "Unpin Bot" : "Pin to top") { _ = app.organize(bot, pinned: !pinned(bot)) }
+        Button(pinned(bot) ? "Unpin Bot" : "Pin to top") { desktop.remote.setPinned(bot, pinned: !pinned(bot)) }
         Button("Bot details") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
         Menu("Move to folder") {
             Button("Unfiled") { _ = app.organize(bot, folder: "") }

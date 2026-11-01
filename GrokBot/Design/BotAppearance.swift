@@ -12,8 +12,14 @@ enum AvatarArtwork {
                      green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, opacity: 1)
     }
 
+    private static func safeDimensions(_ source: CGImageSource) -> Bool {
+        guard let values = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = values[kCGImagePropertyPixelWidth as String] as? Int,
+              let height = values[kCGImagePropertyPixelHeight as String] as? Int else { return false }
+        return width > 0 && height > 0 && width <= 32768 && height <= 32768 && width * height <= 40_000_000
+    }
     static func image(_ data: Data) -> CGImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary), safeDimensions(source) else { return nil }
         return CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -26,7 +32,7 @@ enum AvatarArtwork {
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let resource = try url.resourceValues(forKeys: [.fileSizeKey])
         guard let size = resource.fileSize, size <= 12_000_000,
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary), safeDimensions(source),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,

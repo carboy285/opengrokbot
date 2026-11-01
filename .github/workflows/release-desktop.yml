@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.7.0/ --output=artifacts/OpenGrokBot-0.7.0-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.7.1/ --output=artifacts/OpenGrokBot-0.7.1-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -109,7 +109,9 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          Desktop workspace update: Windows uses the encrypted account relay supported by iPhone and Mac. Includes phone approval and diagnostics, pinned Bots and folders, drag ordering, avatar editing, draft recovery, improved message delivery feedback, provider readiness, and update notifications.
+          0.7.1: chats open at the newest message and follow generated replies on iPhone, Mac and Windows. Includes server-backed pin sync, iPhone edge-swipe back, safer workspace/auth/avatar handling, persistent scheduled tasks with catch-up, and optional isolated hosted page reading through Browserbase. Update both iPhone and desktop for shared pins.
+
+          Ask a Bot to schedule one-time, hourly, daily or weekly work. Incoming Bot messages are the supported event trigger. Your desktop app must be running with its CLI configured. Cloud browsing requires your Browserbase account, API key and project UUID in desktop Settings → Computer; sessions are isolated, temporary, and do not use the desktop browser.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -125,6 +127,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.0" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.1" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.7.0 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.0 · Desktop workspace' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.7.1 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.1 · Fixes, scrolling & scheduled tasks' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

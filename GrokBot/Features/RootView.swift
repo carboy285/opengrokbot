@@ -15,6 +15,7 @@ struct RootView: View {
     @FocusState private var searching: Bool
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 104
     @State private var inspectedBot: Bot?
+    @State private var chatPath: [UUID] = []
 
     private var matchingBots: [Bot] {
         model.visibleBots.filter { bot in
@@ -37,7 +38,7 @@ struct RootView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $chatPath) {
             Group {
                 if remote.hasSnapshot { roster }
                 else { connectionWelcome }
@@ -56,7 +57,12 @@ struct RootView: View {
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { inspectedBot = nil } } }
                 }.presentationDetents([.large]).presentationDragIndicator(.visible)
             }
-            .navigationDestination(for: Bot.self) { bot in ConversationView(bot: bot) }
+            .navigationDestination(for: UUID.self) { id in
+                if let bot = model.workspace.bots.first(where: { $0.id == id }) { ConversationView(bot: bot) }
+                else { ContentUnavailableView("Bot unavailable", systemImage: "bubble.left", description: Text("This Bot was removed or its computer disconnected.")) }
+            }
+            .onChange(of: remote.hasSnapshot) { _, available in if !available { chatPath = []; inspectedBot = nil } }
+            .onChange(of: remote.account.session?.user.id) { _, _ in chatPath = []; inspectedBot = nil }
             .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its conversations?", isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }
             ), titleVisibility: .visible) {
@@ -104,7 +110,7 @@ struct RootView: View {
                     }
                 }
                 ForEach(bots) { bot in
-                    NavigationLink(value: bot) { botRow(bot) }.buttonStyle(.plain)
+                    NavigationLink(value: bot.id) { botRow(bot) }.buttonStyle(.plain)
                         .contextMenu { botActions(bot) }
                 }
                 if matchingBots.isEmpty {
@@ -120,7 +126,7 @@ struct RootView: View {
     }
 
     private func pinnedTile(_ bot: Bot, large: Bool) -> some View {
-        NavigationLink(value: bot) {
+        NavigationLink(value: bot.id) {
             VStack(spacing: large ? 17 : 12) {
                 ZStack(alignment: .bottomTrailing) {
                     BotAvatar(color: bot.color, size: large ? min(heroSize, 140) : 64, appearance: bot.appearance)

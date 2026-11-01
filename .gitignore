@@ -17,3 +17,5 @@ node_modules/
 artifacts/
 playwright-report/
 test-results/
+
+supabase/.temp/

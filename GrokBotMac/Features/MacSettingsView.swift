@@ -117,6 +117,7 @@ struct MacSettingsView: View {
         Group {
             unavailable(title: "AI runs from this Mac", detail: "This app launches the installed CLI on this Mac. Each Bot has a separate working folder and saved CLI session. Approved iPhones can control this workspace using the same account.", icon: "desktopcomputer")
             MacRemoteAccessView(remote: desktop.remote)
+            HostedBrowserSettings()
             section("This Mac") {
                 VStack(spacing: 0) {
                     settingRow("Time zone") { Text(TimeZone.current.identifier).foregroundStyle(MacTheme.secondary) }

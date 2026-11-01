@@ -12,6 +12,8 @@ struct RemoteBotDetailView: View {
     @State private var files: [RemoteFile] = []
     @State private var saving = false
     @State private var loading = false
+    @State private var modelTask: Task<Void,Never>?
+    @State private var modelRequest = UUID()
     @State private var editingAvatar = false
     private var bot: Bot? { model.workspace.bots.first { $0.id == botID } }
 
@@ -41,6 +43,7 @@ struct RemoteBotDetailView: View {
                                     ForEach(remote.providers) { value in Text(value.provider.name).tag(value.provider) }
                                     if !remote.providers.contains(where: { $0.provider == provider }) { Text(provider.name + " · not installed").tag(provider) }
                                 }.onChange(of:provider) { _, value in
+                                    modelTask?.cancel(); modelRequest = UUID(); loading = false
                                     modelID = bot.aiConfiguration?.providers.first { $0.provider == value }?.model ?? ""; models = []
                                 }
                                 if !models.isEmpty {
@@ -52,10 +55,19 @@ struct RemoteBotDetailView: View {
                                 }
                                 TextField("Exact model ID · blank uses CLI default",text:$modelID).textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder)
                                 if provider == .codex || provider == .opencode {
-                                    Button(loading ? "Loading models…" : "Load models from desktop") { loading = true; Task { models = await remote.models(provider); loading = false } }.disabled(loading || !remote.online)
+                                    Button(loading ? "Loading models…" : "Load models from desktop") { loadModels() }.disabled(loading || !remote.online)
                                 }
                                 Button(saving ? "Saving…" : "Apply provider and model") { apply(bot) }.disabled(saving || !remote.online || remote.running.contains(botID))
                                 Text("Only this selected provider and model answers for this Bot. Stop its response before changing models.").font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("Scheduled tasks").font(.headline)
+                        Text("Ask this Bot to schedule a task at a time, repeat hourly/daily/weekly, or respond to incoming Bot messages. Runs while your desktop app is available; missed times catch up once.").font(.footnote).foregroundStyle(.secondary)
+                        ForEach(bot.schedules ?? []) { task in
+                            VStack(alignment: .leading) {
+                                Text(task.name).font(.headline)
+                                Text("\(task.enabled ? (task.nextRun ?? "Incoming Bot message") : "Paused") · \(task.recurrence) · \(task.timezone)").font(.caption)
+                                Button("Cancel task", role: .destructive) { Task { await remote.command(RemoteCommand(action: "cancel_task", botID: bot.id, taskID: task.id)) } }.disabled(!remote.online)
                             }
                         }
                         if !bot.purpose.isEmpty { Text(bot.purpose).foregroundStyle(.secondary) }
@@ -82,8 +94,19 @@ struct RemoteBotDetailView: View {
                     .presentationDragIndicator(.visible)
                 }
             }
+            .onDisappear { modelTask?.cancel(); modelRequest = UUID(); loading = false }
             .onAppear { if let bot { provider = bot.aiConfiguration?.activeProvider ?? bot.aiConfiguration?.providers.first?.provider ?? remote.defaultProvider ?? .codex; modelID = bot.aiConfiguration?.providers.first { $0.provider == provider }?.model ?? "" } }
             .onChange(of:tab) { _, value in if value == "Library", let bot { Task { files = await remote.files(bot) } } }
+    }
+    private func loadModels() {
+        modelTask?.cancel(); modelRequest = UUID()
+        let request = modelRequest, requestedProvider = provider
+        loading = true
+        modelTask = Task { @MainActor in
+            let loaded = await remote.models(requestedProvider)
+            guard !Task.isCancelled, request == modelRequest, provider == requestedProvider else { return }
+            models = loaded; loading = false
+        }
     }
     private func apply(_ bot: Bot) {
         guard modelID.count <= 200, !modelID.contains(where: { $0.isNewline }) else { remote.error = "Enter a model ID of up to 200 characters."; return }

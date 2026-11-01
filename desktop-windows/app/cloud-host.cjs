@@ -42,9 +42,9 @@ function open(local, peer, owner, packet) {
   return JSON.parse(data.subarray(8).toString('utf8'));
 }
 class CloudHost {
-  constructor({ load, save, snapshot, execute, models, files, changed = () => {}, fetchImpl = fetch }) {
-    Object.assign(this, { load, save, snapshot, execute, models, files, changed, fetchImpl });
-    this.data = { identities: {}, approvals: {}, receipts: [] }; this.devices = []; this.phase = 'signed-out'; this.feedback = 'Sign in with the same account as your iPhone.'; this.generation = 0; this.accountGeneration = 0; this.enabled = false; this.refreshing = null; this.saveQueue = Promise.resolve();
+  constructor({ load, save, snapshot, execute, models, files, pins = () => [], applyPins = async () => {}, changed = () => {}, fetchImpl = fetch }) {
+    Object.assign(this, { load, save, snapshot, execute, models, files, pins, applyPins, changed, fetchImpl });
+    this.data = { identities: {}, approvals: {}, receipts: [], pinPending: {} }; this.devices = []; this.phase = 'signed-out'; this.feedback = 'Sign in with the same account as your iPhone.'; this.generation = 0; this.accountGeneration = 0; this.enabled = false; this.refreshing = null; this.saveQueue = Promise.resolve();
   }
   get active() { return this.enabled && !!this.data.session; }
   get local() { return this.data.identities[lower(this.data.session?.user.id)]; }
@@ -54,11 +54,11 @@ class CloudHost {
   }
   status() {
     const owner = lower(this.data.session?.user.id), approvals = this.data.approvals[owner] || {};
-    return { signedIn: !!this.data.session, email: this.data.session?.user.email || '', enabled: this.active, phase: this.phase, feedback: this.feedback, lastHeartbeat: this.lastHeartbeat, lastRequest: this.lastRequest, fingerprint: this.local ? fingerprint(this.local.publicKey) : '', phones: this.devices.filter(x => x.kind === 'controller').map(x => ({ id: x.id, name: x.name, fingerprint: fingerprint(x.public_key), approved: approvals[lower(x.id)] === x.public_key, online: x.available && Date.now() - Date.parse(x.last_seen) < 65000 })) };
+    return { signedIn: !!this.data.session, email: this.data.session?.user.email || '', enabled: this.active, phase: this.phase, feedback: this.feedback, lastHeartbeat: this.lastHeartbeat, lastRequest: this.lastRequest, fingerprint: this.local ? fingerprint(this.local.publicKey) : '', pinSyncMessage: this.pinSyncMessage || '', phones: this.devices.filter(x => x.kind === 'controller').map(x => ({ id: x.id, name: x.name, fingerprint: fingerprint(x.public_key), approved: approvals[lower(x.id)] === x.public_key, online: x.available && Date.now() - Date.parse(x.last_seen) < 65000 })) };
   }
   transition(phase, feedback) { const different = phase !== this.phase || feedback !== this.feedback; this.phase = phase; this.feedback = feedback; if (different) this.changed(this.status()); }
   async restore() {
-    try { const saved = await this.load(); if (saved) this.data = saved; this.data.identities ||= {}; this.data.approvals ||= {}; this.data.receipts ||= []; if (this.data.session && this.data.enabled) this.start(); else this.transition(this.data.session ? 'disabled' : 'signed-out', this.data.session ? 'Phone access is off.' : 'Sign in with the same account as your iPhone.'); }
+    try { const saved = await this.load(); if (saved) this.data = saved; this.data.identities ||= {}; this.data.approvals ||= {}; this.data.receipts ||= []; this.data.pinPending ||= {}; if (this.data.session && this.data.enabled) this.start(); else this.transition(this.data.session ? 'disabled' : 'signed-out', this.data.session ? 'Phone access is off.' : 'Sign in with the same account as your iPhone.'); if(this.data.session)this.startPreferences(); }
     catch { this.transition('locked', 'Unlock Windows device encryption, then reopen OpenGrokBot to restore phone access.'); }
   }
   async raw(path, { body, method = 'POST', token, signal } = {}) {
@@ -88,7 +88,7 @@ class CloudHost {
     const owner = lower(session.user.id); this.data.identities[owner] ||= identity(); this.data.approvals[owner] ||= {}; this.devices = []; this.data.enabled = true; await this.persist(); this.start(); return this.status();
   }
   async signOut() {
-    const old = this.data.session; this.abort?.abort(); this.generation++; this.accountGeneration++; this.refreshing = null; this.enabled = false; this.devices = []; this.data.session = null; this.data.enabled = false; await this.persist(); this.transition('signed-out', 'Signed out on this computer.');
+    const old = this.data.session; this.preferencesAbort?.abort(); this.abort?.abort(); this.generation++; this.accountGeneration++; this.refreshing = null; this.enabled = false; this.devices = []; this.data.session = null; this.data.enabled = false; await this.persist(); this.transition('signed-out', 'Signed out on this computer.');
     if (old) this.raw('/auth/v1/logout?scope=local', { body: {}, token: old.access_token }).catch(() => {}); return this.status();
   }
   async setEnabled(value) {
@@ -132,6 +132,7 @@ class CloudHost {
   start() {
     if (!this.data.session || !this.local) return;
     this.abort?.abort(); const generation = ++this.generation; this.abort = new AbortController(); this.enabled = true; this.transition('connecting', 'Connecting to your account…');
+    this.startPreferences();
     this.worker(generation).catch(error => { if (generation === this.generation) this.transition('offline', error.message); });
   }
   async worker(generation) {
@@ -164,6 +165,53 @@ class CloudHost {
       await new Promise(resolve => { const timer = setTimeout(done, wait); const signal = this.abort.signal; function done() { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); } signal.addEventListener('abort', done, { once: true }); if (signal.aborted) done(); });
     }
   }
-  stop() { this.abort?.abort(); this.generation++; this.enabled = false; }
+  async queuePin(bot, value) {
+    if (!this.data.session) return;
+    if (!uuid(bot) || typeof value !== 'boolean') throw new Error('Invalid pin preference.');
+    const owner = lower(this.data.session.user.id); this.data.pinPending ||= {}; this.data.pinPending[owner] ||= {};
+    this.data.pinPending[owner][lower(bot)] = value; await this.persist(); this.startPreferences();
+  }
+  startPreferences() {
+    if (!this.data.session || !this.local || this.preferenceTask && this.preferenceAccount === this.accountGeneration) return;
+    this.preferencesAbort?.abort(); const signal = new AbortController(); this.preferencesAbort = signal;
+    const epoch = this.accountGeneration; this.preferenceAccount = epoch;
+    this.preferenceTask = this.preferenceWorker(epoch, signal.signal).catch(() => {}).finally(() => { if (this.preferenceAccount === epoch) this.preferenceTask = null; });
+  }
+  async preferenceWorker(epoch, signal) {
+    let backoff = 2000;
+    while (!signal.aborted && epoch === this.accountGeneration && this.data.session) {
+      let wait = 2000;
+      try {
+        const owner = lower(this.data.session.user.id), host = this.local.id;
+        if (!this.devices.some(device => lower(device.id) === lower(host))) await this.sync(this.active);
+        this.data.pinPending ||= {}; this.data.pinPending[owner] ||= {};
+        const pending = this.data.pinPending[owner], hadPending = Object.keys(pending).length > 0;
+        for (const [id, value] of Object.entries(pending)) {
+          await this.request('/rest/v1/rpc/opengrok_set_bot_pin', { host_device: host, bot: id, pinned: value });
+          if (signal.aborted || epoch !== this.accountGeneration) return;
+          if (pending[id] === value) delete pending[id];
+        }
+        if (hadPending) await this.persist();
+        const rows = await this.request('/rest/v1/opengrok_bot_pins?select=bot_id,is_pinned&host_id=eq.' + host, null, 'GET');
+        if (!Array.isArray(rows) || rows.some(row => !uuid(row.bot_id) || typeof row.is_pinned !== 'boolean')) throw new Error('Invalid pin settings.');
+        const existing = new Set(rows.map(row => lower(row.bot_id)));
+        for (const bot of this.pins()) {
+          if (existing.has(lower(bot.bot_id)) || !bot.is_pinned && !bot.explicit) continue;
+          const result = await this.request('/rest/v1/rpc/opengrok_set_bot_pin', { host_device: host, bot: bot.bot_id, pinned: bot.is_pinned, only_if_missing: true });
+          if (result?.[0]) rows.push(result[0]);
+        }
+        if (signal.aborted || epoch !== this.accountGeneration) return;
+        await this.applyPins(rows.filter(row => !Object.hasOwn(pending, lower(row.bot_id))));
+        if (this.pinSyncMessage) { this.pinSyncMessage = ''; this.changed(this.status()); }
+        backoff = 2000;
+      } catch {
+        if (signal.aborted || epoch !== this.accountGeneration) return;
+        this.pinSyncMessage = 'Pins are saved locally and will sync when the account service reconnects.'; this.changed(this.status());
+        wait = backoff; backoff = Math.min(15000, backoff * 2);
+      }
+      await new Promise(resolve => { const timer = setTimeout(done, wait); function done() { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); } signal.addEventListener('abort', done, { once: true }); if(signal.aborted)done(); });
+    }
+  }
+  stop() { this.preferencesAbort?.abort(); this.abort?.abort(); this.generation++; this.enabled = false; }
 }
 module.exports = { CloudHost, seal, open, identity, fingerprint };

@@ -100,9 +100,29 @@ function renderFolderFilter(){
  if(!picker){picker=node('select','folder-filter');picker.id='folder-filter';picker.setAttribute('aria-label','Filter Bot folders');picker.addEventListener('change',()=>{folderFilter=picker.value;render();});$('#search-slot').before(picker);}
  picker.replaceChildren();for(const[value,label]of [['*','All Bots'],['','Unfiled'],...values.map(x=>[x,x])]){const option=node('option','',label);option.value=value;picker.append(option);}if(!['*','',...values].includes(folderFilter))folderFilter='*';picker.value=folderFilter;
 }
+const chatScroll={bot:null,follow:true,frame:null,programmatic:false,userUntil:0,lastTop:0};
+const chatViewport=$('#messages');
+function scheduleChatBottom(){
+ if(!chatScroll.follow||chatScroll.frame!==null)return;
+ chatScroll.frame=requestAnimationFrame(()=>{chatScroll.frame=null;if(!chatScroll.follow)return;chatScroll.programmatic=true;chatViewport.scrollTop=chatViewport.scrollHeight;requestAnimationFrame(()=>{chatScroll.programmatic=false;});});
+}
+function scrollIntent(event){
+ chatScroll.userUntil=performance.now()+600;
+ if(event.type==='wheel'&&event.deltaY<0){chatScroll.follow=false;chatScroll.programmatic=false;}
+}
+chatViewport.tabIndex=0;
+chatViewport.addEventListener('wheel',scrollIntent,{passive:true});
+chatViewport.addEventListener('touchstart',scrollIntent,{passive:true});
+chatViewport.addEventListener('touchmove',scrollIntent,{passive:true});
+chatViewport.addEventListener('pointerdown',scrollIntent,{passive:true});
+chatViewport.addEventListener('pointermove',event=>{if(event.buttons)scrollIntent(event);},{passive:true});
+chatViewport.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))scrollIntent(event);});
+chatViewport.addEventListener('scroll',()=>{const top=chatViewport.scrollTop;if(!chatScroll.programmatic&&performance.now()<chatScroll.userUntil){if(top<chatScroll.lastTop-1)chatScroll.follow=false;else if(top>chatScroll.lastTop)chatScroll.follow=chatViewport.scrollHeight-top-chatViewport.clientHeight<80;}chatScroll.lastTop=top;},{passive:true});
+const chatResizeObserver=new ResizeObserver(()=>scheduleChatBottom());chatResizeObserver.observe(chatViewport);
 function renderMessages(bot){
- const messages=$('#messages'),nearBottom=messages.scrollHeight-messages.scrollTop-messages.clientHeight<100,previousScroll=messages.scrollTop;
- if(messages.dataset.bot!==bot.id){messages.replaceChildren();messages.dataset.bot=bot.id;}
+ let messages=$('#message-content');if(!messages){messages=node('div');messages.id='message-content';chatViewport.replaceChildren(messages);chatResizeObserver.observe(messages);}
+ const previousScroll=chatViewport.scrollTop;
+ if(chatScroll.bot!==bot.id){chatScroll.bot=bot.id;chatScroll.follow=true;chatScroll.userUntil=0;messages.replaceChildren();messages.dataset.bot=bot.id;}
  for(const el of messages.querySelectorAll('[data-extra]'))el.remove();
  const live=new Set();let index=0;
  for(const entry of entries(bot)){
@@ -117,10 +137,11 @@ function renderMessages(bot){
  if(!entries(bot).length&&!pending){const empty=node('div','empty','What’s on your mind?');empty.dataset.extra='true';messages.append(empty);}
  if(running.has(bot.id)){const stop=button('Stop response',()=>bridge.stop(bot.id));stop.dataset.extra='true';messages.append(stop);}
  $('#save-note').disabled=running.has(bot.id)||!!pending&&!pending.failed;$('#save-note').setAttribute('aria-label',pending&&!pending.failed?'Sending message':'Send message');
- if(nearBottom||messages.dataset.previousBot!==bot.id)requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight;});else messages.scrollTop=previousScroll;messages.dataset.previousBot=bot.id;
+ if(chatScroll.follow)scheduleChatBottom();else chatViewport.scrollTop=previousScroll;
 }
 async function submitMessage(bot,text,id=crypto.randomUUID()){
  if(running.has(bot.id)||pendingSends.get(bot.id)&&!pendingSends.get(bot.id).failed)return;
+ if(selected===bot.id)chatScroll.follow=true;
  const pending={id,text,failed:false};pendingSends.set(bot.id,pending);drafts.set(bot.id,text);persistDrafts();renderMessages(bot);
  try{workspace=await result(bridge.send(bot.id,text,id));pendingSends.delete(bot.id);if(drafts.get(bot.id)===text){drafts.delete(bot.id);if(selected===bot.id&&$('#draft').value.trim()===text)$('#draft').value='';}persistDrafts();render();if(selected===bot.id)$('#draft').focus();}
  catch(error){pending.failed=true;toast(error.message);if(selected===bot.id)renderMessages(bot);}
@@ -140,6 +161,8 @@ function renderInspector(){
  for(const name of ['Details','Library','Computer']){const tab=button(name,()=>{inspectorTab=name;renderInspector();},name===inspectorTab?'active':'');tab.setAttribute('aria-current',String(name===inspectorTab));tabs.append(tab);}
  const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
  if(inspectorTab==='Details'){
+  append(body,node('h3','','Scheduled tasks'),node('p','muted','Ask this Bot to schedule a one-time or recurring task, or run when another Bot messages it. Tasks run while this desktop app is running; missed times catch up once.'));
+  for(const task of bot.schedules||[]){append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}`),button('Cancel task',async()=>{await result(bridge.cancelTask(bot.id,task.id));}));}
   if(bot.memberIDs){body.append(node('h3','','Group members'));for(const member of workspace.bots.filter(x=>bot.memberIDs.includes(x.id)))body.append(button(member.name,()=>selectBot(member.id)));body.append(node('p','muted','Each member answers with its own provider and model.'));}
   else{
    append(body,node('h3','','Providers & models'),node('p','muted','Choose available providers and select the one provider and model that answers for this Bot.'));
@@ -284,7 +307,7 @@ function showSettings(tab = 'General') {
     for (const [value,label] of [['system','Follow System'],['dark','Dark'],['light','Light']]) { const option=node('option','',label); option.value=value; select.append(option); } select.value=localStorage.getItem('appearance') || 'dark'; select.addEventListener('change',()=>applyTheme(select.value));
     append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),node('span','muted','Bot color')),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
     append(page,promo,node('p','settings-label','Account'),account,node('p','settings-label','Appearance'),appearance,button('Reset conversations…',()=>confirmReset()));
-  } else if (tab === 'Computer') { page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); }
+  } else if (tab === 'Computer') { page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderCloudBrowser(page); }
   else if (tab === 'Permissions') page.append(unavailable('CLI tool permissions', 'Codex runs with read-only workspace access. Other CLIs retain their own permissions. The app does not add approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
@@ -293,7 +316,7 @@ function showSettings(tab = 'General') {
 async function renderRemoteAccess(page){
  const body=node('section','composio-settings');page.append(body);let disposed=false;const draw=async()=>{
   if(!body.isConnected){disposed=true;return;}let status;try{status=await result(bridge.cloudStatus());}catch(error){body.replaceChildren(node('p','',error.message));return;}if(disposed||!body.isConnected)return;cloudStatus=status;body.replaceChildren();
-  append(body,node('h2','','iPhone remote control'),node('p','','Sign in with the same account as your iPhone. Your computer runs the work; approved phones control its Bots.'),node('p',`connection-state ${status.phase}`,status.feedback));
+  append(body,node('h2','','iPhone remote control'),node('p','','Sign in with the same account as your iPhone. Your computer runs the work; approved phones control its Bots.'),node('p',`connection-state ${status.phase}`,status.feedback),status.pinSyncMessage?node('p','muted',status.pinSyncMessage):null);
   const run=async operation=>{for(const control of body.querySelectorAll('button'))control.disabled=true;try{await result(operation);}catch(error){toast(error.message);}if(body.isConnected)draw();};
   if(!status.signedIn){const email=node('input','field'),password=node('input','field');email.type='email';email.placeholder='Email';email.autocomplete='username';email.setAttribute('aria-label','Account email');password.type='password';password.placeholder='Password';password.autocomplete='current-password';password.setAttribute('aria-label','Account password');const form=node('form');append(form,email,password);const sign=button('Sign in',()=>{});sign.type='submit';form.append(sign);form.addEventListener('submit',event=>{event.preventDefault();const value=password.value;password.value='';run(bridge.cloudSignIn(email.value,value,false));});append(body,form,button('Create account',()=>{const value=password.value;password.value='';run(bridge.cloudSignIn(email.value,value,true));}));}
   else{
@@ -359,3 +382,10 @@ if(window.desktop&&!setup.complete)showConnection();
 bridge.loadDrafts?.().then(response=>{if(response.ok){for(const[id,text]of Object.entries(response.value||{}))if(!drafts.has(id))drafts.set(id,text);render();}}).catch(()=>{});
 if(bridge.checkUpdates&&Date.now()-Number(localStorage.getItem('lastUpdateCheck')||0)>86400000){localStorage.setItem('lastUpdateCheck',String(Date.now()));bridge.checkUpdates().then(response=>{if(response.ok&&response.value.available){toast(`${response.value.version} is available. Open Settings → Updates to download it.`);$('#profile-button').classList.add('update-available');}}).catch(()=>{});}
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||event.altKey||dialog.open)return;if(event.key.toLowerCase()==='k'){event.preventDefault();const content=panel('Switch Bot');const field=node('input','field'),results=node('div','switcher-results');field.placeholder='Find a Bot…';field.setAttribute('aria-label','Find a Bot');const draw=()=>{results.replaceChildren();for(const bot of orderedBots().filter(x=>x.name.toLowerCase().includes(field.value.toLowerCase())))results.append(button(bot.name,()=>{dialog.close();selectBot(bot.id);}));};field.addEventListener('input',draw);append(content,field,results);draw();field.focus();}});
+
+async function renderCloudBrowser(page){
+ const card=append(node('section','settings-card'),node('h3','','Cloud browser'),node('p','muted','Each request opens a separate browser session at Browserbase. Browsers run in the cloud; cookies and logins are not retained. Create a Browserbase account, then enter its API key and project UUID. Provider usage may be billed.'));
+ const status=node('p','muted','Loading configuration…'),key=node('input','field'),project=node('input','field');key.type='password';key.placeholder='Browserbase API key';key.setAttribute('aria-label',key.placeholder);project.placeholder='Browserbase project UUID';project.setAttribute('aria-label',project.placeholder);
+ append(card,status,key,project,button('Save connection',async()=>{try{await result(bridge.browserConfigure(key.value,project.value));key.value='';status.textContent='Connection configuration saved. Ask a Bot to read an HTTPS page.';}catch(error){status.textContent=error.message;}}),button('Disconnect',async()=>{try{await result(bridge.browserRemove());status.textContent='Not connected';}catch(error){status.textContent=error.message;}}));page.append(card);
+ try{const value=await result(bridge.browserStatus());status.textContent=value.configured?'Connection configuration saved':'Not connected';}catch(error){status.textContent=error.message;}
+}

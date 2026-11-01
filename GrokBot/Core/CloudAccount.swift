@@ -22,6 +22,7 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     private let secrets: KeychainSecretStore
     private let network: URLSession
     private var browser: ASWebAuthenticationSession?
+    private var authCompletion: AuthCompletion?
     private var refreshTask: Task<CloudSession, Error>?
     private var generation = UUID()
     private var approvals: [String:String] = [:]
@@ -43,26 +44,39 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
     private func loadIdentity(owner: UUID) throws {
         let account = "identity-" + owner.uuidString
-        if let data = try secrets.read(account: account) { identity = try JSONDecoder().decode(CloudIdentity.self, from: data) }
-        else { let fresh = CloudIdentity(); try secrets.save(JSONEncoder().encode(fresh), account: account); identity = fresh }
-        approvals = try readPins("approved-" + owner.uuidString)
-        pinnedHosts = try readPins("hosts-" + owner.uuidString)
+        let next: CloudIdentity
+        if let data = try secrets.read(account: account) { next = try JSONDecoder().decode(CloudIdentity.self, from: data) }
+        else { next = CloudIdentity(); try secrets.save(JSONEncoder().encode(next), account: account) }
+        let nextApprovals = try readPins("approved-" + owner.uuidString)
+        let nextHosts = try readPins("hosts-" + owner.uuidString)
+        _ = try next.publicKey
+        identity = next; approvals = nextApprovals; pinnedHosts = nextHosts
     }
     private func readPins(_ key: String) throws -> [String:String] { if let data = try secrets.read(account: key) { return try JSONDecoder().decode([String:String].self, from: data) }; return [:] }
     private func save(_ session: CloudSession) throws {
         var value = session; value.setExpiry()
-        try secrets.save(JSONEncoder().encode(value), account: "session")
-        if self.session?.user.id != value.user.id || identity == nil { try loadIdentity(owner: value.user.id) }
+        let changed = self.session?.user.id != value.user.id
+        let previousIdentity = identity, previousApprovals = approvals, previousHosts = pinnedHosts
+        do {
+            if changed || identity == nil { try loadIdentity(owner: value.user.id) }
+            try secrets.save(JSONEncoder().encode(value), account: "session")
+        } catch {
+            identity = previousIdentity; approvals = previousApprovals; pinnedHosts = previousHosts
+            throw error
+        }
+        if changed { generation = UUID(); refreshTask?.cancel(); refreshTask = nil; devices = [] }
         self.session = value
     }
     func signIn(email: String, password: String, create: Bool) async {
         guard !busy else { return }; busy = true; error = nil; notice = nil; defer { busy = false }
+        let epoch = generation
         do {
             let data = try await request(path: create ? "/auth/v1/signup?redirect_to=opengrokbot%3A%2F%2Fauth%2Fcallback" : "/auth/v1/token?grant_type=password", body: ["email": email.trimmingCharacters(in: .whitespacesAndNewlines), "password": password], authenticated: false)
+            guard epoch == generation else { return }
             if let value = try? JSONDecoder().decode(CloudSession.self, from: data) { try save(value) }
             else if create { notice = "Check your email to confirm your account, then return here and sign in." }
             else { throw CloudError.message("Sign-in did not return a session. Try again.") }
-        } catch { self.error = error.localizedDescription }
+        } catch { if epoch == generation { self.error = error.localizedDescription } }
     }
     func resetPassword(email: String) async {
         guard !busy, !email.isEmpty else { return }; busy = true; defer { busy = false }
@@ -74,24 +88,32 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
         providers = Set(external.filter { $0.value }.map(\.key))
     }
     func oauth(_ provider: String) async {
-        guard ["google","github"].contains(provider), !busy else { return }; busy = true; error = nil; defer { busy = false; browser = nil }
+        guard ["google","github"].contains(provider), !busy else { return }; busy = true; error = nil; defer { busy = false; browser = nil; authCompletion = nil }
+        let epoch = generation
         do {
             let verifier = UUID().uuidString + UUID().uuidString
             let challenge = Data(SHA256.hash(data:Data(verifier.utf8))).base64EncodedString().replacingOccurrences(of:"+",with:"-").replacingOccurrences(of:"/",with:"_").replacingOccurrences(of:"=",with:"")
-            var parts = URLComponents(url: CloudConfiguration.url.appendingPathComponent("auth/v1/authorize"), resolvingAgainstBaseURL:false)!
+            guard var parts = URLComponents(url: CloudConfiguration.url.appendingPathComponent("auth/v1/authorize"), resolvingAgainstBaseURL:false) else { throw CloudError.invalidPacket }
             parts.queryItems = [URLQueryItem(name:"provider",value:provider),URLQueryItem(name:"redirect_to",value:CloudConfiguration.callback),URLQueryItem(name:"code_challenge",value:challenge),URLQueryItem(name:"code_challenge_method",value:"s256")]
+            guard let authorizeURL = parts.url else { throw CloudError.invalidPacket }
             let callback: URL = try await withCheckedThrowingContinuation { continuation in
-                let web = ASWebAuthenticationSession(url:parts.url!,callbackURLScheme:"opengrokbot") { url, error in
-                    if let url { continuation.resume(returning:url) } else { continuation.resume(throwing:error ?? CloudError.signedOut) }
+                let completion = AuthCompletion(continuation); authCompletion = completion
+                let web = ASWebAuthenticationSession(url: authorizeURL, callbackURLScheme: "opengrokbot") { url, error in
+                    Task { @MainActor in
+                        if let url { completion.finish(.success(url)) }
+                        else { completion.finish(.failure(error ?? CloudError.signedOut)) }
+                    }
                 }
                 web.presentationContextProvider = self; web.prefersEphemeralWebBrowserSession = true; browser = web
-                if !web.start() { continuation.resume(throwing:CloudError.message("Could not open the sign-in browser.")) }
+                if !web.start() { completion.finish(.failure(CloudError.message("Could not open the sign-in browser."))) }
             }
+            guard epoch == generation else { return }
             let result = URLComponents(url:callback,resolvingAgainstBaseURL:false)
             guard callback.host == "auth", callback.path == "/callback", let code = result?.queryItems?.first(where:{$0.name == "code"})?.value else { throw CloudError.message("Sign-in was cancelled or the provider is not configured.") }
             let data = try await request(path:"/auth/v1/token?grant_type=pkce",body:["auth_code":code,"code_verifier":verifier],authenticated:false)
+            guard epoch == generation else { return }
             try save(JSONDecoder().decode(CloudSession.self,from:data))
-        } catch { self.error = error.localizedDescription }
+        } catch { if epoch == generation { self.error = error.localizedDescription } }
     }
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         #if os(macOS)
@@ -102,6 +124,7 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
     func signOut() async {
         let oldSession = session
+        browser?.cancel(); authCompletion?.finish(.failure(CloudError.signedOut))
         // Clear local state immediately, even if the network is unavailable.
         generation = UUID(); refreshTask?.cancel(); refreshTask = nil; session = nil; identity = nil; devices = []; approvals = [:]; pinnedHosts = [:]
         do { try secrets.delete(account:"session") } catch { self.error = "Keychain sign-out failed. Unlock this device and sign out again." }
@@ -153,6 +176,16 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
         let data = try await request(path:"/rest/v1/opengrok_devices?select=id,name,kind,public_key,last_seen,available&order=last_seen.desc",method:"GET")
         devices = try CloudCoding.decoder().decode([CloudDevice].self,from:data)
     }
+    func botPins(host: UUID) async throws -> [CloudBotPin] {
+        let data = try await request(path: "/rest/v1/opengrok_bot_pins?select=bot_id,is_pinned&host_id=eq." + host.uuidString, method: "GET")
+        return try JSONDecoder().decode([CloudBotPin].self, from: data)
+    }
+    @discardableResult
+    func setBotPin(host: UUID, bot: UUID, pinned: Bool, onlyIfMissing: Bool = false) async throws -> CloudBotPin {
+        let data = try await request(path: "/rest/v1/rpc/opengrok_set_bot_pin", body: ["host_device": host.uuidString, "bot": bot.uuidString, "pinned": String(pinned), "only_if_missing": String(onlyIfMissing)])
+        guard let pin = try JSONDecoder().decode([CloudBotPin].self, from: data).first else { throw CloudError.invalidPacket }
+        return pin
+    }
     func approved(_ device: CloudDevice) -> Bool { approvals[device.id.uuidString] == device.public_key }
     func approve(_ device: CloudDevice, allowed: Bool) throws {
         guard let owner = session?.user.id, device.kind == "controller" else { throw CloudError.signedOut }
@@ -188,4 +221,15 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
 
 private final class CloudNetworkDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+}
+
+@MainActor
+private final class AuthCompletion {
+    private var continuation: CheckedContinuation<URL, Error>?
+    init(_ continuation: CheckedContinuation<URL, Error>) { self.continuation = continuation }
+    func finish(_ result: Result<URL, Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(with: result)
+    }
 }

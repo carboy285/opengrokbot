@@ -14,6 +14,11 @@ final class RemoteController: ObservableObject {
     @Published private(set) var providers: [RemoteProvider] = []
     @Published private(set) var defaultProvider: CLIProvider?
     @Published private(set) var pinnedBotIDs: [UUID]?
+    @Published private(set) var pinSyncNotice: String?
+    private var serverPins: [UUID:Bool] = [:]
+    private var pendingPins: [UUID:Bool] = [:]
+    private var legacyPins = Set<UUID>()
+    private var syncingPins = false
     @Published var showConnection = false
     @Published var busy = false
     @Published var drafts: [UUID:String] = [:]
@@ -56,7 +61,7 @@ final class RemoteController: ObservableObject {
     private func clearState() {
         epoch = UUID(); polling?.cancel(); polling = nil; connection = nil; state = nil
         online = false; hasSnapshot = false; needsApproval = false; running = []; providers = []; defaultProvider = nil; pinnedBotIDs = nil
-        drafts = [:]; pendingSends = [:]
+        drafts = [:]; pendingSends = [:]; serverPins = [:]; pendingPins = [:]; legacyPins = []; pinSyncNotice = nil
         model?.applyRemoteSnapshot(Workspace()); model?.leavePreview()
     }
     func setActive(_ active: Bool) {
@@ -71,6 +76,7 @@ final class RemoteController: ObservableObject {
         if connection == nil { status = "Finding your computer…" }
         let current = epoch
         polling = Task {
+            var nextPinSync = Date.distantPast
             var nextDiscovery = connection == nil ? Date.distantPast : Date().addingTimeInterval(15)
             while !Task.isCancelled, current == epoch {
                 do {
@@ -99,6 +105,10 @@ final class RemoteController: ObservableObject {
                     if connection != nil {
                         if !hasSnapshot, !needsApproval { status = "Loading Bots from \(hostName)…" }
                         try await refresh()
+                        if hasSnapshot, Date() >= nextPinSync {
+                            do { try await syncPins(); nextPinSync = Date().addingTimeInterval(2) }
+                            catch { if current == epoch { pinSyncNotice = "Pins will sync when the account service reconnects." }; nextPinSync = Date().addingTimeInterval(5) }
+                        }
                     } else {
                         status = account.hosts.isEmpty
                             ? "Open OpenGrokBot on your computer and sign in with this account. In Settings → Computer, make sure Allow phone access is on."
@@ -108,8 +118,9 @@ final class RemoteController: ObservableObject {
                     if Task.isCancelled || current != epoch { return }
                     online = false; status = error.localizedDescription
                     nextDiscovery = Date.distantPast
-                    if let cloudError = error as? CloudError, case .approvalRequired = cloudError {
-                        needsApproval = true
+                    if let cloudError = error as? CloudError {
+                        if case .approvalRequired = cloudError { needsApproval = true }
+                        if case .timeout = cloudError, !hasSnapshot { connection = nil; state = nil }
                     }
                 }
                 let interval: Duration = !online ? .seconds(2) : running.isEmpty ? .milliseconds(700) : .milliseconds(250)
@@ -121,8 +132,10 @@ final class RemoteController: ObservableObject {
         guard let peer = connection else { return }; let current = epoch
         var parts = URLComponents(); parts.path = "/v1/state"
         if let revision = state?.revision { parts.queryItems = [URLQueryItem(name:"since",value:revision)] }
-        let response = try await client.fetch(peer,target:parts.string!)
+        guard let target = parts.string else { throw CloudError.invalidPacket }
+        let response = try await client.fetch(peer,target:target)
         try Task.checkCancellation(); guard current == epoch else { return }
+        if response.status == 204, state == nil || !hasSnapshot { throw CloudError.resync }
         if response.status != 204 {
             do {
                 let patch = try CloudCoding.decoder().decode(CloudStatePatch.self,from:response.body)
@@ -161,19 +174,54 @@ final class RemoteController: ObservableObject {
     private func loadPins() {
         guard let key = pinsKey else { return }
         do {
-            if let data = try secrets.read(account: key) { pinnedBotIDs = try JSONDecoder().decode([UUID].self, from: data) }
+            if let data = try secrets.read(account: key) {
+                pinnedBotIDs = try JSONDecoder().decode([UUID].self, from: data)
+                legacyPins = Set(pinnedBotIDs ?? [])
+            }
+            if let data = try secrets.read(account: key + "-pending") { pendingPins = try JSONDecoder().decode([UUID:Bool].self, from: data) }
         } catch { self.error = "Your pinned Bots could not be loaded. Unlock this iPhone and try again." }
     }
-    func isPinned(_ bot: Bot) -> Bool { pinnedBotIDs?.contains(bot.id) ?? (bot.isMain == true) }
+    func isPinned(_ bot: Bot) -> Bool { serverPins[bot.id] ?? pinnedBotIDs?.contains(bot.id) ?? bot.isPinned ?? (bot.isMain == true) }
     func setPinned(_ pinned: Bool, bot: Bot) {
         guard let key = pinsKey else { return }
-        var ids = pinnedBotIDs ?? model?.workspace.bots.filter { $0.isMain == true }.map(\.id) ?? []
-        ids.removeAll { $0 == bot.id }
-        if pinned { ids.append(bot.id) }
+        var ids = pinnedBotIDs ?? model?.workspace.bots.filter { isPinned($0) }.map(\.id) ?? []
+        ids.removeAll { $0 == bot.id }; if pinned { ids.append(bot.id) }
         do {
-            try secrets.save(JSONEncoder().encode(ids), account: key)
-            pinnedBotIDs = ids
+            var pending = pendingPins; pending[bot.id] = pinned
+            try secrets.save(JSONEncoder().encode(pending), account: key + "-pending")
+            pendingPins = pending; serverPins[bot.id] = pinned; pinnedBotIDs = ids
+            let current = epoch
+            Task { @MainActor in
+                do { try await syncPins() }
+                catch { if current == epoch { pinSyncNotice = "Saved on this phone. The pin will sync when the account service reconnects." } }
+            }
         } catch { self.error = "Your pinned Bots could not be saved. Unlock this iPhone and try again." }
+    }
+    private func syncPins() async throws {
+        guard !syncingPins, let host = connection?.id, let key = pinsKey else { return }
+        syncingPins = true; defer { syncingPins = false }
+        let current = epoch
+        var rows = try await account.botPins(host: host)
+        guard current == epoch, !Task.isCancelled else { return }
+        var existing = Set(rows.map(\.bot_id))
+        // Import previously phone-only pins once, without overwriting newer server choices.
+        for id in legacyPins where !existing.contains(id) {
+            let row = try await account.setBotPin(host: host, bot: id, pinned: true, onlyIfMissing: true)
+            guard current == epoch else { return }; rows.append(row); existing.insert(id)
+        }
+        for (id, value) in pendingPins {
+            _ = try await account.setBotPin(host: host, bot: id, pinned: value)
+            guard current == epoch else { return }
+            if pendingPins[id] == value { pendingPins[id] = nil }
+        }
+        try secrets.save(JSONEncoder().encode(pendingPins), account: key + "-pending")
+        rows = try await account.botPins(host: host)
+        guard current == epoch, !Task.isCancelled else { return }
+        var pins: [UUID:Bool] = [:]; for row in rows { pins[row.bot_id] = row.is_pinned }
+        for (id, value) in pendingPins { pins[id] = value }
+        serverPins = pins
+        pinnedBotIDs = model?.workspace.bots.filter { pins[$0.id] ?? $0.isPinned ?? ($0.isMain == true) }.map(\.id)
+        pinSyncNotice = nil
     }
     @discardableResult
     func command(_ command: RemoteCommand) async -> Bool {
@@ -185,17 +233,18 @@ final class RemoteController: ObservableObject {
             // The regular state poll publishes the result. Acknowledged commands
             // must not keep the composer busy waiting for another relay exchange.
             return true
-        } catch { self.error = error.localizedDescription; return false }
+        } catch { if current == epoch, !Task.isCancelled { self.error = error.localizedDescription }; return false }
     }
     func send(_ text: String, bot: Bot) async -> Bool {
         let id = pendingSends[bot.id].flatMap { $0.0 == text ? $0.1:nil } ?? UUID()
         pendingSends[bot.id] = (text,id)
         let accepted = await command(RemoteCommand(requestID:id,action:"send",botID:bot.id,text:text))
-        if accepted { pendingSends[bot.id] = nil }; return accepted
+        if accepted, pendingSends[bot.id]?.1 == id { pendingSends[bot.id] = nil }; return accepted
     }
     func models(_ provider: CLIProvider) async -> [AvailableCLIModel] {
         guard let peer = connection, let response = try? await client.fetch(peer,target:"/v1/models?provider=" + provider.rawValue) else { return [] }
-        return (try? CloudCoding.decoder().decode([AvailableCLIModel].self,from:response.body)) ?? []
+        var seen = Set<String>()
+        return ((try? CloudCoding.decoder().decode([AvailableCLIModel].self,from:response.body)) ?? []).filter { seen.insert($0.id).inserted }
     }
     func files(_ bot: Bot) async -> [RemoteFile] {
         guard let peer = connection, let response = try? await client.fetch(peer,target:"/v1/files?bot=" + bot.id.uuidString) else { return [] }

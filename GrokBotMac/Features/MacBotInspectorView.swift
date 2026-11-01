@@ -70,10 +70,19 @@ struct MacBotInspectorView: View {
     private var details: some View {
         VStack(spacing: 28) {
             VStack(alignment: .leading, spacing: 14) {
-                Button((bot.isPinned ?? (bot.isMain == true)) ? "Unpin Bot" : "Pin to top") { _ = app.organize(bot, pinned: !(bot.isPinned ?? (bot.isMain == true))) }
+                Button((bot.isPinned ?? (bot.isMain == true)) ? "Unpin Bot" : "Pin to top") { desktop.remote.setPinned(bot, pinned: !(bot.isPinned ?? (bot.isMain == true))) }
                 TextField("Folder · blank for Unfiled", text: $folderDraft).textFieldStyle(.roundedBorder)
                 Button("Save folder") { _ = app.organize(bot, folder: folderDraft) }.disabled(folderDraft.count > 80)
                 Text("Drag Bots in the sidebar to change their order.").font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Scheduled tasks").font(.headline)
+                Text("Ask this Bot to schedule a task at a time, repeat hourly/daily/weekly, or react to incoming Bot messages. This app must be running; missed times catch up once.").font(.caption).foregroundStyle(.secondary)
+                ForEach(bot.schedules ?? []) { task in
+                    Text(task.name)
+                    Text("\(task.enabled ? (task.nextRun ?? "Incoming Bot message") : "Paused") · \(task.recurrence) · \(task.timezone)").font(.caption)
+                    Button("Cancel task", role: .destructive) { _ = app.removeSchedule(task.id, botID: bot.id) }
+                }
             }
             if let members = bot.memberIDs {
                 Text("Group members").font(.headline)

@@ -14,6 +14,7 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var isPinned: Bool? = nil
     var folder: String? = nil
     var sortOrder: Int? = nil
+    var schedules: [BotSchedule]? = nil
 }
 
 struct BotAppearance: Codable, Hashable, Sendable {
@@ -64,6 +65,22 @@ struct Workspace: Codable, Equatable, Sendable {
 
     static var fresh: Workspace {
         Workspace(bots: [Bot(id: UUID(), name: "Grok Bot", purpose: "Your AI assistant, powered by a CLI on this device.", color: "white", symbol: "sparkles", isMain: true)])
+    }
+
+    /// Reject inconsistent identities before SwiftUI lists or dictionary construction
+    /// can trap. The saved file is preserved when validation fails.
+    func validateIdentities() throws {
+        var botIDs = Set<UUID>(), entryIDs = Set<UUID>(), teamIDs = Set<UUID>()
+        for bot in bots {
+            guard botIDs.insert(bot.id).inserted else { throw CloudError.message("The workspace contains duplicate Bot IDs. Restore a valid workspace on the computer.") }
+            let schedules = bot.schedules ?? []
+            guard schedules.count <= 100, Set(schedules.map(\.id)).count == schedules.count,
+                  schedules.allSatisfy({ !$0.name.isEmpty && $0.name.count <= 200 && !$0.text.isEmpty && $0.text.count <= 8000 && ["none","hourly","daily","weekly"].contains($0.recurrence) && TimeZone(identifier: $0.timezone) != nil && ($0.nextRun == nil || BotSchedule.date($0.nextRun ?? "") != nil) }) else { throw CloudError.message("The workspace contains invalid scheduled tasks.") }
+        }
+        for entry in entries {
+            guard entryIDs.insert(entry.id).inserted, botIDs.contains(entry.botID) else { throw CloudError.message("The workspace contains inconsistent message IDs. Refresh or restore it on the computer.") }
+        }
+        for message in teamMessages ?? [] { guard teamIDs.insert(message.id).inserted else { throw CloudError.message("The workspace contains duplicate teamwork IDs.") } }
     }
 
     // Kept as a source-compatible alias; no demo Bots or messages are seeded.

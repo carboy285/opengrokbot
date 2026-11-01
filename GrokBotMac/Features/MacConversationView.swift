@@ -8,6 +8,8 @@ struct MacConversationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("spellChecking") private var spellChecking = true
     @FocusState private var composing: Bool
+    @State private var followLatest = true
+    @State private var scrollTask: Task<Void,Never>?
 
     private var draft: Binding<String> {
         Binding(get: { desktop.drafts[bot.id] ?? "" }, set: { desktop.drafts[bot.id] = $0 })
@@ -26,10 +28,15 @@ struct MacConversationView: View {
                     }
                     .padding(.horizontal, 24).padding(.top, 85).padding(.bottom, 24)
                     .frame(maxWidth: 1040).frame(maxWidth: .infinity)
+                    .background(ChatScrollMonitor(onUserScroll: { nearBottom in followLatest = nearBottom },
+                        onLayout: { if followLatest { scrollToLatest(proxy) } }))
                 }
-                .onChange(of: app.entries(for: bot).count) { _, _ in
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                .task(id: bot.id) { followLatest = true; scrollToLatest(proxy) }
+                .onChange(of: app.entries(for: bot).last) { _, _ in
+                    if followLatest { scrollToLatest(proxy) }
                 }
+                .onDisappear { scrollTask?.cancel() }
+
             }
             composer
         }
@@ -126,7 +133,18 @@ struct MacConversationView: View {
         }.frame(maxWidth: .infinity)
     }
 
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        scrollTask?.cancel()
+        scrollTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled, followLatest else { return }
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+    }
+
     private func sendMessage() {
+        followLatest = true
         if desktop.send(draft.wrappedValue, to: bot, app: app) { draft.wrappedValue = ""; composing = true }
     }
 }
@@ -166,6 +184,87 @@ private struct MacMessageView: View {
                 }
                 if entry.kind == .bot { Spacer(minLength: 90) }
             }.frame(maxWidth: .infinity)
+        }
+    }
+}
+
+/// Observes the actual AppKit scroll view after layout, including on macOS 14.
+/// Bounds changes caused by streamed text never turn off the user's follow intent.
+private struct ChatScrollMonitor: NSViewRepresentable {
+    var onUserScroll: (Bool) -> Void
+    var onLayout: () -> Void
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) {
+        view.onUserScroll = onUserScroll; view.onLayout = onLayout
+        view.connectAfterLayout()
+    }
+    static func dismantleNSView(_ view: Probe, coordinator: ()) {
+        view.disconnect(); view.onUserScroll = nil; view.onLayout = nil
+    }
+
+    @MainActor
+    final class Probe: NSView {
+        var onUserScroll: ((Bool) -> Void)?
+        var onLayout: (() -> Void)?
+        private weak var scroll: NSScrollView?
+        private var observers: [NSObjectProtocol] = []
+        private var events: Any?
+        private var userUntil = Date.distantPast
+        private var lastDocumentSize = NSSize.zero
+        private var lastViewportSize = NSSize.zero
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { disconnect() } else { connectAfterLayout() }
+        }
+        func connectAfterLayout() {
+            DispatchQueue.main.async { [weak self] in self?.connect() }
+        }
+        private func connect() {
+            guard window != nil, let parent = enclosingScrollView, scroll !== parent else { return }
+            disconnect(); scroll = parent
+            parent.contentView.postsBoundsChangedNotifications = true
+            parent.contentView.postsFrameChangedNotifications = true
+            parent.documentView?.postsFrameChangedNotifications = true
+            for (name, object) in [(NSView.boundsDidChangeNotification, parent.contentView as NSView),
+                                   (NSView.frameDidChangeNotification, parent.contentView as NSView),
+                                   (NSView.frameDidChangeNotification, parent.documentView ?? parent.contentView)] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.changed() }
+                })
+            }
+            events = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown, .leftMouseDragged, .keyDown]) { [weak self] event in
+                MainActor.assumeIsolated { self?.userEvent(event) }
+                return event
+            }
+            changed()
+        }
+        private func userEvent(_ event: NSEvent) {
+            guard let scroll, event.window === scroll.window else { return }
+            if event.type == .keyDown {
+                guard [UInt16(115), 116, 119, 121, 125, 126].contains(event.keyCode), !(window?.firstResponder is NSTextView) else { return }
+            } else {
+                guard scroll.bounds.contains(scroll.convert(event.locationInWindow, from: nil)) else { return }
+            }
+            userUntil = Date().addingTimeInterval(0.4)
+            DispatchQueue.main.async { [weak self] in self?.reportUserPosition() }
+        }
+        private func reportUserPosition() {
+            guard let scroll, let document = scroll.documentView else { return }
+            onUserScroll?(document.isFlipped ? scroll.documentVisibleRect.maxY >= document.bounds.maxY - 80 : scroll.documentVisibleRect.minY <= document.bounds.minY + 80)
+        }
+        private func changed() {
+            guard let scroll, let document = scroll.documentView else { return }
+            let resized = document.frame.size != lastDocumentSize || scroll.contentView.bounds.size != lastViewportSize
+            lastDocumentSize = document.frame.size; lastViewportSize = scroll.contentView.bounds.size
+            if !resized, Date() < userUntil { reportUserPosition() }
+            if resized { onLayout?() }
+        }
+        func disconnect() {
+            for token in observers { NotificationCenter.default.removeObserver(token) }
+            observers = []
+            if let events { NSEvent.removeMonitor(events) }
+            events = nil; scroll = nil
+            lastDocumentSize = .zero; lastViewportSize = .zero
         }
     }
 }

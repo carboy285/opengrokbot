@@ -11,6 +11,8 @@ struct ConversationView: View {
     @State private var sending = false
     @State private var info = false
     @State private var nearBottom = true
+    @State private var userScrolling = false
+    @State private var scrollTask: Task<Void,Never>?
     @FocusState private var composing: Bool
     private var draft: Binding<String> { Binding(get: { remote.drafts[bot.id] ?? "" }, set: { remote.drafts[bot.id] = $0 }) }
     private var canSend: Bool { remote.online && !sending && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -32,7 +34,7 @@ struct ConversationView: View {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     if model.entries(for: bot).isEmpty { emptyConversation }
                     ForEach(model.entries(for: bot)) { entry in
-                        MessageRow(entry: entry).id(entry.id)
+                        MessageRow(entry: entry).equatable().id(entry.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }.padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 24)
@@ -40,19 +42,34 @@ struct ConversationView: View {
             }
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .scrollDismissesKeyboard(.interactively)
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 100
-            } action: { _, value in nearBottom = value }
-            .onChange(of: model.entries(for: bot).last) { _, entry in
-                if nearBottom || entry?.kind == .user {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+            .onScrollPhaseChange { _, phase in
+                userScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+            }
+            .onScrollGeometryChange(for: ChatScrollMetrics.self) { geometry in
+                ChatScrollMetrics(height: geometry.contentSize.height, viewport: geometry.containerSize.height,
+                                  bottom: geometry.visibleRect.maxY)
+            } action: { old, next in
+                // Content growth is not a user scroll. Keep the existing follow intent
+                // until the person actually scrolls away from the latest message.
+                if userScrolling { nearBottom = next.bottom >= next.height - 80 }
+                if nearBottom && !userScrolling && (old.height != next.height || old.viewport != next.viewport) {
+                    scrollToLatest(proxy)
                 }
             }
+            .task(id: bot.id) { nearBottom = true; scrollToLatest(proxy) }
+            .onChange(of: model.entries(for: bot).last) { _, _ in
+                if nearBottom && !userScrolling { scrollToLatest(proxy) }
+            }
+            .onDisappear { scrollTask?.cancel() }
+
         }
         .background(Palette.background)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .toolbar(.hidden, for: .navigationBar)
+        .simultaneousGesture(DragGesture(minimumDistance: 24, coordinateSpace: .global).onEnded { value in
+            if value.startLocation.x < 28, value.translation.width > 80, abs(value.translation.height) < 70 { dismiss() }
+        })
         .sheet(isPresented: $info) {
             NavigationStack {
                 RemoteBotDetailView(botID: bot.id)
@@ -160,6 +177,16 @@ struct ConversationView: View {
         }.padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 4)
     }
 
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        scrollTask?.cancel()
+        scrollTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled, nearBottom, !userScrolling else { return }
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+    }
+
     private func send() {
         let text = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }; sending = true; nearBottom = true
@@ -170,7 +197,13 @@ struct ConversationView: View {
     }
 }
 
-private struct MessageRow: View {
+private struct ChatScrollMetrics: Equatable {
+    var height: CGFloat
+    var viewport: CGFloat
+    var bottom: CGFloat
+}
+
+private struct MessageRow: View, Equatable {
     let entry: Entry
     private var formattedText: AttributedString {
         (try? AttributedString(markdown: entry.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(entry.text)

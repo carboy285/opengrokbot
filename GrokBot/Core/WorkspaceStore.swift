@@ -36,6 +36,7 @@ struct WorkspaceStore {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let original = try Data(contentsOf: url)
         var workspace = try JSONDecoder().decode(Workspace.self, from: original)
+        try workspace.validateIdentities()
         if workspace.schemaVersion != 2 {
             let backup = url.deletingPathExtension().appendingPathExtension("legacy-backup.json")
             if !FileManager.default.fileExists(atPath: backup.path) { try original.write(to: backup, options: .atomic) }
@@ -46,6 +47,7 @@ struct WorkspaceStore {
     }
 
     func save(_ workspace: Workspace) throws {
+        try workspace.validateIdentities()
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoded = try JSONEncoder().encode(workspace)
         #if os(iOS)

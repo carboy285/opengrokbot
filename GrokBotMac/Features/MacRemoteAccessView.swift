@@ -8,6 +8,7 @@ struct MacRemoteAccessView: View {
             Text("iPhone remote control").font(.system(size:20,weight:.medium))
             Text("Sign in on both devices. Your iPhone controls this Mac’s Bots, chats and models wherever you go.").foregroundStyle(MacTheme.secondary)
             CloudSignInView(account:remote.account)
+            if let notice = remote.pinSyncNotice { Text(notice).font(.caption).foregroundStyle(.secondary) }
             Label(remote.connectionState, systemImage: remote.enabled ? "antenna.radiowaves.left.and.right" : "iphone.slash").font(.headline)
             if remote.account.signedIn {
                 Toggle("Allow phone access",isOn:Binding(get:{remote.enabled},set: { $0 ? remote.start():remote.stop() }))

@@ -34,6 +34,7 @@ struct RemoteCommand: Codable, Sendable {
     var purpose: String?
     var color: String?
     var configuration: BotAIConfiguration?
+    var taskID: UUID?
     var appearance: BotAppearance?
 }
 struct RemoteFile: Codable, Sendable, Identifiable { var name: String; var id: String { name } }

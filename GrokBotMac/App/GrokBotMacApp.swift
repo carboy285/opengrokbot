@@ -20,6 +20,7 @@ struct GrokBotMacApp: App {
                     if !app.previewEnabled { app.enterPreview() }
                     desktop.remote.attach(app: app, desktop: desktop)
                     desktop.selectFirst(in: app)
+                    desktop.startScheduler(app: app)
                     desktop.refreshCLIs()
                     Task { await desktop.updates.check(automatically: true) }
                     #if DEBUG

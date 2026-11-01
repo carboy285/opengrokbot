@@ -9,22 +9,23 @@ function validateWorkspace(value) {
   if(!memory(value.sharedMemory))throw new Error('Invalid shared memory');
   const ids = new Set();
   for (const bot of value.bots) {
-    if (typeof bot.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(bot.id) || ids.has(bot.id) || typeof bot.name !== 'string' || !bot.name.trim() || bot.name.length > 200 || typeof bot.purpose !== 'string' || bot.purpose.length > 2000 || !COLORS.has(bot.color)) throw new Error('Invalid Bot');
+    if (typeof bot.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(bot.id) || ids.has(bot.id.toLowerCase()) || typeof bot.name !== 'string' || !bot.name.trim() || bot.name.length > 200 || typeof bot.purpose !== 'string' || bot.purpose.length > 2000 || !COLORS.has(bot.color)) throw new Error('Invalid Bot');
+    if(bot.schedules!=null&&(!Array.isArray(bot.schedules)||bot.schedules.length>100||bot.schedules.some(x=>!require('./schedules.cjs').valid(x))))throw new Error('Invalid scheduled tasks');
     if(bot.isPinned!=null&&typeof bot.isPinned!=='boolean'||bot.folder!=null&&(typeof bot.folder!=='string'||bot.folder.length>80)||bot.sortOrder!=null&&(!Number.isInteger(bot.sortOrder)||bot.sortOrder<0||bot.sortOrder>10000))throw new Error('Invalid Bot organization');
     if(bot.appearance!=null){const a=bot.appearance;if(!COLORS.has(a.color)||!['circle','cloud','square','sparkle','flower','heart','clover','droplet','capsule','triangle','pebble','star','hexagon','fruit'].includes(a.shape)||a.imageData!=null&&(typeof a.imageData!=='string'||!/^[A-Za-z0-9+/]*={0,2}$/.test(a.imageData)||a.imageData.length>32768||Buffer.from(a.imageData,'base64').length>24576))throw new Error('Invalid Bot avatar');}
     if(bot.aiConfiguration!==undefined&&bot.aiConfiguration!==null){const config=bot.aiConfiguration;
       if(!Array.isArray(config.providers)||config.providers.length>5||!['one','all'].includes(config.replyMode)||new Set(config.providers.map(x=>x.provider)).size!==config.providers.length||config.providers.some(x=>!['codex','claude','grok','opencode','gemini'].includes(x.provider)||typeof x.model!=='string'||x.model.length>200||/[\r\n]/.test(x.model))||(config.activeProvider!=null&&!config.providers.some(x=>x.provider===config.activeProvider)))throw new Error('Invalid provider settings');
     }
     if(!memory(bot.memory)||bot.memberIDs!==undefined&&(!Array.isArray(bot.memberIDs)||bot.memberIDs.length>8||bot.memberIDs.some(x=>typeof x!=='string')))throw new Error('Invalid Bot memory or group');
-    ids.add(bot.id);
+    ids.add(bot.id.toLowerCase());
   }
   const entries = new Set();
   for (const entry of value.entries) {
-    if (typeof entry.id !== 'string' || entries.has(entry.id) || !ids.has(entry.botID) || !KINDS.has(entry.kind) || typeof entry.text !== 'string' || entry.text.length > (entry.kind === 'bot' ? 32 * 1024 * 1024 : 100000)) throw new Error('Invalid entry');
+    if (typeof entry.id !== 'string' || entries.has(entry.id.toLowerCase()) || typeof entry.botID!=='string' || !ids.has(entry.botID.toLowerCase()) || !KINDS.has(entry.kind) || typeof entry.text !== 'string' || entry.text.length > (entry.kind === 'bot' ? 32 * 1024 * 1024 : 100000)) throw new Error('Invalid entry');
     if(entry.state!==undefined&&!['streaming','complete','stopped','failed'].includes(entry.state))throw new Error('Invalid message state');
-    entries.add(entry.id);
+    entries.add(entry.id.toLowerCase());
   }
-  if(value.teamMessages!==undefined){if(!Array.isArray(value.teamMessages)||value.teamMessages.length>10000||value.teamMessages.some(x=>!ids.has(x.from)||!ids.has(x.to)||typeof x.id!=='string'||typeof x.rootID!=='string'||typeof x.text!=='string'||x.text.length>8000||!Number.isInteger(x.depth)||x.depth<1||x.depth>4||!['queued','running','complete','failed','stopped'].includes(x.status)))throw new Error('Invalid teamwork queue');}
+  if(value.teamMessages!==undefined){if(!Array.isArray(value.teamMessages)||value.teamMessages.length>10000||value.teamMessages.some(x=>typeof x.from!=='string'||typeof x.to!=='string'||!ids.has(x.from.toLowerCase())||!ids.has(x.to.toLowerCase())||typeof x.id!=='string'||typeof x.rootID!=='string'||typeof x.text!=='string'||x.text.length>8000||!Number.isInteger(x.depth)||x.depth<1||x.depth>4||!['queued','running','complete','failed','stopped'].includes(x.status)))throw new Error('Invalid teamwork queue');}
   return value;
 }
 

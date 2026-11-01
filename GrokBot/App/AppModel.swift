@@ -102,6 +102,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func updateSchedule(_ task: BotSchedule, botID: UUID) -> Bool {
+        guard let bot = workspace.bots.firstIndex(where: { $0.id == botID }), let index = workspace.bots[bot].schedules?.firstIndex(where: { $0.id == task.id }) else { return false }
+        return commit { $0.bots[bot].schedules?[index] = task }
+    }
+    @discardableResult
+    func removeSchedule(_ id: UUID, botID: UUID) -> Bool {
+        guard let bot = workspace.bots.firstIndex(where: { $0.id == botID }) else { return false }
+        return commit { $0.bots[bot].schedules?.removeAll { $0.id == id } }
+    }
     func activity(_ text: String, for botID: UUID) {
         _ = commit { $0.entries.append(Entry(botID: botID, kind: .activity, text: text)) }
     }
@@ -121,6 +131,20 @@ final class AppModel: ObservableObject {
             func target(_ name: String) -> Bot? { value.bots.first { $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame || $0.name.caseInsensitiveCompare(name) == .orderedSame } }
             for action in parsed.actions {
                 switch action.action {
+                case "browse_web": break // Executed by the desktop after successful CLI completion.
+                case "schedule_task":
+                    guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, !(value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).contains(where: { $0.name == action.name && $0.enabled }),
+                          let task = BotSchedule.make(action), let index = value.bots.firstIndex(where: { $0.id == bot.id }), (value.bots[index].schedules ?? []).count < 100 else { note("Task not scheduled: use a unique name, a future ISO date, valid timezone and recurrence, or message_received trigger."); continue }
+                    if value.bots[index].schedules == nil { value.bots[index].schedules = [] }
+                    var created = task
+                    created.lastEvent = value.entries.last(where: { $0.botID == bot.id && $0.senderBotID != nil && $0.kind == .activity })?.id
+                    value.bots[index].schedules?.append(created)
+                    note("Scheduled · \(task.name) · \(task.nextRun ?? "on incoming Bot message") · \(task.recurrence) · desktop must be available")
+                case "list_tasks":
+                    note((value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).map { "\($0.id): \($0.name) · \($0.enabled ? ($0.nextRun ?? "message_received") : "paused") · \($0.recurrence) · \($0.timezone)" }.joined(separator: "\n").isEmpty ? "No scheduled tasks." : (value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).map { "\($0.id): \($0.name) · \($0.enabled ? ($0.nextRun ?? "message_received") : "paused") · \($0.recurrence) · \($0.timezone)" }.joined(separator: "\n"))
+                case "cancel_task":
+                    guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, let id = action.id.flatMap(UUID.init(uuidString:)), let index = value.bots.firstIndex(where: { $0.id == bot.id }) else { note("Task not cancelled: use its exact UUID."); continue }
+                    value.bots[index].schedules?.removeAll { $0.id == id }; note("Cancelled task · \(id)")
                 case "create_bot":
                     guard let name = action.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty, name.count <= 200,
                           let purpose = action.purpose, purpose.count <= 2000, value.bots.count < 100, target(name) == nil else { note("Bot could not be created: use a unique name and a description of up to 2,000 characters."); continue }

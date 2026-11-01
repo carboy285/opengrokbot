@@ -60,6 +60,8 @@ struct CloudIdentity: Codable, Sendable {
         return Data(envelope.dropFirst(8))
     }
 }
+struct CloudBotPin: Codable, Sendable { var bot_id: UUID; var is_pinned: Bool }
+
 struct CloudPacket: Codable, Sendable {
     var id: UUID
     var sender: UUID
@@ -77,6 +79,8 @@ struct CloudStatePatch: Codable, Sendable {
     var baseRevision: String?
     var removedEntries: [UUID]
     static func make(_ next: RemoteSnapshot, previous: RemoteSnapshot?) throws -> CloudStatePatch {
+        try next.workspace.validateIdentities()
+        try previous?.workspace.validateIdentities()
         guard let previous else { return CloudStatePatch(snapshot: next, baseRevision: nil, removedEntries: []) }
         var result = next
         let encoder = CloudCoding.encoder()
@@ -86,12 +90,17 @@ struct CloudStatePatch: Codable, Sendable {
         return CloudStatePatch(snapshot: result, baseRevision: previous.revision, removedEntries: previous.workspace.entries.map(\.id).filter { !present.contains($0) })
     }
     func applying(to previous: RemoteSnapshot?) throws -> RemoteSnapshot {
-        guard let baseRevision else { return snapshot }
+        guard let baseRevision else { try snapshot.workspace.validateIdentities(); return snapshot }
         guard let previous, previous.revision == baseRevision else { throw CloudError.resync }
+        try previous.workspace.validateIdentities()
+        // A delta is not a complete workspace, so validate its entry IDs directly.
+        var patchIDs = Set<UUID>()
+        for entry in snapshot.workspace.entries { guard patchIDs.insert(entry.id).inserted else { throw CloudError.resync } }
         var result = snapshot
         let removed = Set(removedEntries), changes = Dictionary(uniqueKeysWithValues: snapshot.workspace.entries.map { ($0.id, $0) })
         let existing = Set(previous.workspace.entries.map(\.id))
         result.workspace.entries = previous.workspace.entries.filter { !removed.contains($0.id) }.map { changes[$0.id] ?? $0 } + snapshot.workspace.entries.filter { !existing.contains($0.id) }
+        try result.workspace.validateIdentities()
         return result
     }
 }

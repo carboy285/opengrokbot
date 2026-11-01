@@ -18,6 +18,8 @@ final class MacRemoteHost: ObservableObject {
     private var subscriptions: Set<AnyCancellable> = []
     private var receipts: Set<UUID> = []
     private var polling: Task<Void,Never>?
+    private var pinPolling: Task<Void,Never>?
+    @Published private(set) var pinSyncNotice: String?
     private var baselines: [UUID:RemoteSnapshot] = [:]
     private var replies: [String:CloudResponse] = [:]
     private var owner: UUID?
@@ -42,9 +44,59 @@ final class MacRemoteHost: ObservableObject {
                     self.stop(persistPreference: false)
                     self.owner = id; self.replies = [:]; self.baselines = [:]; self.promptedPhones = []
                 }
+                self.startPinSync()
                 if id != nil, (self.preferences.object(forKey: "cloudHostEnabled") as? Bool ?? true) { self.start() }
             }
         }.store(in: &subscriptions)
+    }
+    private var pendingPinKey: String? {
+        guard let owner = account.session?.user.id, let host = account.identity?.id else { return nil }
+        return "server-pin-intents-" + owner.uuidString + "-" + host.uuidString
+    }
+    func setPinned(_ bot: Bot, pinned: Bool) {
+        guard let app else { return }
+        if app.organize(bot, pinned: pinned), let key = pendingPinKey {
+            var pending = preferences.dictionary(forKey: key) as? [String:Bool] ?? [:]
+            pending[bot.id.uuidString] = pinned; preferences.set(pending, forKey: key)
+        }
+    }
+    private func startPinSync() {
+        pinPolling?.cancel(); pinPolling = nil
+        guard let owner = account.session?.user.id, let host = account.identity?.id, let key = pendingPinKey else { return }
+        pinPolling = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, let app = self.app, self.account.session?.user.id == owner else { return }
+                do {
+                    if self.account.localDevice == nil { try await self.account.sync(available: self.enabled) }
+                    try Task.checkCancellation()
+                    let pending = self.preferences.dictionary(forKey: key) as? [String:Bool] ?? [:]
+                    for (id, value) in pending {
+                        guard let bot = UUID(uuidString: id) else { continue }
+                        _ = try await self.account.setBotPin(host: host, bot: bot, pinned: value)
+                        guard self.account.session?.user.id == owner else { return }; try Task.checkCancellation()
+                        var latest = self.preferences.dictionary(forKey: key) as? [String:Bool] ?? [:]
+                        if latest[id] == value { latest[id] = nil; self.preferences.set(latest, forKey: key) }
+                    }
+                    var rows = try await self.account.botPins(host: host)
+                    let existing = Set(rows.map(\.bot_id))
+                    for bot in app.workspace.bots where !existing.contains(bot.id) && (bot.isPinned != nil || bot.isMain == true) {
+                        rows.append(try await self.account.setBotPin(host: host, bot: bot.id, pinned: bot.isPinned ?? (bot.isMain == true), onlyIfMissing: true))
+                    }
+                    guard self.account.session?.user.id == owner else { return }; try Task.checkCancellation()
+                    let dirty = self.preferences.dictionary(forKey: key) as? [String:Bool] ?? [:]
+                    for row in rows where dirty[row.bot_id.uuidString] == nil {
+                        if let bot = app.workspace.bots.first(where: { $0.id == row.bot_id }), (bot.isPinned ?? (bot.isMain == true)) != row.is_pinned {
+                            _ = app.organize(bot, pinned: row.is_pinned)
+                        }
+                    }
+                    self.pinSyncNotice = nil
+                } catch {
+                    if Task.isCancelled || self.account.session?.user.id != owner { return }
+                    self.pinSyncNotice = "Pins are saved locally and will sync when the account service reconnects."
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
     func start() {
         guard account.signedIn, app != nil, !enabled else { return }
@@ -175,6 +227,8 @@ final class MacRemoteHost: ObservableObject {
             if receipts.contains(command.requestID) || app.workspace.entries.contains(where: { $0.id == command.requestID }) { return try .json(["accepted":true]) }
             let bot = app.workspace.bots.first { $0.id == command.botID }
             switch command.action {
+            case "cancel_task":
+                guard let id = command.botID, let taskID = command.taskID, app.removeSchedule(taskID, botID: id) else { return .error(400, "Task could not be cancelled.") }
             case "update_avatar":
                 guard let bot, app.setAppearance(command.appearance, for: bot) else { return .error(400, "Choose a valid Bot avatar with an image under 24 KB.") }
             case "send":
