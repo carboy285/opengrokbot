@@ -7,6 +7,7 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var color: String
     var symbol: String
     var isMain: Bool? = nil
+    var aiConfiguration: BotAIConfiguration? = nil
 }
 
 struct Entry: Identifiable, Codable, Equatable, Sendable {

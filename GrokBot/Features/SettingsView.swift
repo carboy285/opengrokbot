@@ -40,7 +40,7 @@ struct SettingsView: View {
                     Link(destination: URL(string: "https://docs.composio.dev")!) { Label("Composio documentation", systemImage: "iphone") }
                 }
                 Section {
-                    LabeledContent("App version", value: "0.3.0")
+                    LabeledContent("App version", value: "0.4.0")
                     LabeledContent("CLI hosting", value: "Mac or Windows")
                     Text("The desktop apps run installed AI CLIs and connect tools with Composio. The iPhone host bridge is not implemented in this build.")
                         .font(.footnote).foregroundStyle(.secondary)

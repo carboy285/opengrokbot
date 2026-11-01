@@ -34,12 +34,19 @@ struct MacConversationView: View {
             composer
         }
         .overlay(alignment: .top) {
-            HStack(spacing: 11) {
-                MacBotAvatar(color: bot.color, size: 27)
-                Text(bot.name).font(.system(size: 18, weight: .medium)).lineLimit(1)
+            Button { desktop.showBotInspector.toggle() } label: {
+                HStack(spacing: 11) {
+                    MacBotAvatar(color: bot.color, size: 27)
+                    Text(bot.name).font(.system(size: 18, weight: .medium)).lineLimit(1)
+                }
+                .padding(.horizontal, 15).padding(.vertical, 10)
+                .contentShape(Capsule()).glassChrome(in: Capsule())
             }
-            .padding(.horizontal, 15).padding(.vertical, 10)
-            .glassChrome(in: Capsule(), interactive: false)
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("bot-details-toggle")
+            .accessibilityLabel("Bot details for \(bot.name)")
+            .accessibilityValue(desktop.showBotInspector ? "Expanded" : "Collapsed")
+            .help(desktop.showBotInspector ? "Close bot details" : "Open bot details")
             .padding(.top, 12)
         }
         .background(MacTheme.canvas)
@@ -64,8 +71,8 @@ struct MacConversationView: View {
                     .disableAutocorrection(!spellChecking).focused($composing)
                     .padding(.vertical, 9)
                     .onKeyPress(keys: [.return], phases: .down) { press in
-                        if press.modifiers.contains(.command) { sendMessage(); return .handled }
-                        return .ignored
+                        if press.modifiers.contains(.shift) { return .ignored }
+                        sendMessage(); return .handled
                     }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
                 if desktop.runningBots.contains(bot.id) {
@@ -74,8 +81,8 @@ struct MacConversationView: View {
                     Button { sendMessage() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(.black)
                             .frame(width: 38, height: 38).background(.white, in: Circle())
-                    }.buttonStyle(.plain).disabled(!desktop.canChat).keyboardShortcut(.return, modifiers: .command)
-                        .help("Send message (⌘Return)").accessibilityLabel("Send message")
+                    }.buttonStyle(.plain).disabled(desktop.providersToRun(for: bot).isEmpty).keyboardShortcut(.return, modifiers: [])
+                        .help("Send message").accessibilityLabel("Send message")
                 } else {
                     Image(systemName: "mic").font(.system(size: 21)).foregroundStyle(MacTheme.secondary)
                         .frame(width: 36, height: 38).help("Voice input is not available in this version")
@@ -87,19 +94,15 @@ struct MacConversationView: View {
             .padding(9).glassChrome(in: RoundedRectangle(cornerRadius: 31))
             HStack(spacing: 9) {
                 if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
-                if desktop.installedCLIs.isEmpty {
-                    Button("Set up an AI CLI") { desktop.panel = .setup }.buttonStyle(.link)
-                } else {
-                    Picker("AI CLI", selection: Binding(get: { desktop.selectedCLIID }, set: { desktop.chooseCLI($0) })) {
-                        ForEach(desktop.installedCLIs) { cli in Text(cli.provider.name).tag(cli.id) }
-                    }.labelsHidden().frame(width: 140).controlSize(.mini).disabled(!desktop.runningBots.isEmpty)
+                if desktop.providersToRun(for: bot).isEmpty {
+                    Button("Choose a provider") { desktop.showBotInspector = true }.buttonStyle(.link)
                 }
                 Spacer()
                 if desktop.runningBots.contains(bot.id) {
                     ProgressView().controlSize(.mini)
                     Text("Working…")
                     Button("Stop") { desktop.stop(botID: bot.id) }.buttonStyle(.link)
-                } else { Text("⌘Return to send · Uses your CLI account") }
+                } else { Text("Uses your selected AI account") }
             }.font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
             if let error = desktop.runErrors[bot.id] {
                 HStack { Text(error).font(.system(size: 11)); Spacer(); Button("Retry") { desktop.retry(bot: bot, app: app) } }.foregroundStyle(MacTheme.secondary)
@@ -138,7 +141,11 @@ private struct MacMessageView: View {
         } else {
             HStack(alignment: .top) {
                 if entry.kind == .user { Spacer(minLength: 90) }
-                Text(entry.text.isEmpty && entry.state == .streaming ? "Thinking…" : entry.text)
+                VStack(alignment: .leading, spacing: 6) {
+                    if entry.kind == .bot, let provider = entry.provider {
+                        Text(provider).font(.system(size: 11)).foregroundStyle(MacTheme.secondary).padding(.horizontal, 5)
+                    }
+                    Text(entry.text.isEmpty && entry.state == .streaming ? "Thinking…" : entry.text)
                     .font(.system(size: 18)).lineSpacing(6).textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .background(entry.kind == .user ? MacTheme.userBubble : MacTheme.panel, in: RoundedRectangle(cornerRadius: entry.kind == .user ? 24 : 23))
@@ -152,6 +159,7 @@ private struct MacMessageView: View {
                     }
                     .accessibilityIdentifier("conversation-message")
                     .accessibilityLabel("\(entry.kind == .user ? "You" : "AI reply"): \(entry.text)")
+                }
                 if entry.kind == .bot { Spacer(minLength: 90) }
             }.frame(maxWidth: .infinity)
         }

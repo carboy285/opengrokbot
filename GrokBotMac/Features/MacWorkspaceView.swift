@@ -12,10 +12,19 @@ struct MacWorkspaceView: View {
         GeometryReader { geometry in
             ZStack {
                 HStack(spacing: 0) {
-                    sidebar.frame(width: min(370, max(280, geometry.size.width * 0.268)))
-                    Rectangle().fill(MacTheme.line).frame(width: 1)
+                    let hideRoster = desktop.showBotInspector && geometry.size.width < 1180
+                    sidebar.frame(width: hideRoster ? 0 : min(370, max(280, geometry.size.width * 0.268)))
+                        .clipped().allowsHitTesting(!hideRoster).accessibilityHidden(hideRoster)
+                    Rectangle().fill(MacTheme.line).frame(width: hideRoster ? 0 : 1)
                     if let bot = desktop.selected(in: app) {
                         MacConversationView(bot: bot).id(bot.id)
+                        if desktop.showBotInspector {
+                            Rectangle().fill(MacTheme.line).frame(width: 1)
+                            MacBotInspectorView(bot: bot)
+                                .id(bot.id)
+                                .frame(width: min(440, max(340, geometry.size.width * 0.31)))
+                                .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+                        }
                     } else {
                         emptyWorkspace.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -38,8 +47,9 @@ struct MacWorkspaceView: View {
                 }
             }
             .animation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 1), value: desktop.panel)
+            .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1), value: desktop.showBotInspector)
             .background(MacTheme.canvas)
-            .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showSearch = false } }
+            .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
         .foregroundStyle(.primary.opacity(0.9))
         .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its local notes?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {

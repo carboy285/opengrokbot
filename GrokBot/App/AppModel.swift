@@ -48,6 +48,15 @@ final class AppModel: ObservableObject {
         return commit { $0.bots.append(Bot(id: UUID(), name: cleanName, purpose: purpose, color: color, symbol: "sparkles")) }
     }
 
+    @discardableResult
+    func setAIConfiguration(_ configuration: BotAIConfiguration, for bot: Bot) -> Bool {
+        guard let index = workspace.bots.firstIndex(where: { $0.id == bot.id }),
+              configuration.providers.count <= CLIProvider.allCases.count,
+              Set(configuration.providers.map(\.provider)).count == configuration.providers.count,
+              configuration.providers.allSatisfy({ $0.model.count <= 200 && !$0.model.contains(where: { $0.isNewline }) }) else { return false }
+        return commit { $0.bots[index].aiConfiguration = configuration }
+    }
+
     func removeBot(_ bot: Bot) {
         guard bot.isMain != true else { return }
         commit { value in

@@ -45,7 +45,7 @@ struct MacSetupView: View {
             }
         }
         .padding(32)
-        .onAppear { desktop.refreshCLIs(); if let current = desktop.selectedCLI { provider = current.provider } }
+        .onAppear { desktop.refreshCLIs(); if let requested = desktop.setupProvider { provider = requested; desktop.setupProvider = nil } else if let current = desktop.selectedCLI { provider = current.provider } }
         .onChange(of: provider) { _, _ in desktop.loginVerified = false; desktop.setupFeedback = nil; if let installation { desktop.chooseCLI(installation.id) } }
         .onChange(of: desktop.installedCLIs) { _, _ in if let installation { desktop.chooseCLI(installation.id) } }
     }

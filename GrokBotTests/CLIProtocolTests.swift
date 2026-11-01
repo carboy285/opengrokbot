@@ -72,6 +72,23 @@ final class CLIProtocolTests: XCTestCase {
         XCTAssertTrue(gemini.parse(Data(#"{"type":"result","status":"error"}"#.utf8)).contains(.failed))
     }
 
+    func testSpecificModelsArePassedAsArgumentsForEveryProvider() {
+        for provider in CLIProvider.allCases {
+            let command = CLICommand.chat(provider: provider, prompt: "private", session: "saved-session", promptFile: "/private/prompt.txt", model: "provider/specific-model")
+            let index = command.arguments.firstIndex(of: "--model")!
+            XCTAssertEqual(command.arguments[index + 1], "provider/specific-model")
+            XCTAssertEqual(command.arguments.filter { $0 == "--model" }.count, 1)
+            XCTAssertFalse(command.arguments.contains("private"))
+        }
+    }
+
+    func testProviderConfigurationPersistsMultipleSelectionsAndModels() throws {
+        var bot = Workspace.fresh.bots[0]
+        bot.aiConfiguration = BotAIConfiguration(providers: [BotAIProvider(provider: .codex, model: "model-a"), BotAIProvider(provider: .claude, model: "model-b")], activeProvider: .claude, replyMode: .all)
+        let restored = try JSONDecoder().decode(Bot.self, from: JSONEncoder().encode(bot))
+        XCTAssertEqual(restored.aiConfiguration, bot.aiConfiguration)
+    }
+
     func testCommandsKeepPromptsOutOfArgumentsAndResumeExplicitSessions() {
         for provider in CLIProvider.allCases {
             let command = CLICommand.chat(provider: provider, prompt: "private prompt; $(echo never)", session: "my-session", promptFile: "/private/prompt.txt")

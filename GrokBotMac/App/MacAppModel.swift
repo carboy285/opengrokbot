@@ -29,6 +29,7 @@ final class MacAppModel: ObservableObject {
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
     @Published var showSearch = false
+    @Published var showBotInspector = false
     @Published var drafts: [UUID: String] = [:]
     @Published var importFeedback: String?
     @Published var installedCLIs: [InstalledCLI] = []
@@ -38,10 +39,15 @@ final class MacAppModel: ObservableObject {
     @Published var loginVerified = false
     @Published var setupFeedback: String?
     @Published var runningBots: Set<UUID> = []
+    @Published var modelCatalogs: [CLIProvider:[AvailableCLIModel]] = [:]
+    @Published var loadingModels: Set<CLIProvider> = []
+    @Published var modelCatalogFeedback: [CLIProvider:String] = [:]
+    @Published var setupProvider: CLIProvider?
     @Published var runErrors: [UUID:String] = [:]
     var cliOverrides = UserDefaults.standard.dictionary(forKey: "localCLIPaths") as? [String:String] ?? [:]
     var tasks: [UUID:Task<Void,Never>] = [:]
     var runs: [UUID:LocalCLIRun] = [:]
+    var runOwners: [UUID:UUID] = [:]
 
     func selectFirst(in app: AppModel) {
         if selectedID == nil { selectedID = app.workspace.bots.first?.id }
@@ -56,20 +62,57 @@ final class MacAppModel: ObservableObject {
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = "\(bot.name)-conversation.txt"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let heading = "OpenGrokBot — Local AI conversation\n\n"
-        let body = app.entries(for: bot).map { entry in
+        do { try conversationText(for: bot, app: app).write(to: url, atomically: true, encoding: .utf8) }
+        catch { app.errorMessage = "The conversation could not be exported. Choose a writable folder and try again." }
+    }
+    func conversationText(for bot: Bot, app: AppModel) -> String {
+        "OpenGrokBot — \(bot.name)\n\n" + app.entries(for: bot).map { entry in
             let label = entry.kind == .user ? "You" : entry.kind == .activity ? "Activity" : bot.name
             return "\(label): \(entry.text)"
         }.joined(separator: "\n\n")
-        do { try (heading + body).write(to: url, atomically: true, encoding: .utf8) }
-        catch { app.errorMessage = "The conversation could not be exported. Choose a writable folder and try again." }
     }
+
+    func workingDirectory(for bot: Bot) -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/OpenGrokBot/Conversations/\(bot.id.uuidString)")
+    }
+
+    func openWorkingDirectory(for bot: Bot) {
+        do {
+            let directory = workingDirectory(for: bot)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
+            NSWorkspace.shared.open(directory)
+        } catch { importFeedback = "The working folder could not be opened. Check this Mac’s available storage and folder permissions."; panel = .integration }
+    }
+
 }
 
 extension MacAppModel {
     var selectedCLI: InstalledCLI? { installedCLIs.first { $0.id == selectedCLIID } }
     var canChat: Bool { selectedCLI != nil }
     var statusText: String { selectedCLI.map { "\($0.provider.name) · On this Mac" } ?? "Set up an AI CLI" }
+
+    func aiConfiguration(for bot: Bot) -> BotAIConfiguration {
+        bot.aiConfiguration ?? BotAIConfiguration(providers: selectedCLI.map { [BotAIProvider(provider: $0.provider)] } ?? [], activeProvider: selectedCLI?.provider)
+    }
+
+    func providersToRun(for bot: Bot) -> [(cli: InstalledCLI, choice: BotAIProvider)] {
+        let configuration = aiConfiguration(for: bot)
+        let choices: [BotAIProvider]
+        if configuration.replyMode == .all { choices = configuration.providers }
+        else { choices = (configuration.providers.first { $0.provider == configuration.activeProvider } ?? configuration.providers.first).map { [$0] } ?? [] }
+        return choices.compactMap { choice in installedCLIs.first { $0.provider == choice.provider }.map { ($0, choice) } }
+    }
+
+    func loadModels(for provider: CLIProvider) {
+        guard !loadingModels.contains(provider), let cli = installedCLIs.first(where: { $0.provider == provider }) else { return }
+        loadingModels.insert(provider); modelCatalogFeedback[provider] = nil
+        Task {
+            let models = await Task.detached { CLIModelCatalog.models(for: cli) }.value
+            modelCatalogs[provider] = models
+            if models.isEmpty { modelCatalogFeedback[provider] = "No model list was returned. You can enter a model ID below." }
+            loadingModels.remove(provider)
+        }
+    }
 
     func refreshCLIs() {
         guard !scanningCLIs else { return }
@@ -121,23 +164,24 @@ extension MacAppModel {
 
     @discardableResult
     func send(_ text: String, to bot: Bot, app: AppModel) -> Bool {
-        guard let cli = selectedCLI else { panel = .setup; return false }
+        let providers = providersToRun(for: bot)
+        guard !providers.isEmpty else { showBotInspector = true; return false }
         guard !runningBots.contains(bot.id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard app.addNote(text, to: bot) else { return false }
-        startReply(to: bot, cli: cli, app: app)
+        for provider in providers { startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app) }
         return true
     }
 
     func retry(bot: Bot, app: AppModel) {
-        guard let cli = selectedCLI, !runningBots.contains(bot.id), app.entries(for: bot).contains(where: { $0.kind == .user }) else { return }
-        startReply(to: bot, cli: cli, app: app)
+        guard !runningBots.contains(bot.id), app.entries(for: bot).contains(where: { $0.kind == .user }) else { return }
+        for provider in providersToRun(for: bot) { startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app) }
     }
 
-    func stop(botID: UUID) { runs[botID]?.cancel() }
+    func stop(botID: UUID) { for (runID, owner) in runOwners where owner == botID { runs[runID]?.cancel() } }
     func stopAll(immediately: Bool = false) { for run in runs.values { run.cancel(immediately: immediately) } }
 
-    private func startReply(to bot: Bot, cli: InstalledCLI, app: AppModel) {
-        let key = bot.id.uuidString + "|" + cli.id
+    private func startReply(to bot: Bot, cli: InstalledCLI, model: String, app: AppModel) {
+        let key = bot.id.uuidString + "|" + cli.id + (model.isEmpty ? "" : "|" + model)
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
         let prompt: String
@@ -146,14 +190,14 @@ extension MacAppModel {
             let transcript = history.suffix(30).map { "\($0.kind == .user ? "User" : bot.name): \($0.text)" }.joined(separator: "\n\n")
             prompt = "You are \(bot.name). \(bot.purpose)\nRespond to the user's latest message.\n\n" + String(transcript.suffix(100_000))
         }
-        let replyID = app.beginReply(for: bot, provider: cli.provider.name)
+        let replyID = app.beginReply(for: bot, provider: cli.provider.name + (model.isEmpty ? "" : " · " + model))
         runningBots.insert(bot.id); runErrors[bot.id] = nil
-        let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/OpenGrokBot/Conversations/\(bot.id.uuidString)")
-        let run = LocalCLIRun(); runs[bot.id] = run
-        tasks[bot.id] = Task {
+        let directory = workingDirectory(for: bot)
+        let run = LocalCLIRun(); runs[replyID] = run; runOwners[replyID] = bot.id
+        tasks[replyID] = Task {
             do {
                 let mcpURL = try composio.mcpURL()
-                for try await event in run.events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL) {
+                for try await event in run.events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model) {
                     try Task.checkCancellation()
                     switch event {
                     case .session(let id): app.setSession(id, for: key)
@@ -170,7 +214,8 @@ extension MacAppModel {
                 app.finishReply(replyID, state: stopped ? .stopped : .failed, message: message)
                 if !stopped { runErrors[bot.id] = message }
             }
-            runningBots.remove(bot.id); tasks[bot.id] = nil; runs[bot.id] = nil
+            tasks[replyID] = nil; runs[replyID] = nil; runOwners[replyID] = nil
+            if !runOwners.values.contains(bot.id) { runningBots.remove(bot.id) }
         }
     }
 }

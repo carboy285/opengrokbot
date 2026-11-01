@@ -26,16 +26,16 @@ final class LocalCLIRun: @unchecked Sendable {
         }
     }
 
-    static func stream(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil) -> AsyncThrowingStream<CLIEvent, Error> {
-        LocalCLIRun().events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL)
+    static func stream(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil, model: String = "") -> AsyncThrowingStream<CLIEvent, Error> {
+        LocalCLIRun().events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model)
     }
 
-    func events(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil) -> AsyncThrowingStream<CLIEvent, Error> {
+    func events(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil, model: String = "") -> AsyncThrowingStream<CLIEvent, Error> {
         let run = self
         return AsyncThrowingStream { continuation in
             continuation.onTermination = { @Sendable _ in run.cancel() }
             DispatchQueue.global(qos: .userInitiated).async {
-                run.execute(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, continuation: continuation)
+                run.execute(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model, continuation: continuation)
             }
         }
     }
@@ -52,7 +52,7 @@ final class LocalCLIRun: @unchecked Sendable {
         }
     }
 
-    private func execute(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String?, continuation: AsyncThrowingStream<CLIEvent, Error>.Continuation) {
+    private func execute(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String?, model: String, continuation: AsyncThrowingStream<CLIEvent, Error>.Continuation) {
         var promptFile: URL?
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -65,7 +65,7 @@ final class LocalCLIRun: @unchecked Sendable {
             defer { if let promptFile { try? FileManager.default.removeItem(at: promptFile) } }
             let mcp = try ComposioCLIConfiguration.make(provider: cli.provider, directory: directory, sessionURL: mcpURL)
             defer { mcp.cleanup() }
-            let command = CLICommand.chat(provider: cli.provider, prompt: prompt, session: session, promptFile: promptFile?.path)
+            let command = CLICommand.chat(provider: cli.provider, prompt: prompt, session: session, promptFile: promptFile?.path, model: model)
             let input = Pipe(), output = Pipe(), error = Pipe()
             process.executableURL = URL(fileURLWithPath: cli.path)
             process.arguments = command.arguments + mcp.arguments
@@ -164,8 +164,8 @@ enum CLIInstallationScanner {
         }
     }
 
-    static func capture(path: String, arguments: [String], timeout: TimeInterval = 4) -> (exit: Int32, text: String) {
-        let task = Process(), stdout = Pipe(), stderr = Pipe(), collected = BoundedData(limit: 4096)
+    static func capture(path: String, arguments: [String], timeout: TimeInterval = 4, limit: Int = 4096) -> (exit: Int32, text: String) {
+        let task = Process(), stdout = Pipe(), stderr = Pipe(), collected = BoundedData(limit: limit)
         task.executableURL = URL(fileURLWithPath: path); task.arguments = arguments
         task.environment = environment; task.standardInput = FileHandle.nullDevice
         task.standardOutput = stdout; task.standardError = stderr

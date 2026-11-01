@@ -29,6 +29,25 @@ enum CLIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
 
 }
 
+struct BotAIProvider: Codable, Hashable, Sendable, Identifiable {
+    var provider: CLIProvider
+    var model: String = ""
+    var id: String { provider.rawValue }
+}
+
+enum ProviderReplyMode: String, Codable, Hashable, Sendable { case one, all }
+
+struct BotAIConfiguration: Codable, Hashable, Sendable {
+    var providers: [BotAIProvider]
+    var activeProvider: CLIProvider?
+    var replyMode: ProviderReplyMode = .one
+}
+
+struct AvailableCLIModel: Codable, Hashable, Sendable, Identifiable {
+    let id: String
+    let name: String
+}
+
 struct InstalledCLI: Identifiable, Hashable, Sendable {
     let provider: CLIProvider
     let path: String
@@ -55,29 +74,30 @@ enum CLIError: Error, LocalizedError, Equatable {
 struct CLICommand: Sendable {
     let arguments: [String]
     let input: String
-    static func chat(provider: CLIProvider, prompt: String, session: String?, promptFile: String? = nil) -> CLICommand {
+    static func chat(provider: CLIProvider, prompt: String, session: String?, promptFile: String? = nil, model: String = "") -> CLICommand {
+        let modelArguments = model.isEmpty ? [String]() : ["--model", model]
         switch provider {
         case .codex:
             var args = ["exec", "--sandbox", "read-only"]
             if let session { args += ["resume", session] }
-            args += ["--json", "--skip-git-repo-check", "-"]
+            args += modelArguments + ["--json", "--skip-git-repo-check", "-"]
             return CLICommand(arguments: args, input: prompt)
         case .claude:
             var args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
             if let session { args += ["--resume", session] }
-            return CLICommand(arguments: args, input: prompt)
+            return CLICommand(arguments: args + modelArguments, input: prompt)
         case .opencode:
             var args = ["run", "--format", "json"]
             if let session { args += ["--session", session] }
-            return CLICommand(arguments: args, input: prompt)
+            return CLICommand(arguments: args + modelArguments, input: prompt)
         case .gemini:
             var args = ["--output-format", "stream-json"]
             if let session { args += ["--resume", session] }
-            return CLICommand(arguments: args, input: prompt)
+            return CLICommand(arguments: args + modelArguments, input: prompt)
         case .grok:
             var args = ["--prompt-file", promptFile ?? "prompt.txt", "--output-format", "streaming-messages-json", "--include-partial-messages"]
             if let session { args += ["--resume", session] }
-            return CLICommand(arguments: args, input: "")
+            return CLICommand(arguments: args + modelArguments, input: "")
         }
     }
 }
