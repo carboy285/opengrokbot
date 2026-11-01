@@ -39,9 +39,12 @@ struct MacBotAvatar: View {
     var color = "white"
     var size: CGFloat = 42
     var starred = false
+    var appearance: BotAppearance? = nil
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            ZStack {
+            Group {
+            if let appearance { CustomBotAvatar(appearance: appearance, size: size) }
+            else { ZStack {
                 if color == "white" {
                     Circle().fill(.white)
                 } else if color == "pink" {
@@ -57,6 +60,7 @@ struct MacBotAvatar: View {
                 .rotationEffect(.degrees(-26))
                 .foregroundStyle(Color(hex: 0x111111))
                 .offset(x: size * 0.10, y: -size * 0.12)
+            } }
             }
             if starred {
                 Image(systemName: "star.fill")

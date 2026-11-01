@@ -36,7 +36,7 @@ struct MacConversationView: View {
         .overlay(alignment: .top) {
             Button { desktop.showBotInspector.toggle() } label: {
                 HStack(spacing: 11) {
-                    MacBotAvatar(color: bot.color, size: 27)
+                    MacBotAvatar(color: bot.color, size: 27, appearance: bot.appearance)
                     Text(bot.name).font(.system(size: 18, weight: .medium)).lineLimit(1)
                 }
                 .padding(.horizontal, 15).padding(.vertical, 10)
@@ -119,7 +119,7 @@ struct MacConversationView: View {
 
     private var emptyConversation: some View {
         VStack(spacing: 18) {
-            MacBotAvatar(color: bot.color, size: 70)
+            MacBotAvatar(color: bot.color, size: 70, appearance: bot.appearance)
             Text(bot.name).font(.system(size: 24, weight: .medium))
             Text(bot.purpose).foregroundStyle(MacTheme.secondary)
             Text("Send your first message to start chatting with your selected local AI CLI.")

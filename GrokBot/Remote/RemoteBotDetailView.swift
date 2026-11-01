@@ -12,13 +12,16 @@ struct RemoteBotDetailView: View {
     @State private var files: [RemoteFile] = []
     @State private var saving = false
     @State private var loading = false
+    @State private var editingAvatar = false
     private var bot: Bot? { model.workspace.bots.first { $0.id == botID } }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 if let bot {
-                    BotAvatar(color: bot.color,size:80)
+                    Button { editingAvatar = true } label: {
+                        BotAvatar(color: bot.color, size: 80, appearance: bot.appearance)
+                    }.buttonStyle(.plain).accessibilityLabel("Change Bot avatar").disabled(!remote.online)
                     Text(bot.name).font(.title2.weight(.medium))
                     Picker("Bot details",selection:$tab) { Text("Details").tag("Details");Text("Library").tag("Library");Text("Computer").tag("Computer") }.pickerStyle(.segmented)
                     if tab == "Details" {
@@ -66,6 +69,14 @@ struct RemoteBotDetailView: View {
                 } else { Text("This Bot was removed on the desktop.").foregroundStyle(.secondary) }
             }.padding(24)
         }.navigationTitle("Bot details").navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $editingAvatar) {
+                if let bot {
+                    BotAvatarPicker(bot: bot, save: { appearance in
+                        await remote.command(RemoteCommand(action: "update_avatar", botID: botID, appearance: appearance))
+                    }, close: { editingAvatar = false })
+                    .presentationDragIndicator(.visible)
+                }
+            }
             .onAppear { if let bot { provider = bot.aiConfiguration?.activeProvider ?? bot.aiConfiguration?.providers.first?.provider ?? remote.defaultProvider ?? .codex; modelID = bot.aiConfiguration?.providers.first { $0.provider == provider }?.model ?? "" } }
             .onChange(of:tab) { _, value in if value == "Library", let bot { Task { files = await remote.files(bot) } } }
     }

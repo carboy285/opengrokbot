@@ -10,6 +10,21 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var aiConfiguration: BotAIConfiguration? = nil
     var memory: [String]? = nil
     var memberIDs: [UUID]? = nil
+    var appearance: BotAppearance? = nil
+}
+
+struct BotAppearance: Codable, Hashable, Sendable {
+    var shape: BotAvatarShape = .hexagon
+    var color = "purple"
+    var imageData: Data? = nil
+    static let colors = ["black", "ochre", "red", "orange", "amber", "green", "teal", "blue", "purple", "pink", "gray", "white"]
+    var valid: Bool { Self.colors.contains(color) && (imageData?.count ?? 0) <= 24_576 }
+}
+
+enum BotAvatarShape: String, Codable, CaseIterable, Sendable {
+    case circle, cloud, square, sparkle, flower, heart, clover
+    case droplet, capsule, triangle, pebble, star, hexagon, fruit
+    var label: String { rawValue.capitalized }
 }
 
 struct Entry: Identifiable, Codable, Equatable, Sendable {

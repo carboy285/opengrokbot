@@ -1,0 +1,53 @@
+name: Package Apple update
+on:
+  push:
+    branches: [fix/ios-bot-discovery]
+    paths-ignore: ['**/*.md', 'LICENSE']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: package-apple-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: macos-26
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest installed Xcode
+        run: |
+          python3 - <<'PY' > /tmp/opengrokbot-xcode.txt
+          from pathlib import Path
+          import re
+          apps = list(Path('/Applications').glob('Xcode_*.app'))
+          def key(path): return tuple(int(n) for n in re.findall(r'\d+', path.name))
+          print(str(max(apps,key=key) if apps else Path('/Applications/Xcode.app')) + '/Contents/Developer')
+          PY
+          sudo xcode-select --switch "$(cat /tmp/opengrokbot-xcode.txt)"
+      - name: Compile universal Mac app and package DMG
+        run: ./scripts/build-macos.sh
+      - name: Archive matching Xcode sources
+        run: git archive --format=zip --prefix=OpenGrokBot-0.6.1-Xcode/ --output=artifacts/OpenGrokBot-0.6.1-Xcode.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenGrokBot-0.6.1-Apple
+          path: |
+            artifacts/macos/*.dmg
+            artifacts/macos/*.sha256
+            artifacts/*-Xcode.zip
+          if-no-files-found: error
+      - name: Publish development downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/opengrokbot-release.md <<'NOTES'
+          Mac/iPhone connection flow improvements and a Bot avatar picker with shapes, colors, image upload, reset, and random look generation.
+
+          Install the Mac DMG and rebuild the iPhone app from the matching Xcode ZIP. Open GrokBot.xcodeproj, choose the GrokBot scheme, and select your signing team and iPhone.
+
+          The Mac app is ad-hoc signed and is not notarized. This development build was compiled and packaged without running unit tests, UI tests, or other test suites, as requested. Physical Mac/iPhone behavior remains unverified.
+          NOTES
+          gh release create v0.6.1 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.6.1 · Apple update' --prerelease --notes-file /tmp/opengrokbot-release.md artifacts/macos/*.dmg artifacts/macos/*.sha256 artifacts/*-Xcode.zip

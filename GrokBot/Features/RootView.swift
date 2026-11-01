@@ -15,6 +15,10 @@ struct RootView: View {
                         BotAvatar(size: 88)
                         Text("Your desktop, in your pocket").font(.title2.weight(.medium))
                         Text(remote.status).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        if remote.needsApproval, let phone = remote.account.localDevice {
+                            Text(phone.fingerprint).font(.system(.body, design: .monospaced))
+                            Text("Match this fingerprint on your Mac, then choose Approve phone.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
                         Button("Connect Desktop") { remote.showConnection = true }.buttonStyle(.borderedProminent)
                     }.padding(28).frame(maxWidth: .infinity,maxHeight: .infinity)
                 }
@@ -45,7 +49,7 @@ struct RootView: View {
                 if model.search.isEmpty, let first = model.workspace.bots.first {
                     NavigationLink(value: first) {
                         VStack(spacing: 16) {
-                            BotAvatar(color: first.color, size: 88)
+                            BotAvatar(color: first.color, size: 88, appearance: first.appearance)
                             Text(first.name).font(.title3.weight(.medium))
                             Text("Your assistant").font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity).padding(.vertical, 30)
@@ -57,7 +61,7 @@ struct RootView: View {
                 ForEach(model.visibleBots.filter { !model.search.isEmpty || $0.id != model.workspace.bots.first?.id }) { bot in
                     NavigationLink(value: bot) {
                         HStack(spacing: 18) {
-                            BotAvatar(color: bot.color, size: 44)
+                            BotAvatar(color: bot.color, size: 44, appearance: bot.appearance)
                             VStack(alignment: .leading, spacing: 7) {
                                 Text(bot.name).font(.headline).lineLimit(2)
                                 Text(model.latest(for: bot)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)

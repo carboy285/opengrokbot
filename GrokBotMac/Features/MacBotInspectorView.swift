@@ -14,6 +14,7 @@ struct MacBotInspectorView: View {
     @State private var tab = BotInspectorTab.details
     @State private var files: [URL] = []
     @State private var fileError: String?
+    @State private var editingAvatar = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,8 +26,14 @@ struct MacBotInspectorView: View {
                 }.buttonStyle(.plain).accessibilityLabel("Share conversation").help("Share conversation")
                 MacCircleButton(symbol: "xmark", label: "Close bot details") { desktop.showBotInspector = false }.keyboardShortcut(.cancelAction)
             }.padding(18)
-            VStack(spacing: 0) {
-                    MacBotAvatar(color: bot.color, size: 86).padding(.top, 14)
+            if editingAvatar {
+                BotAvatarPicker(bot: bot, save: { appearance in app.setAppearance(appearance, for: bot) }, close: { editingAvatar = false })
+                    .id(bot.id)
+                Spacer(minLength: 0)
+            } else { VStack(spacing: 0) {
+                    Button { editingAvatar = true } label: {
+                        MacBotAvatar(color: bot.color, size: 86, appearance: bot.appearance)
+                    }.buttonStyle(.plain).help("Change Bot avatar").accessibilityLabel("Change Bot avatar").padding(.top, 14)
                     Text(bot.name).font(.system(size: 24, weight: .medium))
                         .multilineTextAlignment(.center).textSelection(.enabled)
                         .padding(.horizontal, 24).padding(.top, 30)
@@ -51,10 +58,11 @@ struct MacBotInspectorView: View {
                     }
                 }.frame(maxWidth: .infinity).padding(.bottom, 30)
                     }
-            }
+            } }
         }
         .frame(maxHeight: .infinity).background(MacTheme.canvas)
         .onChange(of: desktop.runningBots) { _, running in if !running.contains(bot.id), tab == .library { refreshFiles() } }
+        .onChange(of: bot.id) { _, _ in editingAvatar = false }
     }
 
     private var details: some View {

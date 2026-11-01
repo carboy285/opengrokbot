@@ -72,6 +72,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func setAppearance(_ appearance: BotAppearance?, for bot: Bot) -> Bool {
+        guard appearance?.valid != false,
+              let index = workspace.bots.firstIndex(where: { $0.id == bot.id }) else { return false }
+        return commit {
+            $0.bots[index].appearance = appearance
+            $0.bots[index].color = appearance?.color ?? (bot.isMain == true ? "white" : "purple")
+        }
+    }
+
     func activity(_ text: String, for botID: UUID) {
         _ = commit { $0.entries.append(Entry(botID: botID, kind: .activity, text: text)) }
     }

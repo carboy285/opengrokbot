@@ -108,7 +108,7 @@ enum CloudCoding {
     }
 }
 enum CloudError: LocalizedError {
-    case message(String), invalidPacket, resync, signedOut, timeout
+    case message(String), invalidPacket, resync, signedOut, timeout, approvalRequired
     var errorDescription: String? {
         switch self {
         case .message(let text): text
@@ -116,6 +116,7 @@ enum CloudError: LocalizedError {
         case .resync: "Refreshing the desktop workspace…"
         case .signedOut: "Sign in to your OpenGrokBot account."
         case .timeout: "The desktop did not respond. Keep it awake, enable phone access, and approve this phone on the desktop."
+        case .approvalRequired: "Your Mac is connected, but this iPhone needs approval. On the Mac, open Settings → Computer, compare this phone’s fingerprint, and choose Approve phone. Your Bots will load automatically."
         }
     }
 }

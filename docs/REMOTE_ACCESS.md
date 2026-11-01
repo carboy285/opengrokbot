@@ -6,14 +6,16 @@ Use the **0.6.0 Mac app and iOS sources together**. The iPhone controls the Mac'
 
 1. Finish the Mac's AI CLI setup. Optional Composio accounts and credentials stay on the Mac.
 2. Open **Mac Settings → Computer → iPhone remote control**. Create an email/password account, confirm the email, and sign in. You can use the same account on your phone; don't create two separate accounts.
-3. Turn on **Allow phone access**. Keep the Mac awake with OpenGrokBot running.
+3. Phone access starts on sign-in unless you previously turned **Allow phone access** off. If it is off, turn it on in **Settings → Computer**. Keep the Mac awake with OpenGrokBot running.
 4. On the iPhone, open **Connect Desktop**, sign into the same account, and find your Mac.
-5. Compare **This phone's fingerprint** on the phone with its entry in Mac Settings → Computer. Click **Approve phone** on the Mac. Verify the Mac's fingerprint on the phone too.
-6. Select the Mac on your phone. Its actual Bots and chat history appear. A single registered host is found automatically after sign-in; multiple hosts can be selected from the list.
+5. The Mac prompts when the phone requests access. Compare the fingerprint in that prompt with the one on the iPhone, then click **Approve phone**. You can also approve it in **Mac Settings → Computer**. The iPhone shows an approval message until the Mac grants access and retries automatically.
+6. Its actual Bots and chat history appear automatically when there is one available Mac, even if older offline installations remain registered. A saved Mac is preferred; with multiple available Macs, choose one in **Connect Desktop**. Verify the Mac's fingerprint on the phone too.
 
 This works over Wi-Fi or cellular through Supabase HTTPS. No Tailscale app, Funnel, pairing URL, public IP, port forwarding or local-network permission is required. The Mac no longer starts a local HTTP listener.
 
 ## While away
+
+To change a Bot’s avatar, open its side panel on the Mac and click the avatar. Choose a shape and color, generate a random shape/color combination, upload an image, or reset the avatar, then select **Save avatar**. On iPhone, open Bot details and tap the avatar. Changes are saved on the Mac and appear on both devices. Uploaded images are resized before saving and travel through the encrypted relay with the workspace.
 
 The phone reconnects when reopened or when its network returns. During an outage, already loaded chats remain visible and commands are disabled. Sending retries reuse a command ID so an uncertain acknowledgment does not duplicate a user message. The host records recent command receipts across restarts. Work continues on the Mac when you background, disconnect or sign out of the phone.
 

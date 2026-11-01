@@ -17,8 +17,11 @@ enum Palette {
 struct BotAvatar: View {
     var color = "white"
     var size: CGFloat = 48
+    var appearance: BotAppearance? = nil
     var body: some View {
-        ZStack {
+        Group {
+        if let appearance { CustomBotAvatar(appearance: appearance, size: size) }
+        else { ZStack {
             RoundedRectangle(cornerRadius: size * 0.36)
                 .fill(Palette.bot(color))
                 .rotationEffect(.degrees(color == "pink" ? -12 : -20))
@@ -28,6 +31,7 @@ struct BotAvatar: View {
             }
             .foregroundStyle(Color(uiColor: .systemBackground))
             .rotationEffect(.degrees(-25))
+        } }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

@@ -85,7 +85,7 @@ struct MacWorkspaceView: View {
             if let first = app.workspace.bots.first {
                 Button { desktop.selectedID = first.id } label: {
                     VStack(spacing: 13) {
-                        MacBotAvatar(size: 76, starred: true)
+                        MacBotAvatar(color: first.color, size: 76, starred: true, appearance: first.appearance)
                         Text("Grok Bot").font(.system(size: 16))
                     }
                     .padding(.vertical, 16).frame(width: 126)
@@ -97,7 +97,7 @@ struct MacWorkspaceView: View {
                     ForEach(app.visibleBots.filter { $0.id != app.workspace.bots.first?.id || !app.search.isEmpty }) { bot in
                         Button { desktop.selectedID = bot.id } label: {
                             HStack(spacing: 16) {
-                                MacBotAvatar(color: bot.color, size: 39)
+                                MacBotAvatar(color: bot.color, size: 39, appearance: bot.appearance)
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(bot.name).font(.system(size: 17, weight: .medium)).lineLimit(1)
                                     Text(app.latest(for: bot)).font(.system(size: 14)).foregroundStyle(MacTheme.secondary).lineLimit(1)

@@ -7,6 +7,7 @@ final class MacRemoteHost: ObservableObject {
     let account: CloudAccount
     @Published private(set) var enabled = false
     @Published private(set) var feedback: String?
+    @Published var pendingPhoneApproval: CloudDevice?
     private let preferences: UserDefaults
     private var revision = UUID().uuidString
     private weak var app: AppModel?
@@ -17,6 +18,7 @@ final class MacRemoteHost: ObservableObject {
     private var baselines: [UUID:RemoteSnapshot] = [:]
     private var replies: [String:CloudResponse] = [:]
     private var owner: UUID?
+    private var promptedPhones: Set<UUID> = []
     init(preferences: UserDefaults = .standard, account: CloudAccount = CloudAccount(kind: "host")) {
         self.preferences = preferences; self.account = account
         receipts = Set((preferences.stringArray(forKey:"cloudCommandReceipts") ?? []).compactMap(UUID.init(uuidString:)))
@@ -31,8 +33,13 @@ final class MacRemoteHost: ObservableObject {
         account.$session.map { $0?.user.id }.removeDuplicates().sink { [weak self] id in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if self.owner != id { let restore = self.preferences.bool(forKey:"cloudHostEnabled"); self.stop(); self.preferences.set(restore,forKey:"cloudHostEnabled"); self.owner = id; self.replies = [:]; self.baselines = [:] }
-                if id != nil, self.preferences.bool(forKey: "cloudHostEnabled") { self.start() }
+                if self.owner != id {
+                    // Signing out must stop the relay without turning an unset preference
+                    // into an explicit opt-out for the next sign-in.
+                    self.stop(persistPreference: false)
+                    self.owner = id; self.replies = [:]; self.baselines = [:]; self.promptedPhones = []
+                }
+                if id != nil, (self.preferences.object(forKey: "cloudHostEnabled") as? Bool ?? true) { self.start() }
             }
         }.store(in: &subscriptions)
     }
@@ -48,8 +55,20 @@ final class MacRemoteHost: ObservableObject {
                     let packets = try await self.account.poll()
                     for packet in packets {
                         try Task.checkCancellation()
+                        // A phone can register between heartbeats. Discover it before
+                        // discarding its first request, including its approval request.
+                        if !self.account.controllers.contains(where: { $0.id == packet.sender }) {
+                            try await self.account.sync(available: true)
+                        }
+                        try Task.checkCancellation()
                         guard let peer = self.account.controllers.first(where: { $0.id == packet.sender }) else { try? await self.account.acknowledge(packet); continue }
                         if !self.account.approved(peer) {
+                            guard packet.kind == "request", (try? self.account.decrypt(packet, peer: peer)) != nil else {
+                                try? await self.account.acknowledge(packet); continue
+                            }
+                            if self.pendingPhoneApproval == nil, self.promptedPhones.insert(peer.id).inserted {
+                                self.pendingPhoneApproval = peer
+                            }
                             let denied = RemoteHostResponse.error(403,"Approve this phone in Mac Settings → Computer. Compare its fingerprint before approving.")
                             try? await self.account.send(CloudCoding.encoder().encode(CloudResponse(status:denied.status,body:denied.body)),to:peer,id:packet.id,kind:"response")
                             try? await self.account.acknowledge(packet); continue
@@ -79,14 +98,19 @@ final class MacRemoteHost: ObservableObject {
             }
         }
     }
-    func stop() {
+    func stop(persistPreference: Bool = true) {
         enabled = false; polling?.cancel(); polling = nil; baselines = [:]; replies = [:]
-        preferences.set(false,forKey:"cloudHostEnabled"); feedback = "Phone access is off."
+        pendingPhoneApproval = nil
+        if persistPreference { preferences.set(false,forKey:"cloudHostEnabled") }
+        feedback = "Phone access is off."
         // The registered host expires as offline even if this update cannot reach the network.
         Task { if !enabled, account.signedIn { try? await account.sync(available:false) } }
     }
     func approve(_ device: CloudDevice, allowed: Bool) {
-        do { try account.approve(device,allowed:allowed); baselines[device.id] = nil; replies = [:] }
+        do {
+            try account.approve(device,allowed:allowed); baselines[device.id] = nil; replies = [:]
+            if pendingPhoneApproval?.id == device.id { pendingPhoneApproval = nil }
+        }
         catch { feedback = error.localizedDescription }
     }
     private func respond(_ request: CloudRequest, peer: CloudDevice) async -> CloudResponse {
@@ -129,6 +153,8 @@ final class MacRemoteHost: ObservableObject {
             if receipts.contains(command.requestID) || app.workspace.entries.contains(where: { $0.id == command.requestID }) { return try .json(["accepted":true]) }
             let bot = app.workspace.bots.first { $0.id == command.botID }
             switch command.action {
+            case "update_avatar":
+                guard let bot, app.setAppearance(command.appearance, for: bot) else { return .error(400, "Choose a valid Bot avatar with an image under 24 KB.") }
             case "send":
                 guard let bot, let text = command.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 100000, desktop.send(text, to: bot, app: app, requestID: command.requestID) else { return .error(409, "The Bot is busy or needs provider setup. Check the desktop workspace.") }
             case "stop": guard let bot else { return .error(404,"Bot not found") }; desktop.stop(botID: bot.id)

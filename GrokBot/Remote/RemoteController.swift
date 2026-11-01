@@ -7,6 +7,7 @@ final class RemoteController: ObservableObject {
     let account: CloudAccount
     @Published private(set) var online = false
     @Published private(set) var hasSnapshot = false
+    @Published private(set) var needsApproval = false
     @Published private(set) var hostName = "Desktop"
     @Published private(set) var status = "Sign in to connect your desktop"
     @Published private(set) var running: Set<UUID> = []
@@ -53,7 +54,7 @@ final class RemoteController: ObservableObject {
     }
     private func clearState() {
         epoch = UUID(); polling?.cancel(); polling = nil; connection = nil; state = nil
-        online = false; hasSnapshot = false; running = []; providers = []; defaultProvider = nil
+        online = false; hasSnapshot = false; needsApproval = false; running = []; providers = []; defaultProvider = nil
         drafts = [:]; pendingSends = [:]
         model?.applyRemoteSnapshot(Workspace()); model?.leavePreview()
     }
@@ -64,6 +65,7 @@ final class RemoteController: ObservableObject {
     private func startPolling(autoSelect: Bool = true) {
         polling?.cancel()
         guard active, account.signedIn else { status = "Sign in to connect your desktop"; return }
+        if connection == nil { status = "Finding your Mac…" }
         let current = epoch
         polling = Task {
             var ticks = 0
@@ -74,18 +76,35 @@ final class RemoteController: ObservableObject {
                         if connection == nil, autoSelect, let owner = account.session?.user.id {
                             let selection = try secrets.read(account:owner.uuidString).flatMap { String(data:$0,encoding:.utf8) }
                             let saved = selection.flatMap(UUID.init(uuidString:))
-                            if let device = account.hosts.first(where:{$0.id == saved}) ?? (selection == nil && account.hosts.count == 1 ? account.hosts.first:nil) {
+                            let hosts = account.hosts
+                            let onlineHosts = hosts.filter(\.online)
+                            // Old installations remain registered. They must not block
+                            // discovery of the only Mac that is currently available.
+                            let remembered = hosts.first(where: { $0.id == saved })
+                            let candidate = remembered?.online == true ? remembered
+                                : (onlineHosts.count == 1 ? onlineHosts.first : remembered ?? (hosts.count == 1 ? hosts.first : nil))
+                            if selection != "disconnected", let device = candidate {
                                 try account.pin(device)
                                 try secrets.save(Data(device.id.uuidString.utf8),account:owner.uuidString)
                                 connection = device; hostName = device.name
                             }
                         }
                     }
-                    if connection != nil { try await refresh() } else { status = "Choose your desktop" }
+                    if connection != nil {
+                        if !hasSnapshot, !needsApproval { status = "Loading Bots from \(hostName)…" }
+                        try await refresh()
+                    } else {
+                        status = account.hosts.isEmpty
+                            ? "Open OpenGrokBot on your Mac and sign in with this account. In Settings → Computer, make sure Allow phone access is on."
+                            : "Choose your Mac in Connect Desktop to load its Bots."
+                    }
                     ticks += 1
                 } catch {
                     if Task.isCancelled || current != epoch { return }
                     online = false; status = error.localizedDescription; ticks = 0
+                    if let cloudError = error as? CloudError, case .approvalRequired = cloudError {
+                        needsApproval = true
+                    }
                 }
                 try? await Task.sleep(for:.seconds(2))
             }
@@ -107,7 +126,7 @@ final class RemoteController: ObservableObject {
                 model?.applyRemoteSnapshot(snapshot.workspace); if !hasSnapshot { showConnection = false }; hasSnapshot = true
             } catch { state = nil; throw error }
         }
-        online = true; status = "Connected to \(hostName)"
+        needsApproval = false; online = true; status = "Connected to \(hostName)"
     }
     @discardableResult
     func command(_ command: RemoteCommand) async -> Bool {

@@ -9,7 +9,7 @@ struct ConnectDesktopView: View {
                 Section {
                     HStack { Spacer(); BotAvatar(size:72); Spacer() }.padding(.vertical)
                     Text("Your Bots, wherever you go").font(.title2.weight(.medium))
-                    Text("Your computer runs the AI. Sign in with the same account on both devices, enable phone access on the Mac, then approve this phone there.")
+                    Text("Your computer runs the AI. Sign in with the same account on both devices, then approve this phone on your Mac. Your Bots load automatically when one Mac is available.")
                 }
                 Section { CloudSignInView(account:remote.account) }
                 if remote.account.signedIn {

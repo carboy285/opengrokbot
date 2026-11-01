@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct ConversationView: View {
-    let bot: Bot
+    private let initialBot: Bot
+    init(bot: Bot) { initialBot = bot }
+    private var bot: Bot { model.workspace.bots.first { $0.id == initialBot.id } ?? initialBot }
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var remote: RemoteController
     @State private var sending = false
@@ -17,7 +19,7 @@ struct ConversationView: View {
                     LazyVStack(alignment: .leading, spacing: 20) {
                         if model.entries(for: bot).isEmpty {
                             VStack(spacing: 16) {
-                                BotAvatar(color: bot.color, size: 70)
+                                BotAvatar(color: bot.color, size: 70, appearance: bot.appearance)
                                 Text("A fresh conversation").font(.title2.weight(.medium))
                                 Text("Send a message to this Bot on \(remote.hostName).")
                                     .foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -39,7 +41,7 @@ struct ConversationView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Button { info = true } label: { HStack(spacing: 10) { BotAvatar(color: bot.color, size: 24); Text(bot.name).font(.headline).lineLimit(1) } }.accessibilityLabel("Bot details for \(bot.name)")
+                Button { info = true } label: { HStack(spacing: 10) { BotAvatar(color: bot.color, size: 24, appearance: bot.appearance); Text(bot.name).font(.headline).lineLimit(1) } }.accessibilityLabel("Bot details for \(bot.name)")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { info = true } label: { Image(systemName: "info.circle").frame(width: 44, height: 44) }.accessibilityLabel("Connection details")

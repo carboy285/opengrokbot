@@ -22,6 +22,7 @@ final class CloudRelayClient {
                 let response = try CloudCoding.decoder().decode(CloudResponse.self,from:data)
                 try? await account.acknowledge(packet)
                 guard (200...299).contains(response.status) else {
+                    if response.status == 403 { throw CloudError.approvalRequired }
                     let object = try? JSONDecoder().decode([String:String].self,from:response.body)
                     throw CloudError.message(object?["error"] ?? "Desktop request failed (\(response.status)).")
                 }; return response
