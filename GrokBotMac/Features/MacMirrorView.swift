@@ -62,7 +62,7 @@ struct MacMirrorView: View {
         .onChange(of: remote.account.session?.user.id) { _, _ in selected = nil; draft = "" }
         .alert("Remote workspace", isPresented: Binding(get: { remote.error != nil }, set: { if !$0 { remote.error = nil } })) { Button("OK") { remote.error = nil } } message: { Text(remote.error ?? "") }
         .sheet(item: $editing) { bot in
-            BotAvatarPicker(bot: bot, save: { appearance in Task { _ = await remote.command(RemoteCommand(action: "update_avatar", botID: bot.id, appearance: appearance)) } }, close: { editing = nil }).frame(width: 450, height: 650)
+            BotAvatarPicker(bot: bot, save: { appearance in await remote.command(RemoteCommand(action: "update_avatar", botID: bot.id, appearance: appearance)) }, close: { editing = nil }).frame(width: 450, height: 650)
         }
         .sheet(isPresented: $creating) {
             VStack(spacing: 16) {
