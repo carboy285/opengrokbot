@@ -141,7 +141,11 @@ final class AppModel: ObservableObject {
                     value.bots[index].schedules?.append(created)
                     note("Scheduled · \(task.name) · \(task.nextRun ?? "on incoming Bot message") · \(task.recurrence) · desktop must be available")
                 case "list_tasks":
-                    note((value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).map { "\($0.id): \($0.name) · \($0.enabled ? ($0.nextRun ?? "message_received") : "paused") · \($0.recurrence) · \($0.timezone)" }.joined(separator: "\n").isEmpty ? "No scheduled tasks." : (value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).map { "\($0.id): \($0.name) · \($0.enabled ? ($0.nextRun ?? "message_received") : "paused") · \($0.recurrence) · \($0.timezone)" }.joined(separator: "\n"))
+                    let tasks = value.bots.first(where: { $0.id == bot.id })?.schedules ?? []
+                    let descriptions = tasks.map { task in
+                        "\(task.id): \(task.name) · \(task.enabled ? (task.nextRun ?? "message_received") : "paused") · \(task.recurrence) · \(task.timezone)"
+                    }
+                    note(descriptions.isEmpty ? "No scheduled tasks." : descriptions.joined(separator: "\n"))
                 case "cancel_task":
                     guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, let id = action.id.flatMap(UUID.init(uuidString:)), let index = value.bots.firstIndex(where: { $0.id == bot.id }) else { note("Task not cancelled: use its exact UUID."); continue }
                     value.bots[index].schedules?.removeAll { $0.id == id }; note("Cancelled task · \(id)")

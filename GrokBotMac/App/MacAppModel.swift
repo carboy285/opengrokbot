@@ -246,8 +246,8 @@ extension MacAppModel {
         for provider in providersToRun(for: bot) { startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app) }
     }
 
-    func stop(botID: UUID) { for (runID, owner) in runOwners where owner == botID { runs[runID]?.cancel() } }
-    func stopAll(immediately: Bool = false) { for run in runs.values { run.cancel(immediately: immediately) } }
+    func stop(botID: UUID) { for (runID, owner) in runOwners where owner == botID { runs[runID]?.cancel(); tasks[runID]?.cancel() } }
+    func stopAll(immediately: Bool = false) { for task in tasks.values { task.cancel() }; for run in runs.values { run.cancel(immediately: immediately) } }
 
     func deliverQueuedMessages(app: AppModel) {
         for message in app.workspace.teamMessages ?? [] where message.status == .queued {

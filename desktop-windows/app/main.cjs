@@ -233,7 +233,7 @@ function configureIPC() {
     // Provenance, delivery queues, private memory and sessions belong to the main process.
     const retained=new Set(value.bots.map(x=>x.id));
     value.teamMessages=(state.teamMessages||[]).filter(x=>retained.has(x.from)&&retained.has(x.to));value.sharedMemory=state.sharedMemory||[];
-    for(const bot of value.bots){bot.memory=state.bots.find(x=>x.id===bot.id)?.memory||[];if(bot.memberIDs)bot.memberIDs=bot.memberIDs.filter(id=>retained.has(id));}
+    for(const bot of value.bots){bot.schedules=state.bots.find(x=>x.id===bot.id)?.schedules;bot.memory=state.bots.find(x=>x.id===bot.id)?.memory||[];if(bot.memberIDs)bot.memberIDs=bot.memberIDs.filter(id=>retained.has(id));}
     // Session IDs belong to the main process; renderer CRUD cannot forge them.
     value.sessions=Object.fromEntries(Object.entries(state.sessions||{}).filter(([key])=>value.bots.some(bot=>key.startsWith(bot.id+'|'))));await atomicJSON('preview-workspace.json',value);state=value;notify();
   });
