@@ -120,4 +120,11 @@ jobs:
           else
             echo 'Development installers: the Mac app is ad-hoc signed and not notarized; the Windows installer is unsigned. Trusted publisher signing still requires the owner’s signing credentials.' >> /tmp/desktop-release.md
           fi
-          gh release create v0.7.0 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.0 · Desktop workspace' --prerelease --notes-file /tmp/desktop-release.md downloads/*
+          # Artifacts preserve the macos subdirectory; upload files, never directories.
+          shopt -s nullglob
+          release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
+          test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
+          # A failed asset upload can leave an unpublished draft. Public releases are kept.
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.0" and .draft == true)] | .[0].id // empty')
+          if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
+          gh release create v0.7.0 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.0 · Desktop workspace' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

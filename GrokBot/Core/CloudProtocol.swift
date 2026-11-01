@@ -116,7 +116,7 @@ enum CloudError: LocalizedError {
         case .resync: "Refreshing the desktop workspace…"
         case .signedOut: "Sign in to your OpenGrokBot account."
         case .timeout: "The desktop did not respond. Keep it awake, enable phone access, and approve this phone on the desktop."
-        case .approvalRequired: "Your Mac is connected, but this iPhone needs approval. On the Mac, open Settings → Computer, compare this phone’s fingerprint, and choose Approve phone. Your Bots will load automatically."
+        case .approvalRequired: "Your computer is connected, but this iPhone needs approval. On the computer, open Settings → Computer, compare this phone’s fingerprint, and choose Approve phone. Your Bots will load automatically."
         }
     }
 }

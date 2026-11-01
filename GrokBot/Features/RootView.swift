@@ -208,14 +208,14 @@ struct RootView: View {
             Text(remote.status).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
             if remote.needsApproval, let phone = remote.account.localDevice {
                 Text(phone.fingerprint).font(.system(.body, design: .monospaced))
-                Text("Match this fingerprint on your Mac, then choose Approve phone.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text("Match this fingerprint on your computer, then choose Approve phone.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             Button { remote.showConnection = true } label: {
-                Label("Connect your Mac", systemImage: "desktopcomputer").font(.body.weight(.medium))
+                Label("Connect your computer", systemImage: "desktopcomputer").font(.body.weight(.medium))
                     .padding(.horizontal, 22).padding(.vertical, 14).glassChrome(in: Capsule())
             }.buttonStyle(.plain)
             Spacer()
-            Text("Your Mac runs the work. Your iPhone keeps you connected.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text("Your computer runs the work. Your iPhone keeps you connected.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

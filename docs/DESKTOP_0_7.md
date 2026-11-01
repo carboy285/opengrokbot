@@ -29,7 +29,7 @@ Configure these GitHub repository secrets before requesting a signed run:
 | Mac | `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGN_IDENTITY`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` |
 | Windows | `WINDOWS_CERTIFICATE_PFX_BASE64`, `WINDOWS_CERTIFICATE_PASSWORD` |
 
-The Apple certificate must be a Developer ID Application identity with its private key. Windows needs a valid code-signing certificate/private key supported by electron-builder. Password-protected certificate bundles are loaded only on the build runner. Apple notarization uses a temporary keychain profile. Certificates and private keys are not packaged with the app.
+The Apple certificate must be a Developer ID Application identity with its private key. Windows needs a valid code-signing certificate/private key supported by electron-builder. Password-protected certificate bundles are loaded only on the build runner. Apple notarization uses a temporary keychain profile. Certificates and private keys are not packaged with the app. Signed releases use a new version rather than replacing an already published development release.
 
 ## Verification status
 

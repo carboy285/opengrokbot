@@ -68,7 +68,7 @@ function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
   const matches=bot=>(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
   const primary=$('#primary-bot');primary.replaceChildren();
-  for(const bot of orderedBots().filter(x=>isPinned(x)&&matches(x))){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});primary.append(tile);}
+  for(const bot of orderedBots().filter(x=>isPinned(x)&&matches(x))){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
   const list=$('#bot-list');list.replaceChildren();
   const visible=orderedBots().filter(bot=>!isPinned(bot)&&matches(bot));
   for(const bot of visible){
@@ -76,9 +76,7 @@ function render() {
     const preview=entries(bot).at(-1)?.text||bot.purpose;
     append(row,avatar(bot),append(node('span','details'),node('strong','',bot.name),node('small','',running.has(bot.id)?'Working…':preview)));
     row.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});
-    row.addEventListener('dragstart',event=>{draggedBot=bot.id;event.dataTransfer.setData('text/plain',bot.id);event.dataTransfer.effectAllowed='move';});
-    row.addEventListener('dragend',()=>{draggedBot=null;});row.addEventListener('dragover',event=>{if(draggedBot)event.preventDefault();});
-    row.addEventListener('drop',async event=>{event.preventDefault();const from=draggedBot;draggedBot=null;if(!from||from===bot.id||!bridge.reorderBots)return;const ids=orderedBots().map(x=>x.id).filter(id=>id!==from);ids.splice(ids.indexOf(bot.id),0,from);try{workspace=await result(bridge.reorderBots(ids));render();}catch(error){toast(error.message);}});list.append(row);
+    wireBotDrag(row,bot);list.append(row);
   }
   if(!visible.length&&!primary.children.length)list.append(node('p','empty','No Bots found.'));
   renderFolderFilter();
@@ -93,6 +91,10 @@ function render() {
 
   renderInspector();
 }
+function wireBotDrag(row,bot){
+ row.draggable=true;row.addEventListener('dragstart',event=>{draggedBot=bot.id;event.dataTransfer.setData('text/plain',bot.id);event.dataTransfer.effectAllowed='move';});row.addEventListener('dragend',()=>{draggedBot=null;});row.addEventListener('dragover',event=>{if(draggedBot)event.preventDefault();});
+ row.addEventListener('drop',async event=>{event.preventDefault();const from=draggedBot;draggedBot=null;if(!from||from===bot.id||!bridge.reorderBots)return;const ids=orderedBots().map(x=>x.id).filter(id=>id!==from);ids.splice(ids.indexOf(bot.id),0,from);try{workspace=await result(bridge.reorderBots(ids));render();}catch(error){toast(error.message);}});
+}
 function renderFolderFilter(){
  let picker=$('#folder-filter');const values=[...new Set(workspace.bots.map(x=>x.folder).filter(Boolean))].sort();
  if(!picker){picker=node('select','folder-filter');picker.id='folder-filter';picker.setAttribute('aria-label','Filter Bot folders');picker.addEventListener('change',()=>{folderFilter=picker.value;render();});$('#search-slot').before(picker);}
@@ -106,7 +108,7 @@ function renderMessages(bot){
  for(const entry of entries(bot)){
   live.add(entry.id);let row=messages.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`);
   if(!row){row=node('div',entry.kind==='activity'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));}
-  const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==entry.state){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state','Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
+  const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==(entry.state||'')){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state','Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
   if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
  }
  for(const row of messages.querySelectorAll('[data-entry]'))if(!live.has(row.dataset.entry))row.remove();
@@ -330,7 +332,7 @@ function showBotActions(bot){
 }
 function showAvatarPicker(bot){
  const content=panel('Bot avatar');let draft=structuredClone(bot.appearance||{shape:'hexagon',color:bot.color}),preview=avatar({...bot,appearance:draft});preview.classList.add('avatar-preview');content.append(preview);const refresh=()=>{const next=avatar({...bot,appearance:draft});next.classList.add('avatar-preview');preview.replaceWith(next);preview=next;};
- const shapes=node('div','avatar-grid');for(const shape of avatarShapes)shapes.append(append(button('',()=>{draft.shape=shape;delete draft.imageData;refresh();}),avatar({appearance:{shape,color:draft.color}})));content.append(shapes);
+ const shapes=node('div','avatar-grid');for(const shape of avatarShapes){const choice=append(button('',()=>{draft.shape=shape;delete draft.imageData;refresh();}),avatar({appearance:{shape,color:draft.color}}));choice.setAttribute('aria-label',shape);shapes.append(choice);}content.append(shapes);
  const colors=node('div','colors');for(const[color,hex]of Object.entries(avatarColors)){const swatch=button('',()=>{draft.color=color;delete draft.imageData;refresh();},'color-choice');swatch.style.background=hex;swatch.setAttribute('aria-label',color);colors.append(swatch);}content.append(colors);
  const upload=node('input','field');upload.type='file';upload.accept='image/png,image/jpeg,image/webp,image/heic';upload.setAttribute('aria-label','Upload avatar image');upload.addEventListener('change',async()=>{try{const file=upload.files[0];if(!file)return;if(file.size>12000000)throw new Error('Choose an image under 12 MB.');const image=await createImageBitmap(file);const canvas=document.createElement('canvas'),scale=Math.min(1,192/Math.max(image.width,image.height));canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);image.close();let data;for(const q of [.8,.6,.4,.2]){data=canvas.toDataURL('image/jpeg',q).split(',')[1];if(data.length<=32768)break;}if(data.length>32768)throw new Error('Choose a smaller image.');draft.imageData=data;refresh();}catch(error){toast(error.message);}});
  append(content,upload,button('Generate a look',()=>{draft={shape:avatarShapes[Math.floor(Math.random()*avatarShapes.length)],color:Object.keys(avatarColors)[Math.floor(Math.random()*Object.keys(avatarColors).length)]};refresh();}),button('Reset',async()=>{await organize(bot,{appearance:null,color:bot.isMain?'white':'purple'});dialog.close();}),button('Save avatar',async()=>{await organize(bot,{appearance:draft,color:draft.color});dialog.close();},'pill primary'));

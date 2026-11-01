@@ -9,15 +9,15 @@ struct ConnectDesktopView: View {
                 Section {
                     HStack { Spacer(); BotAvatar(size:72); Spacer() }.padding(.vertical)
                     Text("Your Bots, wherever you go").font(.title2.weight(.medium))
-                    Text("Your computer runs the AI. Sign in with the same account on both devices, then approve this phone on your Mac. Your Bots load automatically when one Mac is available.")
+                    Text("Your computer runs the AI. Sign in with the same account on both devices, then approve this phone on your computer. Your Bots load automatically when one computer is available.")
                 }
                 Section { CloudSignInView(account:remote.account) }
                 if remote.account.signedIn {
                     if let phone = remote.account.localDevice {
-                        Section("This phone’s fingerprint") { Text(phone.fingerprint).font(.system(.body,design:.monospaced)); Text("Match this fingerprint in Mac Settings → Computer before choosing Approve phone.").font(.footnote).foregroundStyle(.secondary) }
+                        Section("This phone’s fingerprint") { Text(phone.fingerprint).font(.system(.body,design:.monospaced)); Text("Match this fingerprint in Desktop Settings → Computer before choosing Approve phone.").font(.footnote).foregroundStyle(.secondary) }
                     }
                     Section("Your computers") {
-                        if remote.account.hosts.isEmpty { Text("No computers yet. Sign in on your Mac and turn on Allow phone access in Settings → Computer.") }
+                        if remote.account.hosts.isEmpty { Text("No computers yet. Sign in on your computer and turn on Allow phone access in Settings → Computer.") }
                         ForEach(remote.account.hosts) { host in
                             Button { remote.select(host) } label: {
                                 HStack {

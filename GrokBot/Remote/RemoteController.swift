@@ -68,7 +68,7 @@ final class RemoteController: ObservableObject {
         polling?.cancel()
         guard active, account.signedIn else { status = "Sign in to connect your desktop"; return }
         restoreHost()
-        if connection == nil { status = "Finding your Mac…" }
+        if connection == nil { status = "Finding your computer…" }
         let current = epoch
         polling = Task {
             var nextDiscovery = connection == nil ? Date.distantPast : Date().addingTimeInterval(15)
@@ -101,8 +101,8 @@ final class RemoteController: ObservableObject {
                         try await refresh()
                     } else {
                         status = account.hosts.isEmpty
-                            ? "Open OpenGrokBot on your Mac and sign in with this account. In Settings → Computer, make sure Allow phone access is on."
-                            : "Choose your Mac in Connect Desktop to load its Bots."
+                            ? "Open OpenGrokBot on your computer and sign in with this account. In Settings → Computer, make sure Allow phone access is on."
+                            : "Choose your computer in Connect Desktop to load its Bots."
                     }
                 } catch {
                     if Task.isCancelled || current != epoch { return }

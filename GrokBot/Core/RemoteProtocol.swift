@@ -5,7 +5,7 @@ enum RemoteError: Error, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .incompatible: "Update the Mac and iPhone apps to compatible versions."
-        case .unauthorized: "Sign in again and approve this phone on your Mac."
+        case .unauthorized: "Sign in again and approve this phone on your computer."
         case .unavailable: "Keep the Mac awake with OpenGrokBot running and phone access enabled."
         }
     }
