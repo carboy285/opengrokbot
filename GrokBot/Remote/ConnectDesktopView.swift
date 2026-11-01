@@ -41,7 +41,12 @@ struct RemoteConnectionBanner: View {
     @EnvironmentObject private var remote: RemoteController
     var body: some View {
         Button { remote.showConnection = true } label: {
-            HStack(spacing:7) { Circle().fill(remote.online ? .green:.orange).frame(width:5,height:5); Text(remote.status).font(.caption).lineLimit(2); Spacer(); Image(systemName:"desktopcomputer") }.foregroundStyle(.secondary).padding(.horizontal,20).padding(.vertical,8)
+            HStack(spacing: 8) {
+                Circle().fill(remote.online ? .green : .orange).frame(width: 5, height: 5)
+                Text(remote.status).font(.footnote).lineLimit(2).multilineTextAlignment(.leading)
+                Spacer(minLength: 10)
+                Image(systemName: "desktopcomputer").font(.system(size: 19)).accessibilityHidden(true)
+            }.foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 7)
         }.buttonStyle(.plain)
     }
 }

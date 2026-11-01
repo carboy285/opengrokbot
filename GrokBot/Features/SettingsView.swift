@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var remote: RemoteController
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("appearance") private var appearance = "dark"
+    @AppStorage("appearance") private var appearance = "system"
     @State private var disconnect = false
     var body: some View {
         NavigationStack {
@@ -21,7 +21,7 @@ struct SettingsView: View {
                     NavigationLink("Desktop connection guide") { IntegrationView() }
                     Link("Project and downloads",destination:URL(string:"https://github.com/carboy285/opengrokbot")!)
                 }
-                Section { LabeledContent("App version",value:"0.6.0");Text("AI CLIs and optional Composio tools run on your Mac or Windows host using its accounts and permissions.").font(.footnote).foregroundStyle(.secondary) }
+                Section { LabeledContent("App version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—");Text("AI CLIs and optional Composio tools run on your Mac or Windows host using its accounts and permissions.").font(.footnote).foregroundStyle(.secondary) }
             }.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Done") { dismiss() } } }
                 .confirmationDialog("Disconnect this phone from the desktop?",isPresented:$disconnect,titleVisibility:.visible) { Button("Disconnect",role:.destructive) { remote.disconnect() } }

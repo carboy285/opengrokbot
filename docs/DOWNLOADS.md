@@ -1,5 +1,11 @@
 # Development downloads · Mac/iOS 0.6.1
 
+## Latest iPhone layout source
+
+[Download the latest Xcode project](https://github.com/carboy285/opengrokbot/archive/refs/heads/codex/macos-client.zip) for the updated iPhone roster and conversation layout: featured assistant, spacious Bot rows with timestamps, floating search and filters, glass navigation controls, rounded message bubbles, and a floating composer. Open `GrokBot.xcodeproj` and run the **GrokBot** scheme on your iPhone. This source update was not compiled or tested at the user's request. The versioned 0.6.1 release ZIP below predates this layout update.
+
+## Published Apple downloads
+
 [Release and downloads](https://github.com/carboy285/opengrokbot/releases/tag/v0.6.1).
 
 | Download | Contents |

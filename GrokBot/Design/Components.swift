@@ -3,6 +3,7 @@ import SwiftUI
 enum Palette {
     static let background = Color(uiColor: .systemBackground)
     static let card = Color(uiColor: .secondarySystemBackground)
+    static let userBubble = Color(uiColor: .systemGray4)
     static func bot(_ name: String) -> Color {
         switch name {
         case "purple": Color(red: 0.57, green: 0.32, blue: 1)
@@ -58,9 +59,10 @@ struct RoundButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 20, weight: .medium))
-                .frame(width: 46, height: 46)
+                .font(.system(size: 23, weight: .regular))
+                .frame(width: 50, height: 50)
                 .glassChrome(in: Circle())
+                .shadow(color: .black.opacity(0.035), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

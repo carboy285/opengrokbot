@@ -5,7 +5,7 @@ struct GrokBotApp: App {
     @StateObject private var model = AppModel()
     @StateObject private var remote = RemoteController()
     @Environment(\.scenePhase) private var phase
-    @AppStorage("appearance") private var appearance = "dark"
+    @AppStorage("appearance") private var appearance = "system"
 
     var body: some Scene {
         WindowGroup {
