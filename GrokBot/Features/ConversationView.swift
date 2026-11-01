@@ -88,7 +88,7 @@ struct ConversationView: View {
                 }.buttonStyle(.plain).frame(maxWidth: 220).accessibilityLabel("Bot details for \(bot.name)")
             }.padding(.horizontal, 20).padding(.top, 8)
             if !remote.online { RemoteConnectionBanner() }
-        }.padding(.bottom, 10).background(.ultraThinMaterial)
+        }.padding(.bottom, 10)
     }
 
     private var emptyConversation: some View {
@@ -157,9 +157,7 @@ struct ConversationView: View {
                     .allowsHitTesting(false)
             }
             .shadow(color: .black.opacity(0.035), radius: 14, y: 4)
-            Text(remote.online ? "Runs on \(remote.hostName)" : "Reconnecting to \(remote.hostName)…")
-                .font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
-        }.padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 8)
+        }.padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 4)
     }
 
     private func send() {
