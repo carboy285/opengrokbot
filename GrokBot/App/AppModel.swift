@@ -21,7 +21,6 @@ final class AppModel: ObservableObject {
 
     func recentlyUsed(_ bots: [Bot]) -> [Bot] {
         var latest: [UUID:Date] = [:]
-        for entry in workspace.entries { latest[entry.botID] = max(latest[entry.botID] ?? .distantPast, entry.date) }
         for bot in bots { if let value = bot.lastUsedAt.flatMap(BotSchedule.date) { latest[bot.id] = max(latest[bot.id] ?? .distantPast, value) } }
         return bots.enumerated().sorted { left, right in
             let a = latest[left.element.id] ?? .distantPast, b = latest[right.element.id] ?? .distantPast
@@ -31,8 +30,19 @@ final class AppModel: ObservableObject {
     @discardableResult
     func touchBot(_ id: UUID) -> Bool {
         guard let index = workspace.bots.firstIndex(where: { $0.id == id }) else { return false }
-        if let last = workspace.bots[index].lastUsedAt.flatMap(BotSchedule.date), Date().timeIntervalSince(last) < 2 { return true }
-        return commit { $0.bots[index].lastUsedAt = ISO8601DateFormatter().string(from: Date()) }
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return commit { $0.bots[index].lastUsedAt = formatter.string(from: Date()) }
+    }
+    @discardableResult
+    func updateDetails(_ bot: Bot, name: String, purpose: String, memory: [String]) -> Bool {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = workspace.bots.firstIndex(where: { $0.id == bot.id }), !cleaned.isEmpty, cleaned.count <= 200,
+              purpose.count <= 2000, memory.count <= 100, memory.allSatisfy({ !$0.isEmpty && $0.count <= 2000 }),
+              !workspace.bots.contains(where: { $0.id != bot.id && $0.name.caseInsensitiveCompare(cleaned) == .orderedSame }) else {
+            errorMessage = "Use a unique Bot name, a purpose up to 2,000 characters, and at most 100 memory items up to 2,000 characters each."
+            return false
+        }
+        return commit { value in value.bots[index].name = cleaned; value.bots[index].purpose = purpose; value.bots[index].memory = memory }
     }
     func enterPreview() {
         do { workspace = try store.load() ?? .fresh }
@@ -42,6 +52,17 @@ final class AppModel: ObservableObject {
             errorMessage = "Saved workspace could not be read. Your saved file has been kept."
         }
         previewEnabled = true
+        var interrupted = false
+        for bot in workspace.bots.indices {
+            for index in (workspace.bots[bot].schedules ?? []).indices where workspace.bots[bot].schedules?[index].lastResult == "running" {
+                workspace.bots[bot].schedules?[index].lastResult = "interrupted"
+                if let history = workspace.bots[bot].schedules?[index].history {
+                    workspace.bots[bot].schedules?[index].history = history.map { run in var item = run; if item.status == "running" { item.status = "interrupted" }; return item }
+                }
+                interrupted = true
+            }
+        }
+        if interrupted && !loadFailed { do { try store.save(workspace) } catch { errorMessage = "The interrupted routine status could not be saved." } }
         for index in (workspace.teamMessages ?? []).indices where workspace.teamMessages?[index].status == .running { workspace.teamMessages?[index].status = .failed }
         for index in workspace.entries.indices where workspace.entries[index].state == .streaming {
             workspace.entries[index].state = .stopped
@@ -56,10 +77,10 @@ final class AppModel: ObservableObject {
     func latest(for bot: Bot) -> String { entries(for: bot).last?.text ?? bot.purpose }
 
     @discardableResult
-    func addNote(_ text: String, to bot: Bot, id: UUID? = nil) -> Bool {
+    func addNote(_ text: String, to bot: Bot, id: UUID? = nil, automated: Bool = false) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard previewEnabled, !trimmed.isEmpty, workspace.bots.contains(where: { $0.id == bot.id }) else { return false }
-        var entry = Entry(botID: bot.id, kind: .user, text: trimmed, id: id ?? UUID()); entry.delivery = "delivered"
+        var entry = Entry(botID: bot.id, kind: .user, text: trimmed, id: id ?? UUID()); entry.delivery = automated ? "scheduled" : "delivered"
         return commit { $0.entries.append(entry) }
     }
 
@@ -117,6 +138,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func createSchedule(_ task: BotSchedule, botID: UUID) -> Bool {
+        guard let index = workspace.bots.firstIndex(where: { $0.id == botID }),
+              !task.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, task.name.count <= 200,
+              !task.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, task.text.count <= 8000,
+              (workspace.bots[index].schedules ?? []).count < 100,
+              (task.eventBased ? task.recurrence == "none" && (task.contains?.count ?? 0) <= 200 : task.nextRun.flatMap(BotSchedule.date).map({ $0 > Date() }) == true),
+              ["none", "hourly", "daily", "weekly"].contains(task.recurrence), TimeZone(identifier: task.timezone) != nil else {
+            errorMessage = "Enter a valid name, instruction, time zone and trigger. Timed routines need a future time."
+            return false
+        }
+        return commit { value in
+            if value.bots[index].schedules == nil { value.bots[index].schedules = [] }
+            value.bots[index].schedules?.append(task)
+        }
+    }
     @discardableResult
     func updateSchedule(_ task: BotSchedule, botID: UUID) -> Bool {
         guard let bot = workspace.bots.firstIndex(where: { $0.id == botID }), let index = workspace.bots[bot].schedules?.firstIndex(where: { $0.id == task.id }) else { return false }

@@ -47,7 +47,7 @@ const pendingSends=new Map();
 let folderFilter='*',draggedBot=null,draftTimer,displayedBot=null,cloudStatus=null;
 function persistDrafts(){clearTimeout(draftTimer);draftTimer=setTimeout(()=>{bridge.saveDrafts?.(Object.fromEntries(drafts)).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>toast('Your draft could not be saved.'));},400);}
 const isPinned=bot=>bot.isPinned??!!bot.isMain;
-const recentBots=bots=>{const times=new Map();for(const entry of workspace.entries){const time=Date.parse(entry.date)||0;times.set(entry.botID,Math.max(times.get(entry.botID)||0,time));}return bots.map((bot,index)=>({bot,index,time:Math.max(times.get(bot.id)||0,Date.parse(bot.lastUsedAt)||0)})).sort((a,b)=>b.time-a.time||a.index-b.index).map(x=>x.bot);};
+const recentBots=bots=>bots.map((bot,index)=>({bot,index,time:Date.parse(bot.lastUsedAt)||0})).sort((a,b)=>b.time-a.time||a.index-b.index).map(x=>x.bot);
 const orderedBots=()=>workspace.bots.map((bot,index)=>({bot,index})).sort((a,b)=>(a.bot.sortOrder??a.index)-(b.bot.sortOrder??b.index)).map(x=>x.bot);
 async function organize(bot,changes){try{if(bridge.organizeBot)workspace=await result(bridge.organizeBot(bot.id,changes));else{const next=structuredClone(workspace);Object.assign(next.bots.find(x=>x.id===bot.id),changes);if(!await persist(next))return;}render();}catch(error){toast(error.message);}}
 const dialog = $('#panel');
@@ -128,8 +128,8 @@ function renderMessages(bot){
  const live=new Set();let index=0;
  for(const entry of entries(bot)){
   live.add(entry.id);let row=messages.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`);
-  if(!row){row=node('div',entry.kind==='activity'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));}
-  const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==(entry.state||'')){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state','Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
+  if(!row){row=node('div',entry.kind==='activity'||entry.delivery==='scheduled'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));}
+  const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==(entry.state||'')){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state',entry.delivery==='scheduled'?'Routine started':'Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
   if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
  }
  for(const row of messages.querySelectorAll('[data-entry]'))if(!live.has(row.dataset.entry))row.remove();
@@ -165,7 +165,7 @@ function renderInspector(){
   body.append(button('Set up / open Linux VM',()=>showBotVM(bot)));
   append(body,node('h3','','Local browser'),node('p','muted','A visible browser on this computer, with a separate cookie/login profile for this Bot.'),button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(error){toast(error.message);}}));
   append(body,node('h3','','Scheduled tasks'),node('p','muted','Ask this Bot to schedule a one-time or recurring task, or run when another Bot messages it. Tasks run while this desktop app is running; missed times catch up once.'));
-  for(const task of bot.schedules||[]){append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}`),button('Cancel task',async()=>{await result(bridge.cancelTask(bot.id,task.id));}));}
+  for(const task of bot.schedules||[]){const history=node('details'),summary=node('summary','','Run history');history.append(summary);for(const run of task.history||[])history.append(node('p','muted',`${run.date} · ${run.status}`));if(task.history?.length)body.append(history);append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}${task.lastRun?' · Last run: '+task.lastRun+' · '+(task.lastResult||'outcome unavailable'):''}`),button('Cancel task',async()=>{await result(bridge.cancelTask(bot.id,task.id));}));}
   if(bot.memberIDs){body.append(node('h3','','Group members'));for(const member of workspace.bots.filter(x=>bot.memberIDs.includes(x.id)))body.append(button(member.name,()=>selectBot(member.id)));body.append(node('p','muted','Each member answers with its own provider and model.'));}
   else{
    append(body,node('h3','','Providers & models'),node('p','muted','Choose available providers and select the one provider and model that answers for this Bot.'));

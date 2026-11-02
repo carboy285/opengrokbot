@@ -26,4 +26,9 @@ function advance(task,now=Date.now()){
  }
  task.nextRun=new Date(now+step*86400000).toISOString();
 }
-module.exports={valid,make,advance};
+function firstMatchingEvent(events, task){
+ const index=task.lastEvent?events.findIndex(event=>event.id===task.lastEvent):-1;
+ const unseen=task.lastEvent?(index<0?events.slice(-1):events.slice(index+1)):events;
+ return unseen.find(event=>!task.contains||event.text.toLowerCase().includes(task.contains.toLowerCase()));
+}
+module.exports={valid,make,advance,firstMatchingEvent};

@@ -76,6 +76,7 @@ final class LocalCLIRun: @unchecked Sendable {
             _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
             lock.lock()
             if cancelled { lock.unlock(); continuation.finish(throwing: CLIError.stopped); return }
+            if !FileManager.default.isExecutableFile(atPath: cli.path) { lock.unlock(); throw CLIError.notInstalled }
             do { try process.run(); lock.unlock() } catch { lock.unlock(); throw error }
             let timeout = DispatchWorkItem { [weak self] in self?.cancel(timeout: true) }
             DispatchQueue.global().asyncAfter(deadline: .now() + 600, execute: timeout)
@@ -114,9 +115,8 @@ final class LocalCLIRun: @unchecked Sendable {
             if expired { throw CLIError.timedOut }
             if stopped { throw CLIError.stopped }
             if process.terminationStatus != 0 || protocolFailed {
-                let diagnostic = String(data: stderr.value, encoding: .utf8)?.lowercased() ?? ""
-                if ["not logged in", "unauthorized", "authentication", "sign in", "401"].contains(where: diagnostic.contains) { throw CLIError.notLoggedIn }
-                throw CLIError.failed(process.terminationStatus)
+                let diagnostic = String(data: stderr.value, encoding: .utf8) ?? ""
+                throw CLIError.classify(stderr: diagnostic, exitCode: process.terminationStatus)
             }
             guard !parser.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CLIError.invalidOutput }
             continuation.finish()

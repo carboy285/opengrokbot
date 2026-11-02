@@ -41,6 +41,10 @@ struct MacMirrorView: View {
                     List(roster, selection: $selected) { item in
                         HStack { MacBotAvatar(color: item.color, size: 32, appearance: item.appearance); Text(item.name); if remote.isPinned(item) { Image(systemName: "pin.fill").font(.caption) } }
                             .tag(item.id)
+                            .contentShape(Rectangle())
+                            .simultaneousGesture(TapGesture().onEnded {
+                                if remote.online { Task { _ = await remote.command(RemoteCommand(action: "touch_bot", botID: item.id)) } }
+                            })
                             .contextMenu {
                                 Button(remote.isPinned(item) ? "Unpin" : "Pin") { remote.setPinned(!remote.isPinned(item), bot: item) }
                                 if item.isMain != true { Button("Delete Bot", role: .destructive) { Task { _ = await remote.command(RemoteCommand(action: "delete_bot", botID: item.id)) } } }
@@ -61,7 +65,7 @@ struct MacMirrorView: View {
         .background(MacTheme.canvas)
         .task { remote.account.useAccount(from: source); remote.attach(workspace); remote.setActive(true) }
         .onDisappear { remote.setActive(false) }
-        .onChange(of: selected) { old, _ in if let old { remote.drafts[old] = draft }; draft = selected.flatMap { remote.drafts[$0] } ?? ""; follow = true; if let id = selected, remote.online { Task { _ = await remote.command(RemoteCommand(action: "touch_bot", botID: id)) } } }
+        .onChange(of: selected) { old, _ in if let old { remote.drafts[old] = draft }; draft = selected.flatMap { remote.drafts[$0] } ?? ""; follow = true }
         .onChange(of: remote.account.session?.user.id) { _, _ in selected = nil; draft = "" }
         .alert("Remote workspace", isPresented: Binding(get: { remote.error != nil }, set: { if !$0 { remote.error = nil } })) { Button("OK") { remote.error = nil } } message: { Text(remote.error ?? "") }
         .sheet(isPresented: $vmViewer) { if let bot { CloudBrowserView(isVM: true, botID: bot.id, remote: remote).frame(width: 900, height: 700) } }

@@ -6,6 +6,15 @@ import XCTest
 #endif
 
 final class CLIProtocolTests: XCTestCase {
+    func testFailureClassificationDoesNotExposeStderr() {
+        let secret = "private-token-and-conversation"
+        let cases: [(String, CLIError)] = [("HTTP 429 rate limit", .rateLimited), ("unknown model", .invalidModel), ("authentication failed", .notLoggedIn), ("connection refused", .network), ("unexpected error", .failed(3))]
+        for (diagnostic, expected) in cases {
+            let result = CLIError.classify(stderr: diagnostic + " " + secret, exitCode: 3)
+            XCTAssertEqual(result, expected)
+            XCTAssertFalse((result.errorDescription ?? "").contains(secret))
+        }
+    }
     func testFreshWorkspaceHasOnlyMainBotAndNoMessages() {
         let value = Workspace.fresh
         XCTAssertEqual(value.bots.count, 1)

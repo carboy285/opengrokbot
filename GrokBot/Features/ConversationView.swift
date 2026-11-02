@@ -209,8 +209,8 @@ private struct MessageRow: View, Equatable {
         (try? AttributedString(markdown: entry.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(entry.text)
     }
     var body: some View {
-        if entry.kind == .activity {
-            Label(entry.text, systemImage: "arrow.triangle.branch")
+        if entry.kind == .activity || entry.delivery == "scheduled" {
+            Label(entry.text, systemImage: entry.delivery == "scheduled" ? "clock" : "arrow.triangle.branch")
                 .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 5)
                 .textSelection(.enabled)
         } else {

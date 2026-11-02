@@ -56,7 +56,6 @@ struct MacWorkspaceView: View {
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
         .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
-        .onChange(of: desktop.selectedID) { _, id in if let id { _ = app.touchBot(id) } }
         .onChange(of: desktop.showSearch) { _, visible in searchFocused = visible }
         .foregroundStyle(.primary.opacity(0.9))
         .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its local notes?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
@@ -95,30 +94,25 @@ struct MacWorkspaceView: View {
                 Text("Unfiled").tag(Optional(""))
                 ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in Text(folder).tag(Optional(folder)) }
             }.labelsHidden().padding(.horizontal, 18).padding(.top, 16)
-            if sidebarBots.contains(where: { pinned($0) }) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
                         ForEach(sidebarBots.filter { pinned($0) }) { bot in
-                            Button { desktop.selectedID = bot.id } label: {
+                            Button { desktop.selectedID = bot.id; _ = app.touchBot(bot.id) } label: {
                                 VStack(spacing: 12) {
                                     MacBotAvatar(color: bot.color, size: 64, starred: true, appearance: bot.appearance)
-                                    Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2)
-                                }.padding(14).frame(width: 118).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
+                                    Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
+                                }.padding(14).frame(maxWidth: .infinity).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
                             }.buttonStyle(.plain).contextMenu { organizationActions(bot) }.draggable(bot.id.uuidString)
                                 .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
                         }
                     }.padding(.horizontal, 18).padding(.vertical, 20)
-                        .background(PinnedScrollIndicators().allowsHitTesting(false).accessibilityHidden(true))
-                }.scrollIndicators(.hidden)
-            }
-            ScrollView {
-                LazyVStack(spacing: 8) {
                     ForEach(app.recentlyUsed(sidebarBots.filter { !pinned($0) })) { bot in
-                        Button { desktop.selectedID = bot.id } label: {
+                        Button { desktop.selectedID = bot.id; _ = app.touchBot(bot.id) } label: {
                             HStack(spacing: 16) {
                                 MacBotAvatar(color: bot.color, size: 39, appearance: bot.appearance)
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text(bot.name).font(.system(size: 17, weight: .medium)).lineLimit(1)
+                                    Text(bot.name).font(.system(size: 17, weight: .medium)).lineLimit(1).help(bot.name)
                                     Text(app.latest(for: bot)).font(.system(size: 14)).foregroundStyle(MacTheme.secondary).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
@@ -201,26 +195,6 @@ struct MacWorkspaceView: View {
             Text("A place for your Bots").font(.system(size: 28, weight: .medium))
             Text("Create a Bot to start a separate AI conversation.").foregroundStyle(MacTheme.secondary)
             MacPillButton(title: "Create Bot", prominent: true) { desktop.panel = .newBot }
-        }
-    }
-}
-
-
-/// Enforce hidden chrome on this scroll view even with macOS “Always” scrollbars.
-private struct PinnedScrollIndicators: NSViewRepresentable {
-    func makeNSView(context: Context) -> Probe { Probe() }
-    func updateNSView(_ view: Probe, context: Context) { view.hideIndicatorsAfterLayout() }
-    @MainActor
-    final class Probe: NSView {
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hideIndicatorsAfterLayout() }
-        func hideIndicatorsAfterLayout() {
-            DispatchQueue.main.async { [weak self] in
-                guard let scroll = self?.enclosingScrollView else { return }
-                scroll.scrollerStyle = .overlay
-                scroll.autohidesScrollers = true
-                scroll.hasHorizontalScroller = false
-                scroll.horizontalScrollElasticity = .allowed
-            }
         }
     }
 }

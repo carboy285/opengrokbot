@@ -58,11 +58,23 @@ struct InstalledCLI: Identifiable, Hashable, Sendable {
 enum CLIEvent: Sendable, Equatable { case session(String), text(String), activity(String), failed }
 
 enum CLIError: Error, LocalizedError, Equatable {
-    case notInstalled, notLoggedIn, failed(Int32), invalidOutput, stopped, timedOut
+    case notInstalled, notLoggedIn, invalidModel, network, rateLimited, failed(Int32), invalidOutput, stopped, timedOut
+    /// Classify locally; never return raw stderr, which may contain credentials or conversation data.
+    static func classify(stderr: String, exitCode: Int32) -> CLIError {
+        let text = stderr.lowercased()
+        if ["rate limit", "too many requests", "http 429", "status 429"].contains(where: text.contains) { return .rateLimited }
+        if ["model not found", "unknown model", "invalid model", "unsupported model"].contains(where: text.contains) { return .invalidModel }
+        if ["not logged in", "unauthorized", "authentication failed", "sign in", "http 401", "status 401"].contains(where: text.contains) { return .notLoggedIn }
+        if ["network error", "connection refused", "could not resolve host", "dns lookup failed", "connection timed out"].contains(where: text.contains) { return .network }
+        return .failed(exitCode)
+    }
     var errorDescription: String? {
         switch self {
         case .notInstalled: "Choose an installed AI CLI in setup first."
         case .notLoggedIn: "Your CLI needs authentication. Open setup, sign in through the CLI, then try again."
+        case .invalidModel: "The selected model was rejected or could not be found. Choose a model available to this provider and try again."
+        case .network: "The CLI could not reach its service. Check the computer’s network connection and try again."
+        case .rateLimited: "The provider reported a rate limit. Wait a little while and try again."
         case .failed(let code): "The AI CLI stopped with exit code \(code). Check its login and configuration in Terminal, then retry."
         case .invalidOutput: "The CLI did not return a supported AI response. Update the CLI or select another installation."
         case .stopped: "Response stopped. You can send another message."
