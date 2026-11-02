@@ -1,0 +1,34 @@
+name: Build bundled Hermes runtime
+on:
+  push:
+    branches: [hermes/runtime-integration]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test Hermes transport and lifecycle
+        run: node --test desktop-windows/app/hermes-gateway.test.cjs desktop-windows/app/hermes-runtime.test.cjs
+      - name: Prepare pinned standalone runtime
+        run: python scripts/prepare-hermes-runtime.py --build-root artifacts/hermes-build
+      - name: Preserve runtime permissions and links
+        run: tar -czf artifacts/hermes-runtime.tar.gz -C artifacts/hermes-build payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-runtime-${{ matrix.os }}
+          path: artifacts/hermes-runtime.tar.gz
+          retention-days: 7
