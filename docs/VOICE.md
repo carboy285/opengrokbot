@@ -18,7 +18,7 @@ Known limits: replies are spoken after they finish generating (not streamed); ec
 - Mac: ⌘V pastes a clipboard image or copied file into the message box; the plus popover has Add files and Paste image.
 - iPhone: plus menu → Photo library or Paste image. Images are compressed to about 1.5 MB, at most 3 per message, and sent through the encrypted relay. The Mac or Windows host must run this version or newer.
 
-## 0.7.6 additions (updates changed in 0.7.7: see below)
+## 0.7.6 additions
 - Replies are spoken sentence by sentence while they stream. Talking over the Bot (or tapping the orb) stops speech and stops the Bot generating.
 - iPhone: when the message box is focused and an image is on the clipboard, a "Paste image from clipboard" button appears. The **Talk to my Bot** shortcut (Shortcuts app, Siri, Action Button) opens voice mode with your main Bot.
 - Windows: Attach files… in the plus menu, Ctrl+V to paste images, and attachment chips above the message box.
