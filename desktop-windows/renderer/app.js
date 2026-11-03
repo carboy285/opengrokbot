@@ -38,6 +38,7 @@ let workspace = structuredClone(preview);
 let selected = workspace.bots[0]?.id;
 let setup={providers:[],installed:[],selected:'',complete:false};
 let running=new Set();
+const pendingFiles=new Map();
 let inspectorOpen=false,inspectorTab="Details",inspectorSignature="",inspectorGeneration=0;
 const modelCatalogs=new Map();
 let search = '';
@@ -84,10 +85,11 @@ function render() {
   renderFolderFilter();
   const bot = currentBot();
   $('#chat-heading').replaceChildren();
-  const draft=$('#draft');if(displayedBot!==selected||document.activeElement!==draft){draft.value=drafts.get(selected)||'';displayedBot=selected;}
+  const draft=$('#draft');if(displayedBot!==selected||document.activeElement!==draft){draft.value=drafts.get(selected)||'';displayedBot=selected;}renderChips();
   draft.disabled=!bot;if(!bot){$('#messages').replaceChildren(node('div','empty','Create a Bot to start chatting.'));return;}
   append($('#chat-heading'),avatar(bot),node('span','',bot.name));draft.placeholder=`Ask ${bot.name}`;
   document.documentElement.style.setProperty('--bot-accent',avatarColors[bot.appearance?.color||bot.color]||'#9355ff');
+  document.documentElement.style.setProperty('--bot-ink',['white','amber','orange','green','teal','gray'].includes(bot.appearance?.color||bot.color)?'#000':'#fff');
   renderMessages(bot);
   const activeCLI=setup.installed.find(x=>x.id===setup.selected);$('#status-button').textContent=activeCLI?`${activeCLI.name} · On this device`:'Set up an AI CLI';
 
@@ -141,11 +143,11 @@ function renderMessages(bot){
  $('#save-note').disabled=running.has(bot.id)||!!pending&&!pending.failed;$('#save-note').setAttribute('aria-label',pending&&!pending.failed?'Sending message':'Send message');
  if(chatScroll.follow)scheduleChatBottom();else chatViewport.scrollTop=previousScroll;
 }
-async function submitMessage(bot,text,id=crypto.randomUUID()){
+async function submitMessage(bot,text,id=crypto.randomUUID(),files=pendingFiles.get(bot.id)||[]){
  if(running.has(bot.id)||pendingSends.get(bot.id)&&!pendingSends.get(bot.id).failed)return;
  if(selected===bot.id)chatScroll.follow=true;
- const pending={id,text,failed:false};pendingSends.set(bot.id,pending);drafts.set(bot.id,text);persistDrafts();renderMessages(bot);
- try{workspace=await result(bridge.send(bot.id,text,id));pendingSends.delete(bot.id);if(drafts.get(bot.id)===text){drafts.delete(bot.id);if(selected===bot.id&&$('#draft').value.trim()===text)$('#draft').value='';}persistDrafts();render();if(selected===bot.id)$('#draft').focus();}
+ const pending={id,text:text||(files.length?`📎 ${files.length} attachment${files.length===1?'':'s'}`:''),failed:false};pendingSends.set(bot.id,pending);drafts.set(bot.id,text);persistDrafts();renderMessages(bot);
+ try{workspace=await result(bridge.send(bot.id,text,id,files.length?files:undefined));pendingSends.delete(bot.id);if(files.length&&pendingFiles.get(bot.id)===files){pendingFiles.delete(bot.id);renderChips();}if(drafts.get(bot.id)===text){drafts.delete(bot.id);if(selected===bot.id&&$('#draft').value.trim()===text)$('#draft').value='';}persistDrafts();render();if(selected===bot.id)$('#draft').focus();}
  catch(error){pending.failed=true;toast(error.message);if(selected===bot.id)renderMessages(bot);}
 }
 function configuration(bot){const active=setup.installed.find(x=>x.id===setup.selected);return bot.aiConfiguration||{providers:active?[{provider:active.provider,model:''}]:[],activeProvider:active?.provider,replyMode:'one'};}
@@ -299,7 +301,7 @@ function unavailable(title, detail) { return append(node('div', 'unavailable'), 
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
   const layout = node('div', 'settings-layout'); const nav = node('nav', 'settings-nav'); const page = node('section', 'settings-page');
-  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['Vault','⚿'],['Voice','♫'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
+  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['Vault','⚿'],['Voice','♫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
   append(page, append(node('header','panel-head'), node('h1','',tab), button('×', () => dialog.close(), 'close-panel')));
   append(layout, nav, page); dialog.append(layout); if (!dialog.open) dialog.showModal();
   if (tab === 'General') {
@@ -317,6 +319,7 @@ function showSettings(tab = 'General') {
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
   else if (tab === 'Voice') voice.renderSettings(page);
+  else if (tab === 'Backup') renderBackup(page);
 }
 async function renderRemoteAccess(page){
  const body=node('section','composio-settings');page.append(body);let disposed=false;const draw=async()=>{
@@ -333,8 +336,19 @@ async function renderRemoteAccess(page){
  };if(!bridge.cloudStatus){body.append(node('p','','Open the installed Windows app to connect your iPhone.'));return;}await draw();const timer=setInterval(()=>{if(!body.isConnected){clearInterval(timer);return;}if(!body.querySelector('input'))draw();},4000);
 }
 async function renderUpdates(page){
- const body=append(node('section','settings-card'),node('h2','','App updates'),node('p','muted','Download updates from the official project. Installers do not replace your saved workspace.'));page.append(body);
- const check=button('Check for updates',async()=>{check.disabled=true;try{const update=await result(bridge.checkUpdates());body.append(node('p','',update.available?`${update.version} is available${update.prerelease?' (development release)':''}.`:`You’re using ${update.current}. No newer release is published.`));if(update.available)body.append(button('Open download page',()=>bridge.openUpdate(update.url)));}catch(error){toast(error.message);}finally{check.disabled=false;}});body.append(check);
+ const body=append(node('section','settings-card'),node('h2','','App updates'),node('p','muted','Updates come from the official project releases and are checked for size and integrity. Installing does not replace your saved workspace; the app closes while the installer runs.'));page.append(body);
+ const check=button('Check for updates',async()=>{check.disabled=true;try{const update=await result(bridge.checkUpdates());body.append(node('p','',update.available?`${update.version} is available${update.prerelease?' (development release)':''}.`:`You’re using ${update.current}. No newer release is published.`));if(update.available){if(update.installer&&bridge.installUpdate){const install=button('Download and install',async()=>{install.disabled=true;install.textContent='Downloading…';try{await result(bridge.installUpdate());install.textContent='Starting installer…';}catch(error){toast(error.message);install.disabled=false;install.textContent='Download and install';}});body.append(install);}body.append(button('Open download page',()=>bridge.openUpdate(update.url)));}}catch(error){toast(error.message);}finally{check.disabled=false;}});body.append(check);
+}
+function renderBackup(page){
+ const field=(label)=>{const input=node('input');input.type='password';input.autocomplete='new-password';input.setAttribute('aria-label',label);input.placeholder=label;return input;};
+ const out=append(node('section','settings-card'),node('h2','','Encrypted backup'),node('p','muted','Saves your Bots, conversations and routines to one file encrypted with your password. AI sign-ins, API keys and vault secrets are not included. Without the password the backup cannot be opened.'));
+ const pass=field('Backup password (8+ characters)'),again=field('Repeat password');
+ const save=button('Export backup…',async()=>{if(pass.value.length<8){toast('Use a password of at least 8 characters.');return;}if(pass.value!==again.value){toast('The passwords don’t match.');return;}save.disabled=true;try{if(await result(bridge.exportBackup(pass.value)))toast('Backup saved.');pass.value=again.value='';}catch(error){toast(error.message);}finally{save.disabled=false;}});
+ append(out,pass,again,save);
+ const restore=append(node('section','settings-card'),node('h2','','Restore'),node('p','muted','Replaces the Bots and conversations on this PC with the backup. Your current workspace is kept in a safety copy first.'));
+ const key=field('Backup password');
+ const load=button('Restore from backup…',async()=>{load.disabled=true;try{if(await result(bridge.importBackup(key.value))){toast('Backup restored.');key.value='';}}catch(error){toast(error.message);}finally{load.disabled=false;}});
+ append(restore,key,load);page.append(out,restore);
 }
 async function renderVault(page) {
   append(page,node('h2','','Device vault'),node('p','muted','Encrypted with Windows data protection. This local vault is not synced or accessible to Grok Bot.'));
@@ -366,21 +380,35 @@ function showAvatarPicker(bot){
  append(content,upload,button('Generate a look',()=>{draft={shape:avatarShapes[Math.floor(Math.random()*avatarShapes.length)],color:Object.keys(avatarColors)[Math.floor(Math.random()*Object.keys(avatarColors).length)]};refresh();}),button('Reset',async()=>{await organize(bot,{appearance:null,color:bot.isMain?'white':'purple'});dialog.close();}),button('Save avatar',async()=>{await organize(bot,{appearance:draft,color:draft.color});dialog.close();},'pill primary'));
 }
 async function exportConversation(bot=currentBot()) { if(!bot)return; const text='OpenGrokBot — Local AI conversation\n\n'+entries(bot).map(x=>`${x.kind==='user'?'You':x.senderName||bot.name}: ${x.text}`).join('\n\n'); try { if(await result(bridge.export(text)))toast('Conversation exported.'); }catch(error){toast(error.message);} }
+function renderChips(){
+ const box=$('#attachment-chips'),bot=currentBot(),files=bot?pendingFiles.get(bot.id)||[]:[];box.replaceChildren();box.hidden=!files.length;
+ for(const name of files){const chip=node('span','attachment-chip');chip.append(node('span','',/\.(png|jpe?g|gif|webp)$/i.test(name)?'🖼':'📄'),node('span','chip-name',name.replace(/^[0-9a-f-]{37}/i,'')));const remove=button('×',()=>{pendingFiles.set(bot.id,(pendingFiles.get(bot.id)||[]).filter(x=>x!==name));renderChips();},'chip-remove');remove.setAttribute('aria-label','Remove attachment '+name.replace(/^[0-9a-f-]{37}/i,''));chip.append(remove);box.append(chip);}
+}
+function addFiles(bot,names){if(!bot||!names?.length)return;const list=[...(pendingFiles.get(bot.id)||[]),...names];if(list.length>10){toast('Attach up to 10 files per message.');return;}pendingFiles.set(bot.id,list);renderChips();}
+async function attachFiles(bot=currentBot()){if(!bot)return;if(!window.desktop){toast('Attachments are available in the installed app.');return;}try{addFiles(bot,await result(bridge.attachFiles(bot.id)));}catch(error){toast(error.message);}}
+$('#draft').addEventListener('paste',async event=>{
+ const bot=currentBot(),items=[...(event.clipboardData?.items||[])].filter(item=>item.kind==='file'&&/^image\/(png|jpeg|gif|webp)$/.test(item.type));
+ if(!bot||!items.length||!window.desktop)return;event.preventDefault();
+ for(const item of items){const file=item.getAsFile();if(!file)continue;if(file.size>20000000){toast('Images must be under 20 MB.');continue;}
+  const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+  try{addFiles(bot,[await result(bridge.attachData(bot.id,item.type,btoa(binary)))]);}catch(error){toast(error.message);}}
+});
 const voice = createVoice({
   get bridge() { return window.desktop || {}; }, result, toast, currentBot,
   latestReply: bot => { const entry = entries(bot).findLast(x => x.kind === 'bot'); return entry ? { id: entry.id, text: entry.text, finished: entry.state !== 'streaming' && !running.has(bot.id) } : null; },
-  sendText: (bot, text) => submitMessage(bot, text),
+  sendText: (bot, text) => submitMessage(bot, text, undefined, []),
   openSettings: () => showSettings('Voice')
 });
 $('#voice-button').addEventListener('click', () => { if (!window.desktop) { toast('Voice mode is available in the installed app.'); return; } if (!setup.installed.length) { showConnection(); return; } voice.start(); });
-$('#composer').addEventListener('submit',event=>{event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||!text||running.has(bot.id))return;if(!window.desktop||!setup.installed.length){showConnection();return;}submitMessage(bot,text,pendingSends.get(bot.id)?.text===text?pendingSends.get(bot.id).id:undefined);});
+$('#composer').addEventListener('submit',event=>{event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||(!text&&!(pendingFiles.get(bot.id)||[]).length)||running.has(bot.id))return;if(!window.desktop||!setup.installed.length){showConnection();return;}submitMessage(bot,text,pendingSends.get(bot.id)?.text===text?pendingSends.get(bot.id).id:undefined);});
 $('#draft').addEventListener('input',()=>{ drafts.set(selected,$('#draft').value);persistDrafts(); $('#draft').style.height='auto';$('#draft').style.height=Math.min(180,$('#draft').scrollHeight)+'px'; });
 $('#search-button').addEventListener('click',()=>{const slot=$('#search-slot');if(slot.firstChild){slot.replaceChildren();search='';render();return;}const field=node('input','search-input');field.placeholder='Search Bots';field.setAttribute('aria-label','Search Bots');field.addEventListener('input',()=>{search=field.value;render();});slot.append(field);field.focus();});
-$('#new-button').addEventListener('click',showNewBot); $('#profile-button').addEventListener('click',()=>showSettings()); $('#apps-button').addEventListener('click',showApps); $('#status-button').addEventListener('click',()=>showConnection()); $('#attachment-button').addEventListener('click',()=>{const content=panel('Conversation actions');append(content,button('Export conversation…',()=>exportConversation()),button('Attachment status',()=>toast('Paste text into your message. File attachments are not supported yet.')));});
+$('#new-button').addEventListener('click',showNewBot); $('#profile-button').addEventListener('click',()=>showSettings()); $('#apps-button').addEventListener('click',showApps); $('#status-button').addEventListener('click',()=>showConnection()); $('#attachment-button').addEventListener('click',()=>{const content=panel('Conversation actions');const bot=currentBot();append(content,button('Attach files…',()=>{dialog.close();attachFiles(bot);}),button('Export conversation…',()=>exportConversation()),node('p','muted','Tip: press Ctrl+V in the message box to paste an image.'));});
 for(const control of document.querySelectorAll('[data-window]')) control.addEventListener('click',async()=>{if(control.dataset.window==='close'&&bridge.saveDrafts){clearTimeout(draftTimer);try{await result(bridge.saveDrafts(Object.fromEntries(drafts)));}catch(error){toast(error.message);return;}}window.desktop?.windowAction(control.dataset.window);});
 window.addEventListener('blur',()=>{focusGeneration++;for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key==='n'){event.preventDefault();showNewBot();}else if(event.key===','){event.preventDefault();showSettings();}else if(event.key==='f'){event.preventDefault();$('#search-button').click();}else if(event.key==='Enter'&&!dialog.open){event.preventDefault();$('#composer').requestSubmit();}});
 bridge.onChange?.(value=>{workspace=value.workspace;running=new Set(value.running);render();});
+bridge.onOpenBot?.(id=>{if(workspace.bots.some(bot=>bot.id===id))selectBot(id);});
 function showCloudStatus(value){
  const old=cloudStatus?.phase;cloudStatus=value;let badge=$('#phone-state');if(!badge){badge=button('',()=>showSettings('Computer'),'phone-state');badge.id='phone-state';$('#status-button').before(badge);}badge.textContent=value.phase==='approval-required'?'Approve your iPhone':value.enabled?value.phase==='offline'?'Phone connection offline · retrying':value.phase==='connecting'?'Connecting your iPhone…':'Phone access ready':'Connect your iPhone';badge.title=value.feedback;badge.dataset.state=value.phase;if(value.phase==='approval-required'&&old!==value.phase)toast(value.feedback);
 }

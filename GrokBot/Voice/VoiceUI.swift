@@ -8,6 +8,7 @@ struct VoiceModeView: View {
     let ink: Color
     let close: () -> Void
     @State private var showSettings = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var session: VoiceSession { conversation.session }
     private var status: String {
@@ -33,17 +34,18 @@ struct VoiceModeView: View {
             Button { if session.state == .speaking { session.interrupt() } } label: {
                 ZStack {
                     Circle().fill(tint.opacity(0.18)).frame(width: 190, height: 190)
-                        .scaleEffect(1 + CGFloat(min(session.level, 1)) * 0.35)
+                        .scaleEffect(reduceMotion ? 1 : 1 + CGFloat(min(session.level, 1)) * 0.35)
                     Circle().fill(tint).frame(width: 130, height: 130)
-                        .scaleEffect(session.state == .thinking ? 0.92 : 1 + CGFloat(min(session.level, 1)) * 0.12)
+                        .scaleEffect(reduceMotion ? 1 : session.state == .thinking ? 0.92 : 1 + CGFloat(min(session.level, 1)) * 0.12)
                     Image(systemName: session.state == .speaking ? "waveform" : session.state == .thinking ? "ellipsis" : "mic.fill")
                         .font(.system(size: 36, weight: .medium)).foregroundStyle(ink)
-                }.animation(.easeOut(duration: 0.12), value: session.level)
-            }.buttonStyle(.plain).accessibilityLabel(status)
+                }.animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: session.level)
+            }.buttonStyle(.plain).accessibilityLabel(status).accessibilityHint(session.state == .speaking ? "Stops the spoken reply" : "")
             Text(status).font(.title3.weight(.medium))
             Text(session.partial.isEmpty ? " " : session.partial)
                 .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(4)
                 .padding(.horizontal, 28).frame(minHeight: 90, alignment: .top)
+                .accessibilityLabel(session.partial.isEmpty ? "" : "You said: " + session.partial)
             if let message = session.message {
                 Text(message).font(.footnote).foregroundStyle(.orange).multilineTextAlignment(.center).padding(.horizontal, 28)
             }

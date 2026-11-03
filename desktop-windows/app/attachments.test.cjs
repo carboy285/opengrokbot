@@ -37,3 +37,27 @@ test('builds the CLI message with file paths', () => {
   assert.match(message, /^Please review the attached files\./);
   assert.match(message, /- Attachments\/x-Photo\.jpg/);
 });
+
+test('copies local files, saves pasted images, and validates stored names', async () => {
+  const { copyLocalFiles, saveDataFile, existingNames } = require('./attachments.cjs');
+  const { writeFile, mkdir } = require('node:fs/promises');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grok-att-'));
+  try {
+    const source = path.join(dir, 'my notes.txt');
+    await writeFile(source, 'hello');
+    const [copied] = await copyLocalFiles(dir, [source]);
+    assert.match(copied, /^[0-9a-f-]{36}-my notes\.txt$/);
+    assert.equal(await readFile(path.join(dir, 'Attachments', copied), 'utf8'), 'hello');
+    await assert.rejects(copyLocalFiles(dir, [dir]), /regular files/);
+    await assert.rejects(copyLocalFiles(dir, []));
+    const pasted = await saveDataFile(dir, 'image/png', png.toString('base64'));
+    assert.match(pasted, /-Pasted image\.png$/);
+    await assert.rejects(saveDataFile(dir, 'text/html', 'aGk='), /Unsupported/);
+    assert.deepEqual(await existingNames(dir, [copied, pasted]), [copied, pasted]);
+    assert.deepEqual(await existingNames(dir, undefined), []);
+    await assert.rejects(existingNames(dir, ['../secret']), /Invalid/);
+    await assert.rejects(existingNames(dir, ['00000000-0000-0000-0000-000000000000-missing.txt']));
+    await mkdir(path.join(dir, 'Attachments', '11111111-1111-1111-1111-111111111111-dir'));
+    await assert.rejects(existingNames(dir, ['11111111-1111-1111-1111-111111111111-dir']), /Missing/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

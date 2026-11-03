@@ -86,7 +86,10 @@ final class RemoteControllerTests: XCTestCase {
         XCTAssertTrue(remote.online,remote.status);XCTAssertTrue(remote.hasSnapshot);XCTAssertEqual(remote.hostName,"My Mac")
         let bot = try XCTUnwrap(app.workspace.bots.first)
         let accepted = await remote.send("Use my desktop model",bot:bot)
-        XCTAssertTrue(accepted);XCTAssertEqual(fixture.entryCount,2);XCTAssertEqual(app.entries(for:bot).last?.text,"Host reply")
+        XCTAssertTrue(accepted);XCTAssertEqual(fixture.entryCount,2)
+        // send() returns once the host acknowledges; the reply arrives with the next state poll.
+        for _ in 0..<50 { if app.entries(for:bot).last?.text == "Host reply" {break};try await Task.sleep(for:.milliseconds(100)) }
+        XCTAssertEqual(app.entries(for:bot).last?.text,"Host reply")
         XCTAssertFalse(FileManager.default.fileExists(atPath:store.url.path),"The phone must never save an independent workspace")
         fixture.setOffline(true)
         for _ in 0..<70 { if !remote.online {break};try await Task.sleep(for:.milliseconds(100)) }

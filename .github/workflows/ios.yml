@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       run_checks:
-        description: Explicitly run automated checks
+        description: Run automated checks (they always run on pull requests)
         type: boolean
         default: false
 permissions:
@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   ios:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_checks
+    if: github.event_name != 'workflow_dispatch' || inputs.run_checks
     runs-on: macos-26
     timeout-minutes: 15
     steps:
@@ -50,7 +50,7 @@ jobs:
           path: build/Tests.xcresult
           if-no-files-found: ignore
   inspection:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_checks
+    if: github.event_name != 'workflow_dispatch' || inputs.run_checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -55,7 +55,7 @@
 #messages{scroll-behavior:auto;overflow-anchor:none}#message-content{min-height:1px}
 
 /* Voice mode */
-.composer-area .voice-button{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:50%;background:var(--bot-accent,#9355ff);color:#fff;font-size:20px;cursor:pointer}
+.composer-area .voice-button{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:50%;background:var(--bot-accent,#9355ff);color:var(--bot-ink,#fff);font-size:20px;cursor:pointer}
 .composer-area .voice-button:hover{filter:brightness(1.08)}
 .voice-overlay{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:30px;background:rgba(17,17,17,.94);color:var(--text,#fff);backdrop-filter:blur(18px)}
 .voice-title{font-size:20px}
@@ -65,7 +65,19 @@
 .voice-status{font-size:20px;font-weight:600}
 .voice-caption{min-height:64px;max-width:640px;text-align:center;color:var(--muted,#a0a0a0);font-size:17px}
 .voice-note{max-width:560px;text-align:center;font-size:13px;color:#f69a0a}
-.voice-end{padding:12px 26px;border-radius:99px;background:var(--bot-accent,#9355ff);color:#fff;font-size:16px;font-weight:600;cursor:pointer}
+.voice-end{padding:12px 26px;border-radius:99px;background:var(--bot-accent,#9355ff);color:var(--bot-ink,#fff);font-size:16px;font-weight:600;cursor:pointer}
 .voice-gear{position:absolute;top:16px;left:16px;width:44px;height:44px;border-radius:50%;font-size:20px;color:var(--muted,#a0a0a0);cursor:pointer}
 .voice-settings{display:grid;gap:14px}.voice-row{display:grid;grid-template-columns:200px 1fr;gap:12px;align-items:center}.voice-key{display:flex;gap:8px}.voice-key input,.voice-settings select,.voice-settings input[type=text],.voice-settings input:not([type]){flex:1;padding:9px 10px;border:1px solid var(--line,#333);border-radius:10px;background:var(--panel,#1f1f1f);color:var(--text,#fff)}
 @media (prefers-reduced-motion:reduce){.voice-overlay[data-mode="thinking"] .voice-orb{animation:none}.voice-orb{transition:none}}
+
+/* Attachments + avatar-colored controls */
+.attachment-chips{display:flex;gap:8px;flex-wrap:wrap;max-width:1000px;margin:0 auto 8px;padding:0 8px}
+.attachment-chips[hidden]{display:none}
+.attachment-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px 6px 12px;border-radius:99px;background:color-mix(in srgb,var(--bot-accent,#9355ff) 22%,transparent);font-size:13px;max-width:280px}
+.attachment-chip .chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attachment-chip .chip-remove{width:22px;height:22px;border-radius:50%;color:var(--muted);cursor:pointer}
+.attachment-chip .chip-remove:hover{background:#ffffff18;color:var(--text)}
+#composer .plus,#composer #attachment-button{background:var(--bot-accent,#9355ff);color:var(--bot-ink,#fff)}
+#composer #save-note{background:var(--bot-accent,var(--primary));color:var(--bot-ink,#fff)}
+#composer #save-note:disabled{opacity:.35}
+.settings-card input[type=password]{display:block;width:100%;max-width:420px;margin:8px 0;padding:10px 12px;border:1px solid var(--line,#333);border-radius:10px;background:var(--panel,#1f1f1f);color:var(--text,#fff)}

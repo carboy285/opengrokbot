@@ -1,6 +1,10 @@
 import Foundation
 import SwiftUI
 import Combine
+#if os(iOS)
+import UIKit
+import UserNotifications
+#endif
 
 @MainActor
 final class RemoteController: ObservableObject {
@@ -23,6 +27,8 @@ final class RemoteController: ObservableObject {
     @Published var busy = false
     @Published var drafts: [UUID:String] = [:]
     @Published var draftImages: [UUID:[RemoteAttachment]] = [:]
+    /// The chat on screen, so a finished reply there doesn't also raise a notification.
+    var viewingBotID: UUID?
     @Published var error: String?
     private let client: CloudRelayClient
     private let secrets: KeychainSecretStore
@@ -144,9 +150,11 @@ final class RemoteController: ObservableObject {
                 let patch = try CloudStatePatch.decode(response.body)
                 let snapshot = try patch.applying(to:state)
                 guard snapshot.protocolVersion == 1 else { throw RemoteError.incompatible }
+                let wasLoaded = hasSnapshot, finished = running.subtracting(Set(snapshot.running))
                 state = snapshot; hostName = snapshot.hostName; running = Set(snapshot.running)
                 providers = snapshot.providers; defaultProvider = snapshot.defaultProvider
                 model?.applyRemoteSnapshot(snapshot.workspace)
+                if wasLoaded, !finished.isEmpty { ReplyNotifier.notify(finished: finished, workspace: snapshot.workspace, viewing: viewingBotID) }
                 if !hasSnapshot {
                     loadPins(); showConnection = false
                     if let owner = account.session?.user.id {
@@ -259,3 +267,39 @@ final class RemoteController: ObservableObject {
         return (try? CloudCoding.decoder().decode([RemoteFile].self,from:response.body)) ?? []
     }
 }
+
+/// Notifies you when a Bot finishes while you're in another chat or the app is in the background.
+/// The phone only learns about replies while it is connected, so this is not a push service.
+enum ReplyNotifier {
+    @MainActor static func notify(finished: Set<UUID>, workspace: Workspace, viewing: UUID?) {
+        #if os(iOS)
+        let foreground = UIApplication.shared.applicationState == .active
+        for id in finished where !(foreground && id == viewing) {
+            guard let bot = workspace.bots.first(where: { $0.id == id }),
+                  let reply = workspace.entries.last(where: { $0.botID == id && $0.kind == .bot }),
+                  reply.state != .stopped else { continue }
+            let content = UNMutableNotificationContent()
+            content.title = reply.state == .failed ? "\(bot.name) couldn’t finish" : "\(bot.name) replied"
+            content.body = String(reply.text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).prefix(160))
+            content.sound = .default
+            content.userInfo = ["botID": id.uuidString]
+            let request = UNNotificationRequest(identifier: reply.id.uuidString, content: content, trigger: nil)
+            Task {
+                let center = UNUserNotificationCenter.current()
+                guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+                try? await center.add(request)
+            }
+        }
+        #endif
+    }
+}
+
+#if os(iOS)
+/// Shows reply banners even while OpenGrokBot is open.
+final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate, Sendable {
+    static let shared = NotificationPresenter()
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+}
+#endif

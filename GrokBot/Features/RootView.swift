@@ -16,6 +16,9 @@ struct RootView: View {
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 104
     @State private var inspectedBot: Bot?
     @State private var chatPath: [UUID] = []
+    @AppStorage("seenWelcome") private var seenWelcome = false
+    @AppStorage("pendingVoiceStart") private var pendingVoice = false
+    @AppStorage("autoVoiceBotID") private var autoVoiceBotID = ""
 
     private var matchingBots: [Bot] {
         model.visibleBots.filter { bot in
@@ -29,6 +32,47 @@ struct RootView: View {
             (ids.firstIndex(of: $0.id) ?? 0) < (ids.firstIndex(of: $1.id) ?? 0)
         }
     }
+    /// Handles the "Talk to my Bot" shortcut once the desktop workspace has loaded.
+    private func openPendingVoice() {
+        guard pendingVoice, remote.hasSnapshot else { return }
+        pendingVoice = false
+        guard let bot = model.workspace.bots.first(where: { $0.isMain == true }) ?? model.workspace.bots.first else { return }
+        seenWelcome = true
+        autoVoiceBotID = bot.id.uuidString
+        chatPath = [bot.id]
+    }
+
+    /// Messages in any chat that contain the search text, newest first.
+    private var messageMatches: [Entry] {
+        let query = model.search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 2 else { return [] }
+        return Array(model.workspace.entries.reversed().lazy
+            .filter { $0.kind != .activity && $0.text.localizedCaseInsensitiveContains(query) }
+            .prefix(25))
+    }
+
+    private func messageRow(_ entry: Entry) -> some View {
+        let bot = model.workspace.bots.first { $0.id == entry.botID }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(bot?.name ?? "Bot").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(entry.date, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+            }
+            Text((entry.kind == .user ? "You: " : "") + snippet(entry.text)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 10).contentShape(Rectangle())
+        .accessibilityElement(children: .combine).accessibilityHint("Opens this chat")
+    }
+
+    /// Shows the part of a long message around the first match.
+    private func snippet(_ text: String) -> String {
+        let flat = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard let range = flat.range(of: model.search.trimmingCharacters(in: .whitespacesAndNewlines), options: .caseInsensitive) else { return String(flat.prefix(140)) }
+        let start = flat.index(range.lowerBound, offsetBy: -40, limitedBy: flat.startIndex) ?? flat.startIndex
+        return (start == flat.startIndex ? "" : "…") + String(flat[start...].prefix(140))
+    }
+
     private var bots: [Bot] { model.recentlyUsed(matchingBots.filter { !remote.isPinned($0) }) }
     private var initials: String {
         guard remote.account.signedIn else { return "" }
@@ -50,6 +94,10 @@ struct RootView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $settings) { SettingsView() }
+            .onAppear { openPendingVoice() }
+            .onChange(of: pendingVoice) { _, _ in openPendingVoice() }
+            .onChange(of: remote.hasSnapshot) { _, _ in openPendingVoice() }
+            .fullScreenCover(isPresented: Binding(get: { !seenWelcome }, set: { if !$0 { seenWelcome = true } })) { WelcomeView { seenWelcome = true } }
             .sheet(isPresented: $createBot) { CreateBotView() }
             .sheet(item: $inspectedBot) { bot in
                 NavigationStack {
@@ -112,6 +160,14 @@ struct RootView: View {
                 ForEach(bots) { bot in
                     NavigationLink(value: bot.id) { botRow(bot) }.buttonStyle(.plain)
                         .contextMenu { botActions(bot) }
+                }
+                if !messageMatches.isEmpty {
+                    Text("Messages").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 6)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(messageMatches) { entry in
+                        Button { chatPath.append(entry.botID) } label: { messageRow(entry) }.buttonStyle(.plain)
+                    }
                 }
                 if matchingBots.isEmpty {
                     ContentUnavailableView(filter == .working ? "No Bots working" : filter == .groups ? "No groups yet" : "No matches",
@@ -261,5 +317,46 @@ struct CreateBotView: View {
                 }
             }
         }
+    }
+}
+
+/// Shown once on first launch: how the phone, the computer and the Bots fit together.
+struct WelcomeView: View {
+    let done: () -> Void
+    @State private var page = 0
+    private let pages: [(icon: String, title: String, text: String)] = [
+        ("desktopcomputer", "Your Bots run on your computer",
+         "Install OpenGrokBot on your Mac or Windows PC, choose an AI account there, and sign in with the same OpenGrokBot account on this iPhone."),
+        ("checkmark.shield", "Approve this iPhone once",
+         "Your computer asks before letting this phone in. Compare the fingerprint shown on both screens, then approve. Messages travel end-to-end encrypted."),
+        ("waveform", "Type, talk or send photos",
+         "Tap the waveform to talk hands-free, the plus button for photos and pasted images, and search to find any message.")
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TabView(selection: $page) {
+                ForEach(pages.indices, id: \.self) { index in
+                    VStack(spacing: 22) {
+                        Spacer()
+                        Image(systemName: pages[index].icon).font(.system(size: 64, weight: .light)).foregroundStyle(.primary)
+                            .accessibilityHidden(true)
+                        Text(pages[index].title).font(.title2.weight(.semibold)).multilineTextAlignment(.center)
+                        Text(pages[index].text).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 32)
+                        Spacer()
+                    }.tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            Button {
+                if page < pages.count - 1 { withAnimation { page += 1 } } else { done() }
+            } label: {
+                Text(page < pages.count - 1 ? "Next" : "Get started").font(.headline).foregroundStyle(Palette.background)
+                    .frame(maxWidth: .infinity).frame(height: 54).background(.primary, in: Capsule())
+            }.buttonStyle(.plain).padding(.horizontal, 24).padding(.bottom, 12)
+            Button("Skip", action: done).font(.subheadline).foregroundStyle(.secondary).padding(.bottom, 20)
+        }
+        .background(Palette.background)
     }
 }

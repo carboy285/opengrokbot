@@ -16,6 +16,8 @@ struct ConversationView: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var voiceOn = false
     @State private var attachNotice: String?
+    @State private var clipboardHasImage = false
+    @AppStorage("autoVoiceBotID") private var autoVoiceBotID = ""
     @StateObject private var voice = VoiceConversation()
     @State private var nearBottom = true
     @State private var userScrolling = false
@@ -76,6 +78,14 @@ struct ConversationView: View {
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            remote.viewingBotID = bot.id
+            if autoVoiceBotID == bot.id.uuidString { autoVoiceBotID = ""; startVoice() }
+        }
+        .onChange(of: composing) { _, focused in clipboardHasImage = focused && UIPasteboard.general.hasImages }
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in clipboardHasImage = composing && UIPasteboard.general.hasImages }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in clipboardHasImage = composing && UIPasteboard.general.hasImages }
+        .onDisappear { if remote.viewingBotID == bot.id { remote.viewingBotID = nil } }
         .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: RemoteAttachment.maxCount, matching: .images)
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
@@ -150,6 +160,16 @@ struct ConversationView: View {
                     var list = images; if list.indices.contains(index) { list.remove(at: index) }
                     remote.draftImages[bot.id] = list
                 }
+            }
+            if clipboardHasImage && images.count < RemoteAttachment.maxCount {
+                Button {
+                    clipboardHasImage = false
+                    if let image = UIPasteboard.general.image { addImage(ImageAttachments.make(from: image)) }
+                } label: {
+                    Label("Paste image from clipboard", systemImage: "doc.on.clipboard")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(composerInk)
+                        .padding(.horizontal, 14).padding(.vertical, 8).background(composerTint, in: Capsule())
+                }.buttonStyle(.plain).transition(.opacity).accessibilityHint("Attaches the copied image to your message")
             }
             if let attachNotice {
                 Text(attachNotice).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 12)
@@ -250,7 +270,8 @@ struct ConversationView: View {
                     guard let entry = model.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
                     let finished = entry.state != .streaming && !remote.running.contains(current.id)
                     return VoiceReply(id: entry.id, text: entry.text, finished: finished)
-                })
+                },
+                stopReply: { Task { _ = await remote.command(RemoteCommand(action: "stop", botID: current.id)) } })
         }
     }
 

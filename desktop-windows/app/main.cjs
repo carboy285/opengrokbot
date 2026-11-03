@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Tray, Menu, Notification } = require('electron');
 const { readFile, writeFile, mkdir, rename, readdir, lstat } = require('node:fs/promises');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
@@ -12,6 +12,7 @@ const composio=require('./composio.cjs');
 const teamwork=require('./teamwork.cjs');
 const attachments=require('./attachments.cjs');
 const voice=require('./voice.cjs');
+const backup=require('./backup.cjs');
 const { CloudHost } = require('./cloud-host.cjs');
 const updates = require('./updates.cjs');
 const stoppedBots=new Set();
@@ -84,6 +85,17 @@ function configuredProviders(bot){
  const choices=[config.providers.find(x=>x.provider===config.activeProvider)||config.providers[0]].filter(Boolean);
  return choices.map(choice=>({choice,installation:installed.find(x=>x.provider===choice.provider)}));
 }
+// Shows a Windows notification when a Bot finishes while the app is in the background.
+function notifyFinished(botID,reply){
+ try{
+  if(!Notification.isSupported()||!window||window.isFocused()||reply.state==='stopped')return;
+  const bot=state.bots.find(x=>x.id===botID);if(!bot)return;
+  const failed=reply.state==='failed';
+  const note=new Notification({title:failed?`${bot.name} couldn’t finish`:`${bot.name} replied`,body:String((failed?reply.error:reply.text)||'').replace(/\s+/g,' ').slice(0,160)});
+  note.on('click',()=>{if(window.isMinimized())window.restore();window.show();window.focus();window.webContents.send('bot:open',botID);});
+  note.show();
+ }catch{}
+}
 async function startChat(botID,text,delivery,requestID,browserDepth=0){
  const bot=state.bots.find(x=>x.id===botID);
  const scheduledTask=(requestID&&bot?.schedules?.find(task=>task.occurrence===requestID))||(!text&&!delivery&&bot?.schedules?.find(task=>task.id===routineRuns.get(botID)?.id));
@@ -127,6 +139,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
     let continuing=false;
     if(continueBrowser&&!quitting&&!stoppedBots.has(botID)){try{await startChat(botID,undefined,undefined,undefined,browserSteps);continuing=true;}catch{if(scheduledTask)scheduledTask.lastResult='failed';}}
     if(scheduledTask&&!continuing){if(scheduledTask.lastResult==='running')scheduledTask.lastResult=stoppedBots.has(botID)?'cancelled':routineRuns.get(botID)?.failed?'failed':'completed';const history=scheduledTask.history?.find(run=>run.id===routineRuns.get(botID)?.runID);if(history)history.status=scheduledTask.lastResult;routineRuns.delete(botID);await atomicJSON('preview-workspace.json',state);}
+    if(!continuing)notifyFinished(botID,reply);
     notify();await deliverQueued();
    });
   }
@@ -239,6 +252,7 @@ function configureIPC() {
  handle('cloud:approve',(id,allowed)=>cloudAction(()=>cloud.approve(id,allowed===true)));
  handle('cloud:reconnect',()=>cloudAction(async()=>{if(!cloud.data.session)throw new Error('Sign in first.');await cloud.setEnabled(true);return cloud.status();}));
  handle('updates:check',async()=>{try{updateState=await updates.check(app.getVersion());return updateState;}catch(error){throw new PublicError(error.message);}});
+ handle('updates:install',async()=>{if(!updateState?.available||!updateState.installer)throw new PublicError('Check for updates first. This release has no Windows installer.');const target=path.join(app.getPath('temp'),`OpenGrokBot-${updateState.version.replace(/[^0-9A-Za-z.-]/g,'')}-Setup.exe`);try{await updates.download(updateState.installer,target);}catch(error){throw new PublicError(error.message);}const failure=await shell.openPath(target);if(failure)throw new PublicError('The installer could not be started. Open it from your Downloads or temp folder.');setTimeout(()=>app.quit(),1500);return true;});
  handle('updates:open',async url=>{if(!updates.trusted(url))throw new PublicError('Use the official project release page.');await shell.openExternal(url);});
  handle('bot:organize',async(id,changes)=>{
   await ensureState();const bot=state.bots.find(x=>x.id===id);if(!bot||!changes||typeof changes!=='object')throw new PublicError('Choose a Bot.');
@@ -249,6 +263,25 @@ function configureIPC() {
  handle('drafts:load',async()=>{await ensureState();const drafts=await loadJSON('drafts.json',{});return Object.fromEntries(Object.entries(drafts).filter(([id,text])=>state.bots.some(x=>x.id===id)&&typeof text==='string'));});
  handle('drafts:save',async drafts=>{await ensureState();if(!drafts||typeof drafts!=='object'||Array.isArray(drafts)||Object.keys(drafts).length>100||Object.values(drafts).some(text=>typeof text!=='string'||text.length>100000))throw new PublicError('Drafts are too large.');const retained=Object.fromEntries(Object.entries(drafts).filter(([id])=>state.bots.some(bot=>bot.id===id)));await atomicJSON('drafts.json',retained);});
   handle('workspace:load', async () => {await ensureState();return state;});
+  handle('backup:export',async password=>{
+    await ensureState();if(typeof password!=='string'||password.length<8||password.length>200)throw new PublicError('Use a password of at least 8 characters.');
+    const {sessions,...portable}=state;const text=backup.encryptBackup(portable,password);
+    const choice=await dialog.showSaveDialog(window,{defaultPath:`OpenGrokBot-backup-${new Date().toISOString().slice(0,10)}.ogbackup`,filters:[{name:'OpenGrokBot backup',extensions:['ogbackup']}]});
+    if(choice.canceled||!choice.filePath)return false;await writeFile(choice.filePath,text,{mode:0o600});return true;
+  });
+  handle('backup:import',async password=>{
+    await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before restoring a backup.');
+    if(typeof password!=='string'||!password||password.length>200)throw new PublicError('Enter the backup password.');
+    const choice=await dialog.showOpenDialog(window,{title:'Choose an OpenGrokBot backup',properties:['openFile'],filters:[{name:'OpenGrokBot backup',extensions:['ogbackup']}]});
+    if(choice.canceled||!choice.filePaths.length)return false;
+    const info=await lstat(choice.filePaths[0]);if(!info.isFile()||info.size>200_000_000)throw new PublicError('Choose an OpenGrokBot backup file.');
+    let restored;try{restored=backup.decryptBackup(await readFile(choice.filePaths[0],'utf8'),password);}catch(error){throw new PublicError(error.message);}
+    if(restored.platform!=='windows')throw new PublicError('This backup was made on a Mac. Restore it in the Mac app.');
+    let migrated;try{validateWorkspace(restored.workspace);migrated=migrateWorkspace(restored.workspace);}catch{throw new PublicError('This backup could not be read by this version of OpenGrokBot.');}
+    if(migrated.bots.filter(x=>x.isMain===true).length!==1)throw new PublicError('This backup is missing its main Bot.');
+    for(const entry of migrated.entries)if(entry.state==='streaming')entry.state='stopped';
+    await atomicJSON('pre-restore-workspace.json',state);migrated.sessions={};state=migrated;await atomicJSON('preview-workspace.json',state);notify();return true;
+  });
   handle('workspace:save', async value => {
     await ensureState();if(active.size||pendingBots.size)throw new PublicError('Stop the current response before changing Bots.');
     validateWorkspace(value);const main=state.bots.find(x=>x.isMain===true);if(!main||!value.bots.some(x=>x.id===main.id&&x.isMain===true)||value.bots.filter(x=>x.isMain===true).length!==1)throw new PublicError('The main Bot must be kept.');
@@ -292,7 +325,9 @@ function configureIPC() {
     settings.providerHealth[installation.provider]={state:'configured',detail:'CLI detected. Authentication is verified by its next message.',at:new Date().toISOString()};await saveSettings();return settings.providerHealth[installation.provider].detail;
   });
   handle('setup:complete',async()=>{if(!selectedCLI())throw new PublicError('Choose an installed CLI first.');settings.complete=true;await saveSettings();});
-  handle('chat:send',async(botID,text,requestID)=>{await ensureState();if(typeof text!=='string'||!text.trim()||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');if(requestID&&!/^[0-9a-f-]{36}$/i.test(requestID))throw new PublicError('Invalid delivery ID.');if(!requestID||!state.entries.some(x=>x.id.toLowerCase()===requestID.toLowerCase()))await startChat(botID,text,undefined,requestID);return state;});
+  handle('files:attach',async botID=>{await ensureState();const bot=state.bots.find(x=>x.id===botID);if(!bot||bot.memberIDs)throw new PublicError('Attachments are available in individual Bot chats.');const choice=await dialog.showOpenDialog(window,{title:'Attach files (up to 10, each under 20 MB)',properties:['openFile','multiSelections']});if(choice.canceled||!choice.filePaths.length)return [];try{return await attachments.copyLocalFiles(botDirectory(bot.id),choice.filePaths);}catch(error){throw new PublicError(error.message);}});
+  handle('files:attach-data',async(botID,mime,data)=>{await ensureState();const bot=state.bots.find(x=>x.id===botID);if(!bot||bot.memberIDs)throw new PublicError('Attachments are available in individual Bot chats.');try{return await attachments.saveDataFile(botDirectory(bot.id),mime,data);}catch{throw new PublicError('Paste a PNG, JPEG, GIF or WebP image under 20 MB.');}});
+  handle('chat:send',async(botID,text,requestID,files)=>{await ensureState();if(typeof text!=='string'||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');let names=[];if(files!==undefined&&files!==null){const bot=state.bots.find(x=>x.id===botID);if(!bot)throw new PublicError('Choose a Bot.');try{names=await attachments.existingNames(botDirectory(bot.id),files);}catch{throw new PublicError('An attachment is missing. Remove it and attach it again.');}}if(!text.trim()&&!names.length)throw new PublicError('Enter a message of up to 100,000 characters.');text=attachments.attachmentMessage(text.trim(),names);if(requestID&&!/^[0-9a-f-]{36}$/i.test(requestID))throw new PublicError('Invalid delivery ID.');if(!requestID||!state.entries.some(x=>x.id.toLowerCase()===requestID.toLowerCase()))await startChat(botID,text,undefined,requestID);return state;});
   handle('chat:retry',async botID=>{await ensureState();const message=state.teamMessages?.findLast(x=>x.to===botID&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(botID);return state;});
   handle('chat:stop',async botID=>{stoppedBots.add(botID);for(const run of active.get(botID)||[])run.cancel();});
   handle('composio:status',async()=>{await ensureState();return composioStatus();});
@@ -386,6 +421,7 @@ function configureIPC() {
   });
 }
 
+if (process.platform === 'win32') app.setAppUserModelId('org.opengrokbot.windows');
 app.whenReady().then(() => {
   configureIPC();
   window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, frame: false, backgroundColor: '#111111', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });

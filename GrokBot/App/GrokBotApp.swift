@@ -1,4 +1,6 @@
+import AppIntents
 import SwiftUI
+import UserNotifications
 
 @main
 struct GrokBotApp: App {
@@ -11,7 +13,7 @@ struct GrokBotApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model).environmentObject(remote)
-                .onAppear { remote.attach(model) }
+                .onAppear { remote.attach(model); UNUserNotificationCenter.current().delegate = NotificationPresenter.shared }
                 .onOpenURL { remote.receive($0) }
                 .onChange(of: phase) { _, phase in
                     if phase == .active { remote.setActive(true) }
@@ -25,5 +27,28 @@ struct GrokBotApp: App {
                     Button("OK") { model.errorMessage = nil }
                 } message: { Text(model.errorMessage ?? "") }
         }
+    }
+}
+
+/// "Talk to OpenGrokBot": opens the app in hands-free voice mode with your main Bot.
+/// Add it to the Action Button, Lock Screen or Control Center from the Shortcuts app.
+struct StartVoiceIntent: AppIntent {
+    static var title: LocalizedStringResource { "Talk to my Bot" }
+    static var description: IntentDescription { IntentDescription("Opens OpenGrokBot in hands-free voice mode with your main Bot.") }
+    static var openAppWhenRun: Bool { true }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        UserDefaults.standard.set(true, forKey: "pendingVoiceStart")
+        return .result()
+    }
+}
+
+struct OpenGrokBotShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(intent: StartVoiceIntent(),
+                    phrases: ["Talk to \(.applicationName)", "Start voice mode in \(.applicationName)"],
+                    shortTitle: "Talk to Bot",
+                    systemImageName: "waveform")
     }
 }

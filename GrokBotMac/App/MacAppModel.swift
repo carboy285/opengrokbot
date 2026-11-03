@@ -1,6 +1,7 @@
 import AppKit
 import UniformTypeIdentifiers
 import SwiftUI
+import UserNotifications
 
 struct RecoverableDraft: Codable {
     var text: String
@@ -498,6 +499,9 @@ extension MacAppModel {
             }
             tasks[replyID] = nil; runs[replyID] = nil; runOwners[replyID] = nil
             if !runOwners.values.contains(bot.id) { runningBots.remove(bot.id) }
+            if !continueBrowser, routineResult != "cancelled" {
+                MacNotifier.replyFinished(botName: bot.name, text: app.workspace.entries.first(where: { $0.id == replyID })?.text ?? "", failed: routineResult == "failed")
+            }
             var continuing = false
             if continueBrowser, !Task.isCancelled, delivery == nil {
                 let providers = providersToRun(for: bot)
@@ -517,3 +521,20 @@ extension MacAppModel {
     }
 }
 
+
+/// Posts a macOS notification when a Bot finishes while OpenGrokBot is in the background.
+enum MacNotifier {
+    @MainActor static func replyFinished(botName: String, text: String, failed: Bool) {
+        guard !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = failed ? "\(botName) couldn’t finish" : "\(botName) replied"
+        content.body = String(text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).prefix(160))
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+            try? await center.add(request)
+        }
+    }
+}
