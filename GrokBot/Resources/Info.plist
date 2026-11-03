@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>OpenGrokBot uses the microphone for hands-free voice conversations with your Bots.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>OpenGrokBot uses speech recognition to turn what you say into messages for your Bots.</string>
 	<key>CFBundleDisplayName</key>
 	<string>OpenGrokBot</string>
 	<key>CFBundleExecutable</key>

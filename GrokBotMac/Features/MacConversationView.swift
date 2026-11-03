@@ -10,8 +10,17 @@ struct MacConversationView: View {
     @FocusState private var composing: Bool
     @State private var followLatest = true
     @State private var showActions = false
+    @State private var voiceOn = false
+    @StateObject private var voice = VoiceConversation()
     @State private var pasteMonitor: Any?
     @State private var scrollTask: Task<Void,Never>?
+
+    private var avatarColor: String { bot.appearance?.color ?? bot.color }
+    private var tint: Color { bot.appearance == nil && bot.color == "white" ? .primary : AvatarArtwork.color(avatarColor) }
+    private var ink: Color {
+        if bot.appearance == nil && bot.color == "white" { return MacTheme.canvas }
+        return ["white", "amber", "orange", "green", "teal", "gray"].contains(avatarColor) ? .black : .white
+    }
 
     private var draft: Binding<String> {
         Binding(get: { desktop.drafts[bot.id] ?? "" }, set: { desktop.drafts[bot.id] = $0 })
@@ -59,6 +68,9 @@ struct MacConversationView: View {
             .padding(.top, 12)
         }
         .background(MacTheme.canvas)
+        .overlay { if voiceOn { VoiceModeView(conversation: voice, botName: bot.name, tint: tint, ink: ink) { stopVoice() }.transition(.opacity) } }
+        .onChange(of: bot.id) { _, _ in stopVoice() }
+        .onDisappear { stopVoice() }
         .dropDestination(for: URL.self) { urls, _ in
             guard urls.allSatisfy(\.isFileURL), bot.memberIDs == nil else { return false }
             desktop.importAttachments(urls, for: bot); return true
@@ -93,7 +105,7 @@ struct MacConversationView: View {
                                 }.buttonStyle(.plain).accessibilityLabel("Remove attachment")
                             }
                             .padding(.vertical, 6).padding(.leading, 10).padding(.trailing, 8)
-                            .background(MacTheme.raised, in: Capsule())
+                            .background(tint.opacity(0.2), in: Capsule())
                         }
                     }.padding(.horizontal, 4)
                 }.font(.caption)
@@ -101,9 +113,9 @@ struct MacConversationView: View {
             HStack(alignment: .bottom, spacing: 11) {
                 Button { showActions.toggle() } label: {
                     Image(systemName: "plus").font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(MacTheme.secondary)
+                        .foregroundStyle(ink)
                         .frame(width: 38, height: 38)
-                        .background(Color.primary.opacity(0.07), in: Circle())
+                        .background(tint, in: Circle())
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain).help("Attach or export").accessibilityLabel("Attach or export")
@@ -125,15 +137,18 @@ struct MacConversationView: View {
                     .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showBotInspector = false } }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
                 if desktop.runningBots.contains(bot.id) {
-                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").frame(width: 38, height: 38) }.buttonStyle(.plain).help("Stop response")
+                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").foregroundStyle(ink).frame(width: 38, height: 38).background(tint, in: Circle()) }.buttonStyle(.plain).help("Stop response")
                 } else if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(desktop.attachments[bot.id] ?? []).isEmpty {
                     Button { sendMessage() } label: {
-                        Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(.black)
-                            .frame(width: 38, height: 38).background(.white, in: Circle())
+                        Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(ink)
+                            .frame(width: 38, height: 38).background(tint, in: Circle())
                     }.buttonStyle(.plain).disabled(bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty)
                         .help("Send message").accessibilityLabel("Send message")
                 } else {
-                    Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(MacTheme.secondary).frame(width: 38, height: 38)
+                    Button { startVoice() } label: {
+                        Image(systemName: "waveform").font(.system(size: 18, weight: .semibold)).foregroundStyle(ink)
+                            .frame(width: 38, height: 38).background(tint, in: Circle())
+                    }.buttonStyle(.plain).help("Start voice mode").accessibilityLabel("Start voice mode")
                 }
             }
             .padding(9).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
@@ -195,20 +210,44 @@ struct MacConversationView: View {
         }
     }
 
+    private func startVoice() {
+        withAnimation { voiceOn = true }
+        let current = bot, model = desktop, workspace = app
+        Task {
+            await voice.start(
+                send: { text in model.send(text, to: current, app: workspace) },
+                latestReply: {
+                    guard let entry = workspace.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
+                    let finished = entry.state != .streaming && !model.runningBots.contains(current.id)
+                    return VoiceReply(id: entry.id, text: entry.text, finished: finished)
+                })
+        }
+    }
+
+    private func stopVoice() {
+        guard voiceOn || voice.isRunning else { return }
+        voice.stop()
+        withAnimation { voiceOn = false }
+    }
+
     private var attachDisabled: Bool { bot.memberIDs != nil || desktop.importingAttachments.contains(bot.id) }
 
     private var actionsMenu: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ComposerActionRow(title: "Add files…", icon: "paperclip", disabled: attachDisabled) {
+            ComposerActionRow(title: "Voice mode", icon: "waveform", disabled: false, tint: tint) {
+                showActions = false
+                startVoice()
+            }
+            ComposerActionRow(title: "Add files…", icon: "paperclip", disabled: attachDisabled, tint: tint) {
                 showActions = false
                 DispatchQueue.main.async { desktop.chooseAttachments(for: bot) }
             }
-            ComposerActionRow(title: "Paste image", icon: "photo.on.clipboard", disabled: attachDisabled) {
+            ComposerActionRow(title: "Paste image", icon: "photo.on.clipboard", disabled: attachDisabled, tint: tint) {
                 showActions = false
                 desktop.pasteAttachments(from: .general, for: bot)
             }
             Divider().padding(.vertical, 4)
-            ComposerActionRow(title: "Export conversation…", icon: "square.and.arrow.up", disabled: false) {
+            ComposerActionRow(title: "Export conversation…", icon: "square.and.arrow.up", disabled: false, tint: tint) {
                 showActions = false
                 DispatchQueue.main.async { desktop.exportConversation(bot, app: app) }
             }
@@ -245,8 +284,7 @@ struct MacConversationView: View {
         let files = desktop.attachments[bot.id] ?? []
         let base = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty || !files.isEmpty else { return }
-        let paths = files.map { "Attachments/" + $0 }
-        let message = (base.isEmpty ? "Please review the attached files." : base) + (paths.isEmpty ? "" : "\n\nAttached files in this Bot’s working folder:\n" + paths.map { "- " + $0 }.joined(separator: "\n") + "\nUse your available tools to read these files; do not assume an image was viewed.")
+        let message = MacAppModel.attachmentMessage(base: base, names: files)
         if desktop.send(message, to: bot, app: app) {
             desktop.outgoingDrafts[bot.id] = RecoverableDraft(text: draft.wrappedValue, files: files)
             draft.wrappedValue = ""; desktop.attachments[bot.id] = []; desktop.flushDrafts(); composing = true
@@ -450,6 +488,7 @@ private struct ComposerActionRow: View {
     let title: String
     let icon: String
     let disabled: Bool
+    var tint: Color = .primary
     let action: () -> Void
     @State private var hovering = false
 
@@ -461,7 +500,7 @@ private struct ComposerActionRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(hovering && !disabled ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .background(hovering && !disabled ? tint.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.4 : 1)

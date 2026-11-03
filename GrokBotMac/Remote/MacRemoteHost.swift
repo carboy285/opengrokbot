@@ -144,7 +144,7 @@ final class MacRemoteHost: ObservableObject {
                             let response: CloudResponse
                             if let cached = self.replies[cacheKey] { response = cached }
                             else {
-                                if let request = try? CloudCoding.decoder().decode(CloudRequest.self,from:data), request.target.count <= 2048, request.body.count <= 131072 {
+                                if let request = try? CloudCoding.decoder().decode(CloudRequest.self,from:data), request.target.count <= 2048, request.body.count <= 3_500_000 {
                                     response = await self.respond(request,peer:peer)
                                 } else {
                                     let error = RemoteHostResponse.error(400, "The remote request format is unsupported. Update both devices to 0.7.2.")
@@ -262,7 +262,13 @@ final class MacRemoteHost: ObservableObject {
             case "update_avatar":
                 guard let bot, app.setAppearance(command.appearance, for: bot) else { return .error(400, "Choose a valid Bot avatar with an image under 24 KB.") }
             case "send":
-                guard let bot, let text = command.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 100000, desktop.send(text, to: bot, app: app, requestID: command.requestID) else { return .error(409, "The Bot is busy or needs provider setup. Check the desktop workspace.") }
+                guard let bot, let text = command.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 100000 else { return .error(409, "The Bot is busy or needs provider setup. Check the desktop workspace.") }
+                var message = text
+                if let images = command.attachments, !images.isEmpty {
+                    guard let names = desktop.saveRemoteAttachments(images, for: bot) else { return .error(400, "The images couldn’t be accepted. Send up to 3 JPEG or PNG images under 2.4 MB in total.") }
+                    message = MacAppModel.attachmentMessage(base: text, names: names)
+                }
+                guard desktop.send(message, to: bot, app: app, requestID: command.requestID) else { return .error(409, "The Bot is busy or needs provider setup. Check the desktop workspace.") }
             case "stop": guard let bot else { return .error(404,"Bot not found") }; desktop.stop(botID: bot.id)
             case "retry": guard let bot, !desktop.runningBots.contains(bot.id) else { return .error(409,"Bot is busy") }; desktop.retry(bot: bot, app: app)
             case "create_bot":

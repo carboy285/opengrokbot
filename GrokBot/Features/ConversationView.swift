@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -11,12 +12,19 @@ struct ConversationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sending = false
     @State private var info = false
+    @State private var showPhotos = false
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var voiceOn = false
+    @State private var attachNotice: String?
+    @StateObject private var voice = VoiceConversation()
     @State private var nearBottom = true
     @State private var userScrolling = false
     @State private var scrollTask: Task<Void,Never>?
     @FocusState private var composing: Bool
     private var draft: Binding<String> { Binding(get: { remote.drafts[bot.id] ?? "" }, set: { remote.drafts[bot.id] = $0 }) }
-    private var canSend: Bool { remote.online && !sending && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var images: [RemoteAttachment] { remote.draftImages[bot.id] ?? [] }
+    private var canSend: Bool { remote.online && !sending && (!draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty) }
+    private var hasContent: Bool { !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty }
     private var avatarColor: String { bot.appearance?.color ?? bot.color }
     private var composerTint: Color {
         bot.appearance == nil && bot.color == "white" ? .primary : AvatarArtwork.color(avatarColor)
@@ -68,6 +76,17 @@ struct ConversationView: View {
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .toolbar(.hidden, for: .navigationBar)
+        .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: RemoteAttachment.maxCount, matching: .images)
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                for item in items { if let data = try? await item.loadTransferable(type: Data.self) { addImage(ImageAttachments.make(from: data)) } }
+                photoItems = []
+            }
+        }
+        .fullScreenCover(isPresented: $voiceOn, onDismiss: { voice.stop() }) {
+            VoiceModeView(conversation: voice, botName: bot.name, tint: composerTint, ink: composerInk) { voice.stop(); voiceOn = false }
+        }
         .simultaneousGesture(DragGesture(minimumDistance: 24, coordinateSpace: .global).onEnded { value in
             if value.startLocation.x < 28, value.translation.width > 80, abs(value.translation.height) < 70 { dismiss() }
         })
@@ -126,6 +145,15 @@ struct ConversationView: View {
                 } label: { Label("Retry response", systemImage: "arrow.clockwise") }
                     .font(.footnote).disabled(!remote.online)
             }
+            if !images.isEmpty {
+                ImageChips(images: images, tint: composerTint) { index in
+                    var list = images; if list.indices.contains(index) { list.remove(at: index) }
+                    remote.draftImages[bot.id] = list
+                }
+            }
+            if let attachNotice {
+                Text(attachNotice).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 12)
+            }
             HStack(alignment: .bottom, spacing: 10) {
                 Menu {
                     Button("Paste text", systemImage: "doc.on.clipboard") {
@@ -133,6 +161,12 @@ struct ConversationView: View {
                             draft.wrappedValue += (draft.wrappedValue.isEmpty ? "" : "\n") + text
                         }
                     }
+                    Button("Photo library", systemImage: "photo.on.rectangle") { showPhotos = true }
+                    Button("Paste image", systemImage: "photo.on.clipboard") {
+                        guard UIPasteboard.general.hasImages, let image = UIPasteboard.general.image else { attachNotice = "There’s no image on the clipboard."; return }
+                        addImage(ImageAttachments.make(from: image))
+                    }.disabled(!UIPasteboard.general.hasImages)
+                    Button("Voice mode", systemImage: "waveform") { startVoice() }
                     Button("Bot details", systemImage: "info.circle") { info = true }
                 } label: {
                     Image(systemName: "plus").font(.system(size: 19, weight: .medium))
@@ -153,6 +187,14 @@ struct ConversationView: View {
                             .background(composerTint, in: Circle())
                             .frame(width: 48, height: 48).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!remote.online).accessibilityLabel("Stop response")
+                } else if !hasContent && !sending {
+                    Button { startVoice() } label: {
+                        Image(systemName: "waveform").font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(composerInk).frame(width: 38, height: 38)
+                            .background(composerTint, in: Circle())
+                            .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 1).allowsHitTesting(false))
+                            .frame(width: 48, height: 48).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(!remote.online).accessibilityLabel("Start voice mode")
                 } else {
                     Button { send() } label: {
                         ZStack {
@@ -189,11 +231,41 @@ struct ConversationView: View {
         }
     }
 
-    private func send() {
-        let text = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSend else { return }; sending = true; nearBottom = true
+    private func addImage(_ attachment: RemoteAttachment?) {
+        guard let attachment else { attachNotice = "That image couldn’t be prepared."; return }
+        var list = images
+        guard list.count < RemoteAttachment.maxCount, (list + [attachment]).reduce(0, { $0 + $1.data.count }) <= RemoteAttachment.maxTotalBytes else {
+            attachNotice = "Attach up to \(RemoteAttachment.maxCount) images per message."; return
+        }
+        list.append(attachment); remote.draftImages[bot.id] = list; attachNotice = nil
+    }
+
+    private func startVoice() {
+        voiceOn = true
+        let current = bot
         Task {
-            if await remote.send(text, bot: bot), draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines) == text { draft.wrappedValue = "" }
+            await voice.start(
+                send: { text in await remote.send(text, bot: current) },
+                latestReply: {
+                    guard let entry = model.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
+                    let finished = entry.state != .streaming && !remote.running.contains(current.id)
+                    return VoiceReply(id: entry.id, text: entry.text, finished: finished)
+                })
+        }
+    }
+
+    private func send() {
+        let typed = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentImages = images
+        let text = typed.isEmpty && !sentImages.isEmpty ? "Please look at the attached image\(sentImages.count == 1 ? "" : "s")." : typed
+        guard canSend else { return }; sending = true; nearBottom = true; attachNotice = nil
+        Task {
+            if await remote.send(text, bot: bot, images: sentImages) {
+                if draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines) == typed { draft.wrappedValue = "" }
+                if remote.draftImages[bot.id] == sentImages { remote.draftImages[bot.id] = [] }
+            } else if !sentImages.isEmpty, remote.error == nil {
+                attachNotice = "The image couldn’t be sent. Update the Mac or Windows app to this version and try again."
+            }
             sending = false
         }
     }

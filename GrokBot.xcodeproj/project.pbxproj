@@ -5,6 +5,58 @@
 	};
 	"objectVersion" = "56";
 	"objects" = {
+		"2490E0DD6047FE812B25F3F0" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBot/Voice/VoiceEngine.swift";
+			"sourceTree" = "<group>";
+		};
+		"C31B89C48ED0E0B84029B697" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2490E0DD6047FE812B25F3F0";
+		};
+		"0F0A34096CCACCAB3F36312C" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2490E0DD6047FE812B25F3F0";
+		};
+		"97843474673A853E654CF901" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBot/Voice/VoiceCloud.swift";
+			"sourceTree" = "<group>";
+		};
+		"83994C116F87BD94E0B6D670" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "97843474673A853E654CF901";
+		};
+		"D4C471F09B0C331B89E3720D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "97843474673A853E654CF901";
+		};
+		"51B8F8607ECDF674B5144F5E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBot/Voice/VoiceUI.swift";
+			"sourceTree" = "<group>";
+		};
+		"92DD43221F4E0B0214A04040" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "51B8F8607ECDF674B5144F5E";
+		};
+		"85A3FC6D2C5CB1432ED5AE62" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "51B8F8607ECDF674B5144F5E";
+		};
+		"55406ED2E9E1AAA725B03450" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBot/Features/ImageAttachments.swift";
+			"sourceTree" = "<group>";
+		};
+		"BDC2493B2047EB9B627024E5" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "55406ED2E9E1AAA725B03450";
+		};
 		"B997B958F0D7E9E66672246A" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -174,6 +226,10 @@
 			"buildActionMask" = "2147483647";
 			"files" = (
 				"8027A56A5C512265EE905A4F",
+				"BDC2493B2047EB9B627024E5",
+				"92DD43221F4E0B0214A04040",
+				"83994C116F87BD94E0B6D670",
+				"C31B89C48ED0E0B84029B697",
 				"C0500DC260408AD2A8EB87FA",
 				"EA2315A29EF9FAD629B17CF9",
 				"205C54FC098BADEDCD1C1AE2",
@@ -451,6 +507,10 @@
 			"isa" = "PBXGroup";
 			"children" = (
 				"A40BA7C4BC48268BE9A399F0",
+				"55406ED2E9E1AAA725B03450",
+				"51B8F8607ECDF674B5144F5E",
+				"97843474673A853E654CF901",
+				"2490E0DD6047FE812B25F3F0",
 				"376640D10D947E7BFFE26506",
 				"5EEE1638A6C655C6D2DDD9EB",
 				"0542435EFC69E1847C4C5535",
@@ -925,6 +985,9 @@
 				"9375AF7961EB4B5B9FF800D0",
 				"F46FB84C7BA32BCF20016587",
 				"F1C5F5DB241E31A5DC9B1DA8",
+				"85A3FC6D2C5CB1432ED5AE62",
+				"D4C471F09B0C331B89E3720D",
+				"0F0A34096CCACCAB3F36312C",
 				"BF06AE98855DD3672035AF5E",
 				"1859F51FFB6A30A3019EB6F5",
 				"0F467172FD9C3066055E70BB",

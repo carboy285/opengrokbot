@@ -250,6 +250,32 @@ final class MacAppModel: ObservableObject {
             if result.failed { sendFeedback[bot.id] = "Some files could not be imported. Choose regular files under 20 MB and try again." }
         }
     }
+    /// The text sent to the CLI so it can find files stored in the Bot's Attachments folder.
+    static func attachmentMessage(base: String, names: [String]) -> String {
+        guard !names.isEmpty else { return base }
+        let lead = base.isEmpty ? "Please review the attached files." : base
+        return lead + "\n\nAttached files in this Bot’s working folder:\n" + names.map { "- Attachments/" + $0 }.joined(separator: "\n") + "\nUse your available tools to read these files; do not assume an image was viewed."
+    }
+    /// Stores images sent from the iPhone. Returns stored file names, or nil when any image is invalid.
+    func saveRemoteAttachments(_ items: [RemoteAttachment], for bot: Bot) -> [String]? {
+        guard bot.memberIDs == nil, items.count <= RemoteAttachment.maxCount,
+              items.reduce(0, { $0 + $1.data.count }) <= RemoteAttachment.maxTotalBytes + 200_000 else { return nil }
+        let extensions = ["image/jpeg": "jpg", "image/png": "png"]
+        let directory = workingDirectory(for: bot).appendingPathComponent("Attachments", isDirectory: true)
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) } catch { return nil }
+        var names: [String] = []
+        for item in items {
+            guard let ext = extensions[item.mime], !item.data.isEmpty, NSImage(data: item.data) != nil else { return nil }
+            let name = UUID().uuidString + "-Photo." + ext
+            let target = directory.appendingPathComponent(name)
+            do {
+                try item.data.write(to: target, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            } catch { return nil }
+            names.append(name)
+        }
+        return names
+    }
     /// Attaches files or an image from a pasteboard. Returns true when the clipboard held something attachable.
     @discardableResult
     func pasteAttachments(from pasteboard: NSPasteboard, for bot: Bot) -> Bool {

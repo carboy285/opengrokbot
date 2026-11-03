@@ -22,6 +22,7 @@ final class RemoteController: ObservableObject {
     @Published var showConnection = false
     @Published var busy = false
     @Published var drafts: [UUID:String] = [:]
+    @Published var draftImages: [UUID:[RemoteAttachment]] = [:]
     @Published var error: String?
     private let client: CloudRelayClient
     private let secrets: KeychainSecretStore
@@ -62,7 +63,7 @@ final class RemoteController: ObservableObject {
     private func clearState() {
         epoch = UUID(); initialLoadFailed = false; polling?.cancel(); polling = nil; connection = nil; state = nil
         online = false; hasSnapshot = false; needsApproval = false; running = []; providers = []; defaultProvider = nil; pinnedBotIDs = nil
-        drafts = [:]; pendingSends = [:]; serverPins = [:]; pendingPins = [:]; legacyPins = []; pinSyncNotice = nil
+        drafts = [:]; draftImages = [:]; pendingSends = [:]; serverPins = [:]; pendingPins = [:]; legacyPins = []; pinSyncNotice = nil
         model?.applyRemoteSnapshot(Workspace()); model?.leavePreview()
     }
     func setActive(_ active: Bool) {
@@ -237,10 +238,10 @@ final class RemoteController: ObservableObject {
             return true
         } catch { if current == epoch, !Task.isCancelled { self.error = error.localizedDescription }; return false }
     }
-    func send(_ text: String, bot: Bot) async -> Bool {
+    func send(_ text: String, bot: Bot, images: [RemoteAttachment] = []) async -> Bool {
         let id = pendingSends[bot.id].flatMap { $0.0 == text ? $0.1:nil } ?? UUID()
         pendingSends[bot.id] = (text,id)
-        let accepted = await command(RemoteCommand(requestID:id,action:"send",botID:bot.id,text:text))
+        let accepted = await command(RemoteCommand(requestID:id,action:"send",botID:bot.id,text:text,attachments:images.isEmpty ? nil : images))
         if accepted, pendingSends[bot.id]?.1 == id { pendingSends[bot.id] = nil }; return accepted
     }
     func models(_ provider: CLIProvider) async -> [AvailableCLIModel] {

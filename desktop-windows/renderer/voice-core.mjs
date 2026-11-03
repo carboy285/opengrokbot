@@ -1,0 +1,88 @@
+// Pure helpers for voice mode (no DOM), so they can be unit-tested in Node.
+
+export function speakable(raw) {
+  return String(raw ?? '')
+    .replace(/```[\s\S]*?(```|$)/g, ' (code omitted) ')
+    .replace(/https?:\/\/\S+/g, ' link ')
+    .replace(/[`*_#>|~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 4000);
+}
+
+/** 16-bit mono PCM WAV at 16 kHz, accepted by every transcription provider. */
+export function encodeWav(samples, sampleRate) {
+  const target = 16000, ratio = Math.max(1, sampleRate / target);
+  const count = Math.floor(samples.length / ratio);
+  const bytes = new Uint8Array(44 + count * 2), view = new DataView(bytes.buffer);
+  const text = (offset, value) => { for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i)); };
+  text(0, 'RIFF'); view.setUint32(4, 36 + count * 2, true); text(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, target, true); view.setUint32(28, target * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  text(36, 'data'); view.setUint32(40, count * 2, true);
+  for (let i = 0; i < count; i++) {
+    const start = Math.floor(i * ratio), end = Math.min(samples.length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0; for (let j = start; j < end; j++) sum += samples[j];
+    const value = Math.max(-1, Math.min(1, sum / (end - start)));
+    view.setInt16(44 + i * 2, Math.round(value * 32767), true);
+  }
+  return bytes;
+}
+
+export function rms(samples) {
+  if (!samples.length) return 0;
+  let sum = 0; for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / samples.length);
+}
+
+/** Voice-activity detector. Time is measured in samples, so it behaves the same at any sample rate. */
+export class Vad {
+  constructor({ sampleRate, speechThreshold = 0.012, bargeThreshold = 0.08, silenceMs = 1000, bargeMs = 400, maxSeconds = 60 }) {
+    Object.assign(this, { sampleRate, speechThreshold, bargeThreshold, silenceMs, bargeMs, maxSeconds });
+    this.reset();
+  }
+  reset() { this.inSpeech = false; this.preRoll = []; this.preRollLength = 0; this.utterance = []; this.utteranceLength = 0; this.silent = 0; this.barge = 0; this.voiced = 0; }
+  get speaking() { return this.inSpeech; }
+  roll(chunk) {
+    this.preRoll.push(chunk); this.preRollLength += chunk.length;
+    const max = Math.floor(this.sampleRate * 0.4);
+    while (this.preRollLength > max && this.preRoll.length > 1) this.preRollLength -= this.preRoll.shift().length;
+  }
+  begin(chunk) {
+    this.inSpeech = true; this.utterance = [...this.preRoll, chunk];
+    this.utteranceLength = this.utterance.reduce((n, c) => n + c.length, 0);
+    this.preRoll = []; this.preRollLength = 0; this.silent = 0; this.barge = 0; this.voiced = chunk.length;
+  }
+  finish() {
+    const out = new Float32Array(this.utteranceLength); let offset = 0;
+    for (const chunk of this.utterance) { out.set(chunk, offset); offset += chunk.length; }
+    const long = this.voiced / this.sampleRate >= 0.3;
+    this.reset();
+    return long ? { type: 'utterance', samples: out } : null;
+  }
+  /** mode is 'listening' or 'speaking' (the Bot is talking). Returns null, {type:'barge'} or {type:'utterance',samples}. */
+  push(chunk, mode) {
+    const level = rms(chunk);
+    if (mode === 'speaking') {
+      if (level > this.bargeThreshold) {
+        this.barge += chunk.length;
+        if ((this.barge / this.sampleRate) * 1000 >= this.bargeMs) { this.roll(chunk); this.begin(new Float32Array(0)); this.voiced = this.barge || chunk.length * 4; return { type: 'barge' }; }
+        this.roll(chunk);
+      } else { this.barge = 0; this.roll(chunk); }
+      return null;
+    }
+    if (level > this.speechThreshold) {
+      if (!this.inSpeech) this.begin(chunk); else { this.utterance.push(chunk); this.utteranceLength += chunk.length; this.voiced += chunk.length; }
+      this.silent = 0;
+      if (this.utteranceLength > this.sampleRate * this.maxSeconds) return this.finish();
+      return null;
+    }
+    if (this.inSpeech) {
+      this.utterance.push(chunk); this.utteranceLength += chunk.length; this.silent += chunk.length;
+      if ((this.silent / this.sampleRate) * 1000 >= this.silenceMs) return this.finish();
+      return null;
+    }
+    this.roll(chunk);
+    return null;
+  }
+}

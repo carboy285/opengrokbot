@@ -10,6 +10,8 @@ if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userD
 const cli=require('./local-cli.cjs');
 const composio=require('./composio.cjs');
 const teamwork=require('./teamwork.cjs');
+const attachments=require('./attachments.cjs');
+const voice=require('./voice.cjs');
 const { CloudHost } = require('./cloud-host.cjs');
 const updates = require('./updates.cjs');
 const stoppedBots=new Set();
@@ -198,7 +200,7 @@ async function remoteCommand(command){
  if(command.action==='touch_bot'){if(!bot)throw new Error('Unknown Bot');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();return;}
  if(command.action==='open_vm'){if(!bot)throw new Error('Unknown Bot');await localVMs.open(bot.id);return;}
  if(command.action==='open_browser'){if(!bot)throw new Error('Unknown Bot');localBrowsers.open(bot.id,command.text);return;}
- if(command.action==='send'){if(!bot||typeof command.text!=='string'||!command.text.trim()||command.text.length>100000)throw new Error('Invalid message');await startChat(bot.id,command.text,undefined,command.requestID);return;}
+ if(command.action==='send'){if(!bot||typeof command.text!=='string'||!command.text.trim()||command.text.length>100000)throw new Error('Invalid message');let text=command.text;if(Array.isArray(command.attachments)&&command.attachments.length){let names;try{names=await attachments.saveRemoteImages(botDirectory(bot.id),command.attachments);}catch{throw new PublicError('The images could not be accepted. Send up to 3 JPEG or PNG images.');}text=attachments.attachmentMessage(text,names);}await startChat(bot.id,text,undefined,command.requestID);return;}
  if(command.action==='stop'){if(bot)stoppedBots.add(bot.id);if(!bot)throw new Error('Unknown Bot');for(const run of active.get(bot.id)||[])run.cancel();return;}
  if(command.action==='retry'){if(!bot)throw new Error('Unknown Bot');const message=state.teamMessages?.findLast(x=>x.to===bot.id&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(bot.id);return;}
  if(command.action==='create_bot'){
@@ -330,6 +332,40 @@ function configureIPC() {
     const values = await loadJSON('vault.json', []);
     return values.map(({ id, title }) => ({ id, title }));
   });
+  const voiceDefaults = { transcriber: 'groq', speaker: 'system', voiceID: '21m00Tcm4TlvDq8ikWAM', talkOver: true };
+  const voiceKey = async provider => { const keys = await loadJSON('voice-keys.encrypted.json', {}); if (!keys[provider]) return ''; requireVault(); return safeStorage.decryptString(Buffer.from(keys[provider], 'base64')); };
+  const voiceSettings = async () => {
+    const saved = await loadJSON('voice-settings.json', {}), keys = await loadJSON('voice-keys.encrypted.json', {});
+    return { ...voiceDefaults, ...saved, keys: { groq: !!keys.groq, openAI: !!keys.openAI, elevenLabs: !!keys.elevenLabs } };
+  };
+  handle('voice:settings', voiceSettings);
+  handle('voice:save', async patch => {
+    if (!patch || typeof patch !== 'object') throw new Error('Invalid settings');
+    const current = await loadJSON('voice-settings.json', {}), next = { ...current };
+    if (patch.transcriber !== undefined) { if (!voice.PROVIDERS.has(patch.transcriber)) throw new Error('Invalid provider'); next.transcriber = patch.transcriber; }
+    if (patch.speaker !== undefined) { if (!['system', 'openAI', 'elevenLabs'].includes(patch.speaker)) throw new Error('Invalid provider'); next.speaker = patch.speaker; }
+    if (patch.voiceID !== undefined) { if (typeof patch.voiceID !== 'string' || !/^[A-Za-z0-9]{8,40}$/.test(patch.voiceID)) throw new PublicError('That ElevenLabs voice ID looks invalid.'); next.voiceID = patch.voiceID; }
+    if (patch.talkOver !== undefined) next.talkOver = patch.talkOver === true;
+    await atomicJSON('voice-settings.json', next);
+  });
+  handle('voice:key', async (provider, value) => {
+    if (!voice.PROVIDERS.has(provider) || typeof value !== 'string' || value.length > 500) throw new Error('Invalid key');
+    requireVault();
+    const keys = await loadJSON('voice-keys.encrypted.json', {});
+    if (value) keys[provider] = safeStorage.encryptString(value).toString('base64'); else delete keys[provider];
+    await atomicJSON('voice-keys.encrypted.json', keys);
+  });
+  const voiceFailure = error => { throw error instanceof voice.VoiceError ? new PublicError(error.message) : new PublicError('The voice service could not be reached. Check your connection and key.'); };
+  handle('voice:transcribe', async wav => {
+    const settings = await voiceSettings();
+    if (typeof wav !== 'string' || wav.length > 13_500_000) throw new Error('Invalid audio');
+    try { return await voice.transcribe({ provider: settings.transcriber, key: await voiceKey(settings.transcriber), wav: Buffer.from(wav, 'base64') }); } catch (error) { voiceFailure(error); }
+  });
+  handle('voice:speak', async text => {
+    const settings = await voiceSettings();
+    if (settings.speaker === 'system') throw new PublicError('Using the Windows voice.');
+    try { return (await voice.synthesize({ provider: settings.speaker, key: await voiceKey(settings.speaker), text, voiceID: settings.voiceID })).toString('base64'); } catch (error) { voiceFailure(error); }
+  });
   handle('vault:save', async (title, value) => {
     requireVault();
     if (typeof title !== 'string' || !title.trim() || title.length > 200 || typeof value !== 'string' || !value || value.length > 100000) throw new Error('Invalid secret');
@@ -356,7 +392,8 @@ app.whenReady().then(() => {
   window.on('close',event=>{if(cloud.active&&!quitting){event.preventDefault();window.hide();}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
-  window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(contents === window?.webContents && permission === 'media' && Array.isArray(details?.mediaTypes) && details.mediaTypes.length > 0 && details.mediaTypes.every(type => type === 'audio')));
+  window.webContents.session.setPermissionCheckHandler((contents, permission) => contents === window?.webContents && permission === 'media');
   window.loadFile(rendererFile);
   (async()=>{try{await ensureState();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
 });
