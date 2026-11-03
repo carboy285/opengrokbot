@@ -9,7 +9,18 @@ struct MacConversationView: View {
     @AppStorage("spellChecking") private var spellChecking = true
     @FocusState private var composing: Bool
     @State private var followLatest = true
+    @State private var showActions = false
+    @State private var voiceOn = false
+    @StateObject private var voice = VoiceConversation()
+    @State private var pasteMonitor: Any?
     @State private var scrollTask: Task<Void,Never>?
+
+    private var avatarColor: String { bot.appearance?.color ?? bot.color }
+    private var tint: Color { bot.appearance == nil && bot.color == "white" ? .primary : AvatarArtwork.color(avatarColor) }
+    private var ink: Color {
+        if bot.appearance == nil && bot.color == "white" { return MacTheme.canvas }
+        return ["white", "amber", "orange", "green", "teal", "gray"].contains(avatarColor) ? .black : .white
+    }
 
     private var draft: Binding<String> {
         Binding(get: { desktop.drafts[bot.id] ?? "" }, set: { desktop.drafts[bot.id] = $0 })
@@ -57,6 +68,9 @@ struct MacConversationView: View {
             .padding(.top, 12)
         }
         .background(MacTheme.canvas)
+        .overlay { if voiceOn { VoiceModeView(conversation: voice, botName: bot.name, tint: tint, ink: ink) { stopVoice() }.transition(.opacity) } }
+        .onChange(of: bot.id) { _, _ in stopVoice() }
+        .onDisappear { stopVoice() }
         .dropDestination(for: URL.self) { urls, _ in
             guard urls.allSatisfy(\.isFileURL), bot.memberIDs == nil else { return false }
             desktop.importAttachments(urls, for: bot); return true
@@ -79,31 +93,37 @@ struct MacConversationView: View {
             }
             if desktop.importingAttachments.contains(bot.id) { ProgressView("Copying files…").controlSize(.small) }
             if let files = desktop.attachments[bot.id], !files.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
                         ForEach(files, id: \.self) { file in
-                            HStack {
+                            HStack(spacing: 6) {
+                                Image(systemName: file.lowercased().hasSuffix(".png") || file.lowercased().hasSuffix(".jpg") || file.lowercased().hasSuffix(".jpeg") ? "photo" : "doc")
+                                    .foregroundStyle(MacTheme.secondary)
                                 Text(String(file.dropFirst(min(file.count, 37)))).lineLimit(1)
-                                Button { desktop.attachments[bot.id]?.removeAll { $0 == file } } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Remove attachment")
-                            }.padding(8).background(MacTheme.panel, in: Capsule())
+                                Button { desktop.attachments[bot.id]?.removeAll { $0 == file } } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(MacTheme.secondary)
+                                }.buttonStyle(.plain).accessibilityLabel("Remove attachment")
+                            }
+                            .padding(.vertical, 6).padding(.leading, 10).padding(.trailing, 8)
+                            .background(tint.opacity(0.2), in: Capsule())
                         }
-                    }
+                    }.padding(.horizontal, 4)
                 }.font(.caption)
-                Text("Files are copied to this Bot’s folder. The CLI must use its own tools to read them; image support varies by provider.").font(.caption).foregroundStyle(.secondary)
             }
             HStack(alignment: .bottom, spacing: 11) {
-                Menu {
-                    Button("Export conversation…") { desktop.exportConversation(bot, app: app) }
-                    Divider()
-                    Button("Attach files…") { desktop.chooseAttachments(for: bot) }.disabled(bot.memberIDs != nil || desktop.importingAttachments.contains(bot.id))
-                } label: {
-                    Image(systemName: "plus").font(.system(size: 25, weight: .light)).frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.06), in: Circle())
-                }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Conversation actions")
+                Button { showActions.toggle() } label: {
+                    Image(systemName: "plus").font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(ink)
+                        .frame(width: 38, height: 38)
+                        .background(tint, in: Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain).help("Attach or export").accessibilityLabel("Attach or export")
+                .popover(isPresented: $showActions) { actionsMenu }
                 TextField("Message \(bot.name)", text: draft, axis: .vertical)
                     .textFieldStyle(.plain).font(.system(size: 18)).lineLimit(1...7)
                     .disableAutocorrection(!spellChecking).focused($composing)
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 6).frame(minHeight: 38)
                     .onKeyPress(keys: [.return], phases: .down) { press in
                         if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.hasMarkedText() { return .ignored }
                         if press.modifiers.contains(.shift) {
@@ -117,18 +137,24 @@ struct MacConversationView: View {
                     .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showBotInspector = false } }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
                 if desktop.runningBots.contains(bot.id) {
-                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").frame(width: 38, height: 38) }.buttonStyle(.plain).help("Stop response")
+                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").foregroundStyle(ink).frame(width: 38, height: 38).background(tint, in: Circle()) }.buttonStyle(.plain).help("Stop response")
                 } else if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(desktop.attachments[bot.id] ?? []).isEmpty {
                     Button { sendMessage() } label: {
-                        Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(.black)
-                            .frame(width: 38, height: 38).background(.white, in: Circle())
+                        Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(ink)
+                            .frame(width: 38, height: 38).background(tint, in: Circle())
                     }.buttonStyle(.plain).disabled(bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty)
                         .help("Send message").accessibilityLabel("Send message")
                 } else {
-                    Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(MacTheme.secondary).frame(width: 38, height: 38)
+                    Button { startVoice() } label: {
+                        Image(systemName: "waveform").font(.system(size: 18, weight: .semibold)).foregroundStyle(ink)
+                            .frame(width: 38, height: 38).background(tint, in: Circle())
+                    }.buttonStyle(.plain).help("Start voice mode").accessibilityLabel("Start voice mode")
                 }
             }
             .padding(9).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
+            .onAppear { installPasteMonitor() }
+            .onChange(of: bot.id) { _, _ in installPasteMonitor() }
+            .onDisappear { removePasteMonitor() }
             HStack(spacing: 9) {
                 if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
                 if bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty {
@@ -184,14 +210,81 @@ struct MacConversationView: View {
         }
     }
 
+    private func startVoice() {
+        withAnimation { voiceOn = true }
+        let current = bot, model = desktop, workspace = app
+        Task {
+            await voice.start(
+                send: { text in model.send(text, to: current, app: workspace) },
+                latestReply: {
+                    guard let entry = workspace.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
+                    let finished = entry.state != .streaming && !model.runningBots.contains(current.id)
+                    return VoiceReply(id: entry.id, text: entry.text, finished: finished)
+                })
+        }
+    }
+
+    private func stopVoice() {
+        guard voiceOn || voice.isRunning else { return }
+        voice.stop()
+        withAnimation { voiceOn = false }
+    }
+
+    private var attachDisabled: Bool { bot.memberIDs != nil || desktop.importingAttachments.contains(bot.id) }
+
+    private var actionsMenu: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ComposerActionRow(title: "Voice mode", icon: "waveform", disabled: false, tint: tint) {
+                showActions = false
+                startVoice()
+            }
+            ComposerActionRow(title: "Add files…", icon: "paperclip", disabled: attachDisabled, tint: tint) {
+                showActions = false
+                DispatchQueue.main.async { desktop.chooseAttachments(for: bot) }
+            }
+            ComposerActionRow(title: "Paste image", icon: "photo.on.clipboard", disabled: attachDisabled, tint: tint) {
+                showActions = false
+                desktop.pasteAttachments(from: .general, for: bot)
+            }
+            Divider().padding(.vertical, 4)
+            ComposerActionRow(title: "Export conversation…", icon: "square.and.arrow.up", disabled: false, tint: tint) {
+                showActions = false
+                DispatchQueue.main.async { desktop.exportConversation(bot, app: app) }
+            }
+        }
+        .padding(8).frame(width: 236)
+    }
+
+    /// Lets ⌘V attach an image or file from the clipboard while the message box is focused.
+    private func installPasteMonitor() {
+        removePasteMonitor()
+        let target = bot, model = desktop
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "v",
+                  target.memberIDs == nil,
+                  let window = event.window, window.isKeyWindow,
+                  window.firstResponder is NSTextView else { return event }
+            let board = NSPasteboard.general
+            let hasFile = board.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+            let hasImage = board.availableType(from: [.png, .tiff]) != nil && board.string(forType: .string) == nil
+            guard hasFile || hasImage else { return event }
+            return model.pasteAttachments(from: board, for: target) ? nil : event
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let monitor = pasteMonitor { NSEvent.removeMonitor(monitor) }
+        pasteMonitor = nil
+    }
+
     private func sendMessage() {
         followLatest = true
         guard !desktop.importingAttachments.contains(bot.id) else { return }
         let files = desktop.attachments[bot.id] ?? []
         let base = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty || !files.isEmpty else { return }
-        let paths = files.map { "Attachments/" + $0 }
-        let message = (base.isEmpty ? "Please review the attached files." : base) + (paths.isEmpty ? "" : "\n\nAttached files in this Bot’s working folder:\n" + paths.map { "- " + $0 }.joined(separator: "\n") + "\nUse your available tools to read these files; do not assume an image was viewed.")
+        let message = MacAppModel.attachmentMessage(base: base, names: files)
         if desktop.send(message, to: bot, app: app) {
             desktop.outgoingDrafts[bot.id] = RecoverableDraft(text: draft.wrappedValue, files: files)
             draft.wrappedValue = ""; desktop.attachments[bot.id] = []; desktop.flushDrafts(); composing = true
@@ -388,5 +481,29 @@ struct ChatScrollMonitor: NSViewRepresentable {
             events = nil; scroll = nil
             lastDocumentSize = .zero; lastViewportSize = .zero
         }
+    }
+}
+
+private struct ComposerActionRow: View {
+    let title: String
+    let icon: String
+    let disabled: Bool
+    var tint: Color = .primary
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 14, weight: .medium)).frame(width: 20)
+                Text(title).font(.system(size: 14))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(hovering && !disabled ? tint.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.4 : 1)
+        .onHover { hovering = $0 }
     }
 }

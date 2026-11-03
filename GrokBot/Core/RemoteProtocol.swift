@@ -50,6 +50,15 @@ struct RemoteCommand: Codable, Sendable {
     var configuration: BotAIConfiguration?
     var taskID: UUID?
     var appearance: BotAppearance?
+    var attachments: [RemoteAttachment]?
+}
+/// An image sent with a message. Hosts store it in the Bot's Attachments folder.
+struct RemoteAttachment: Codable, Sendable, Equatable {
+    static let maxCount = 3
+    static let maxTotalBytes = 2_400_000
+    var name: String
+    var mime: String
+    var data: Data
 }
 struct RemoteFile: Codable, Sendable, Identifiable { var name: String; var id: String { name } }
 

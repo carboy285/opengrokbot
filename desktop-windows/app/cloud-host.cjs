@@ -123,8 +123,8 @@ class CloudHost {
       if (url.pathname === '/v1/files') return this.response(200, await this.files(url.searchParams.get('bot')));
     }
     if (request.method !== 'POST' || url.pathname !== '/v1/command') return this.response(404, { error: 'Unknown endpoint.' });
-    if (typeof request.body !== 'string' || request.body.length > 174764) throw new Error('Invalid command size.');
-    const bytes = Buffer.from(request.body, 'base64'); if (bytes.length > 131072) throw new Error('Command too large.');
+    if (typeof request.body !== 'string' || request.body.length > 4700000) throw new Error('Invalid command size.');
+    const bytes = Buffer.from(request.body, 'base64'); if (bytes.length > 3500000) throw new Error('Command too large.');
     const command = JSON.parse(bytes.toString('utf8')); if (!uuid(command.requestID)) throw new Error('Invalid command.');
     const key = lower(this.data.session.user.id) + '|' + lower(command.requestID);
     if (!this.data.receipts.includes(key)) { await this.execute(command); this.data.receipts = [...this.data.receipts.slice(-255), key]; await this.persist(); }

@@ -1,4 +1,5 @@
 import { preview } from './seed.js';
+import { createVoice } from './voice.js';
 
 const $ = selector => document.querySelector(selector);
 const node = (tag, className = '', text = '') => { const value = document.createElement(tag); value.className = className; value.textContent = text; return value; };
@@ -298,7 +299,7 @@ function unavailable(title, detail) { return append(node('div', 'unavailable'), 
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
   const layout = node('div', 'settings-layout'); const nav = node('nav', 'settings-nav'); const page = node('section', 'settings-page');
-  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['Vault','⚿'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
+  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['Vault','⚿'],['Voice','♫'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
   append(page, append(node('header','panel-head'), node('h1','',tab), button('×', () => dialog.close(), 'close-panel')));
   append(layout, nav, page); dialog.append(layout); if (!dialog.open) dialog.showModal();
   if (tab === 'General') {
@@ -315,6 +316,7 @@ function showSettings(tab = 'General') {
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
+  else if (tab === 'Voice') voice.renderSettings(page);
 }
 async function renderRemoteAccess(page){
  const body=node('section','composio-settings');page.append(body);let disposed=false;const draw=async()=>{
@@ -364,6 +366,13 @@ function showAvatarPicker(bot){
  append(content,upload,button('Generate a look',()=>{draft={shape:avatarShapes[Math.floor(Math.random()*avatarShapes.length)],color:Object.keys(avatarColors)[Math.floor(Math.random()*Object.keys(avatarColors).length)]};refresh();}),button('Reset',async()=>{await organize(bot,{appearance:null,color:bot.isMain?'white':'purple'});dialog.close();}),button('Save avatar',async()=>{await organize(bot,{appearance:draft,color:draft.color});dialog.close();},'pill primary'));
 }
 async function exportConversation(bot=currentBot()) { if(!bot)return; const text='OpenGrokBot — Local AI conversation\n\n'+entries(bot).map(x=>`${x.kind==='user'?'You':x.senderName||bot.name}: ${x.text}`).join('\n\n'); try { if(await result(bridge.export(text)))toast('Conversation exported.'); }catch(error){toast(error.message);} }
+const voice = createVoice({
+  get bridge() { return window.desktop || {}; }, result, toast, currentBot,
+  latestReply: bot => { const entry = entries(bot).findLast(x => x.kind === 'bot'); return entry ? { id: entry.id, text: entry.text, finished: entry.state !== 'streaming' && !running.has(bot.id) } : null; },
+  sendText: (bot, text) => submitMessage(bot, text),
+  openSettings: () => showSettings('Voice')
+});
+$('#voice-button').addEventListener('click', () => { if (!window.desktop) { toast('Voice mode is available in the installed app.'); return; } if (!setup.installed.length) { showConnection(); return; } voice.start(); });
 $('#composer').addEventListener('submit',event=>{event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||!text||running.has(bot.id))return;if(!window.desktop||!setup.installed.length){showConnection();return;}submitMessage(bot,text,pendingSends.get(bot.id)?.text===text?pendingSends.get(bot.id).id:undefined);});
 $('#draft').addEventListener('input',()=>{ drafts.set(selected,$('#draft').value);persistDrafts(); $('#draft').style.height='auto';$('#draft').style.height=Math.min(180,$('#draft').scrollHeight)+'px'; });
 $('#search-button').addEventListener('click',()=>{const slot=$('#search-slot');if(slot.firstChild){slot.replaceChildren();search='';render();return;}const field=node('input','search-input');field.placeholder='Search Bots';field.setAttribute('aria-label','Search Bots');field.addEventListener('input',()=>{search=field.value;render();});slot.append(field);field.focus();});

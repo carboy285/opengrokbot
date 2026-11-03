@@ -250,6 +250,60 @@ final class MacAppModel: ObservableObject {
             if result.failed { sendFeedback[bot.id] = "Some files could not be imported. Choose regular files under 20 MB and try again." }
         }
     }
+    /// The text sent to the CLI so it can find files stored in the Bot's Attachments folder.
+    static func attachmentMessage(base: String, names: [String]) -> String {
+        guard !names.isEmpty else { return base }
+        let lead = base.isEmpty ? "Please review the attached files." : base
+        return lead + "\n\nAttached files in this Bot’s working folder:\n" + names.map { "- Attachments/" + $0 }.joined(separator: "\n") + "\nUse your available tools to read these files; do not assume an image was viewed."
+    }
+    /// Stores images sent from the iPhone. Returns stored file names, or nil when any image is invalid.
+    func saveRemoteAttachments(_ items: [RemoteAttachment], for bot: Bot) -> [String]? {
+        guard bot.memberIDs == nil, items.count <= RemoteAttachment.maxCount,
+              items.reduce(0, { $0 + $1.data.count }) <= RemoteAttachment.maxTotalBytes + 200_000 else { return nil }
+        let extensions = ["image/jpeg": "jpg", "image/png": "png"]
+        let directory = workingDirectory(for: bot).appendingPathComponent("Attachments", isDirectory: true)
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) } catch { return nil }
+        var names: [String] = []
+        for item in items {
+            guard let ext = extensions[item.mime], !item.data.isEmpty, NSImage(data: item.data) != nil else { return nil }
+            let name = UUID().uuidString + "-Photo." + ext
+            let target = directory.appendingPathComponent(name)
+            do {
+                try item.data.write(to: target, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            } catch { return nil }
+            names.append(name)
+        }
+        return names
+    }
+    /// Attaches files or an image from a pasteboard. Returns true when the clipboard held something attachable.
+    @discardableResult
+    func pasteAttachments(from pasteboard: NSPasteboard, for bot: Bot) -> Bool {
+        guard bot.memberIDs == nil else { sendFeedback[bot.id] = "Attachments are available in individual Bot chats."; return false }
+        let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: fileOptions) as? [URL], !urls.isEmpty {
+            importAttachments(urls, for: bot); return true
+        }
+        var png = pasteboard.data(forType: .png)
+        if png == nil, let tiff = pasteboard.data(forType: .tiff), let rep = NSBitmapImageRep(data: tiff) {
+            png = rep.representation(using: .png, properties: [:])
+        }
+        guard let data = png else { sendFeedback[bot.id] = "There’s no image or file on the clipboard."; return false }
+        guard !importingAttachments.contains(bot.id) else { return true }
+        guard (attachments[bot.id]?.count ?? 0) < 10, data.count <= 20_000_000 else {
+            sendFeedback[bot.id] = "Choose no more than 10 files per draft, each under 20 MB."; return true
+        }
+        let directory = workingDirectory(for: bot).appendingPathComponent("Attachments", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let name = UUID().uuidString + "-Pasted image.png"
+            let target = directory.appendingPathComponent(name)
+            try data.write(to: target, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            attachments[bot.id, default: []].append(name); sendFeedback[bot.id] = nil; flushDrafts()
+        } catch { sendFeedback[bot.id] = "The pasted image could not be saved. Check available storage and try again." }
+        return true
+    }
     func openWorkingDirectory(for bot: Bot) {
         do {
             let directory = workingDirectory(for: bot)
