@@ -250,6 +250,34 @@ final class MacAppModel: ObservableObject {
             if result.failed { sendFeedback[bot.id] = "Some files could not be imported. Choose regular files under 20 MB and try again." }
         }
     }
+    /// Attaches files or an image from a pasteboard. Returns true when the clipboard held something attachable.
+    @discardableResult
+    func pasteAttachments(from pasteboard: NSPasteboard, for bot: Bot) -> Bool {
+        guard bot.memberIDs == nil else { sendFeedback[bot.id] = "Attachments are available in individual Bot chats."; return false }
+        let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: fileOptions) as? [URL], !urls.isEmpty {
+            importAttachments(urls, for: bot); return true
+        }
+        var png = pasteboard.data(forType: .png)
+        if png == nil, let tiff = pasteboard.data(forType: .tiff), let rep = NSBitmapImageRep(data: tiff) {
+            png = rep.representation(using: .png, properties: [:])
+        }
+        guard let data = png else { sendFeedback[bot.id] = "There’s no image or file on the clipboard."; return false }
+        guard !importingAttachments.contains(bot.id) else { return true }
+        guard (attachments[bot.id]?.count ?? 0) < 10, data.count <= 20_000_000 else {
+            sendFeedback[bot.id] = "Choose no more than 10 files per draft, each under 20 MB."; return true
+        }
+        let directory = workingDirectory(for: bot).appendingPathComponent("Attachments", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let name = UUID().uuidString + "-Pasted image.png"
+            let target = directory.appendingPathComponent(name)
+            try data.write(to: target, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            attachments[bot.id, default: []].append(name); sendFeedback[bot.id] = nil; flushDrafts()
+        } catch { sendFeedback[bot.id] = "The pasted image could not be saved. Check available storage and try again." }
+        return true
+    }
     func openWorkingDirectory(for bot: Bot) {
         do {
             let directory = workingDirectory(for: bot)

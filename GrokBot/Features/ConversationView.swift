@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ConversationView: View {
     private let initialBot: Bot
@@ -127,20 +128,21 @@ struct ConversationView: View {
             }
             HStack(alignment: .bottom, spacing: 10) {
                 Menu {
-                    PasteButton(payloadType: String.self) { values in
-                        let text = values.joined(separator: "\n")
-                        draft.wrappedValue += (draft.wrappedValue.isEmpty ? "" : "\n") + text
+                    Button("Paste text", systemImage: "doc.on.clipboard") {
+                        if let text = UIPasteboard.general.string, !text.isEmpty {
+                            draft.wrappedValue += (draft.wrappedValue.isEmpty ? "" : "\n") + text
+                        }
                     }
                     Button("Bot details", systemImage: "info.circle") { info = true }
                 } label: {
-                    Image(systemName: "plus").font(.system(size: 21, weight: .regular))
+                    Image(systemName: "plus").font(.system(size: 19, weight: .medium))
                         .foregroundStyle(composerInk).frame(width: 36, height: 36)
                         .background(composerTint, in: Circle())
                         .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 1).allowsHitTesting(false))
                         .frame(width: 48, height: 48).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Message options")
                 TextField("Ask \(bot.name)", text: draft, axis: .vertical)
-                    .font(.body).lineLimit(1...6).focused($composing).padding(.vertical, 7)
+                    .font(.body).lineLimit(1...6).focused($composing).padding(.vertical, 5).frame(minHeight: 48)
                     .accessibilityIdentifier("remote-chat-input")
                 if remote.running.contains(bot.id) {
                     Button {

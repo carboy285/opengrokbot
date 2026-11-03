@@ -9,6 +9,8 @@ struct MacConversationView: View {
     @AppStorage("spellChecking") private var spellChecking = true
     @FocusState private var composing: Bool
     @State private var followLatest = true
+    @State private var showActions = false
+    @State private var pasteMonitor: Any?
     @State private var scrollTask: Task<Void,Never>?
 
     private var draft: Binding<String> {
@@ -79,31 +81,37 @@ struct MacConversationView: View {
             }
             if desktop.importingAttachments.contains(bot.id) { ProgressView("Copying files…").controlSize(.small) }
             if let files = desktop.attachments[bot.id], !files.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
                         ForEach(files, id: \.self) { file in
-                            HStack {
+                            HStack(spacing: 6) {
+                                Image(systemName: file.lowercased().hasSuffix(".png") || file.lowercased().hasSuffix(".jpg") || file.lowercased().hasSuffix(".jpeg") ? "photo" : "doc")
+                                    .foregroundStyle(MacTheme.secondary)
                                 Text(String(file.dropFirst(min(file.count, 37)))).lineLimit(1)
-                                Button { desktop.attachments[bot.id]?.removeAll { $0 == file } } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Remove attachment")
-                            }.padding(8).background(MacTheme.panel, in: Capsule())
+                                Button { desktop.attachments[bot.id]?.removeAll { $0 == file } } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(MacTheme.secondary)
+                                }.buttonStyle(.plain).accessibilityLabel("Remove attachment")
+                            }
+                            .padding(.vertical, 6).padding(.leading, 10).padding(.trailing, 8)
+                            .background(MacTheme.raised, in: Capsule())
                         }
-                    }
+                    }.padding(.horizontal, 4)
                 }.font(.caption)
-                Text("Files are copied to this Bot’s folder. The CLI must use its own tools to read them; image support varies by provider.").font(.caption).foregroundStyle(.secondary)
             }
             HStack(alignment: .bottom, spacing: 11) {
-                Menu {
-                    Button("Export conversation…") { desktop.exportConversation(bot, app: app) }
-                    Divider()
-                    Button("Attach files…") { desktop.chooseAttachments(for: bot) }.disabled(bot.memberIDs != nil || desktop.importingAttachments.contains(bot.id))
-                } label: {
-                    Image(systemName: "plus").font(.system(size: 25, weight: .light)).frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.06), in: Circle())
-                }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Conversation actions")
+                Button { showActions.toggle() } label: {
+                    Image(systemName: "plus").font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(MacTheme.secondary)
+                        .frame(width: 38, height: 38)
+                        .background(Color.primary.opacity(0.07), in: Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain).help("Attach or export").accessibilityLabel("Attach or export")
+                .popover(isPresented: $showActions) { actionsMenu }
                 TextField("Message \(bot.name)", text: draft, axis: .vertical)
                     .textFieldStyle(.plain).font(.system(size: 18)).lineLimit(1...7)
                     .disableAutocorrection(!spellChecking).focused($composing)
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 6).frame(minHeight: 38)
                     .onKeyPress(keys: [.return], phases: .down) { press in
                         if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.hasMarkedText() { return .ignored }
                         if press.modifiers.contains(.shift) {
@@ -129,6 +137,9 @@ struct MacConversationView: View {
                 }
             }
             .padding(9).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
+            .onAppear { installPasteMonitor() }
+            .onChange(of: bot.id) { _, _ in installPasteMonitor() }
+            .onDisappear { removePasteMonitor() }
             HStack(spacing: 9) {
                 if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
                 if bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty {
@@ -182,6 +193,50 @@ struct MacConversationView: View {
             var transaction = Transaction(); transaction.disablesAnimations = true
             withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
         }
+    }
+
+    private var attachDisabled: Bool { bot.memberIDs != nil || desktop.importingAttachments.contains(bot.id) }
+
+    private var actionsMenu: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ComposerActionRow(title: "Add files…", icon: "paperclip", disabled: attachDisabled) {
+                showActions = false
+                DispatchQueue.main.async { desktop.chooseAttachments(for: bot) }
+            }
+            ComposerActionRow(title: "Paste image", icon: "photo.on.clipboard", disabled: attachDisabled) {
+                showActions = false
+                desktop.pasteAttachments(from: .general, for: bot)
+            }
+            Divider().padding(.vertical, 4)
+            ComposerActionRow(title: "Export conversation…", icon: "square.and.arrow.up", disabled: false) {
+                showActions = false
+                DispatchQueue.main.async { desktop.exportConversation(bot, app: app) }
+            }
+        }
+        .padding(8).frame(width: 236)
+    }
+
+    /// Lets ⌘V attach an image or file from the clipboard while the message box is focused.
+    private func installPasteMonitor() {
+        removePasteMonitor()
+        let target = bot, model = desktop
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "v",
+                  target.memberIDs == nil,
+                  let window = event.window, window.isKeyWindow,
+                  window.firstResponder is NSTextView else { return event }
+            let board = NSPasteboard.general
+            let hasFile = board.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+            let hasImage = board.availableType(from: [.png, .tiff]) != nil && board.string(forType: .string) == nil
+            guard hasFile || hasImage else { return event }
+            return model.pasteAttachments(from: board, for: target) ? nil : event
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let monitor = pasteMonitor { NSEvent.removeMonitor(monitor) }
+        pasteMonitor = nil
     }
 
     private func sendMessage() {
@@ -388,5 +443,28 @@ struct ChatScrollMonitor: NSViewRepresentable {
             events = nil; scroll = nil
             lastDocumentSize = .zero; lastViewportSize = .zero
         }
+    }
+}
+
+private struct ComposerActionRow: View {
+    let title: String
+    let icon: String
+    let disabled: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 14, weight: .medium)).frame(width: 20)
+                Text(title).font(.system(size: 14))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(hovering && !disabled ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.4 : 1)
+        .onHover { hovering = $0 }
     }
 }
