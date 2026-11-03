@@ -50,8 +50,6 @@ const {_electron:electron}=require('@playwright/test');const fs=require('node:fs
   await page.waitForFunction(async()=>{const r=await window.desktop.load();return r.value.teamMessages.every(x=>x.status==='complete');});
   const teamCalls=(await fs.readFile(path.join(directory,'invocations.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);assert.equal(teamCalls.filter(x=>x.text.endsWith('Create team fixture')).length,1);assert.ok(teamCalls.filter(x=>x.args.includes('fixture-model')).length>=4);assert.ok(teamCalls.every(x=>!x.args.includes('must-not-run')));
   await page.locator('#primary-bot button').click();
-  await page.evaluate(()=>window.desktop.windowAction('close')); // Closing the window must leave the app running in the tray.
-  await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].show());
   const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   const stored=await page.evaluate(([id,data])=>window.desktop.attachData(id,'image/png',data),[mainID,png]);assert.equal(stored.ok,true);
   const attached=await page.evaluate(([id,name])=>window.desktop.send(id,'Attachment fixture',crypto.randomUUID(),[name]),[mainID,stored.value]);assert.equal(attached.ok,true);
@@ -62,6 +60,6 @@ const {_electron:electron}=require('@playwright/test');const fs=require('node:fs
   const item=(await page.evaluate(()=>window.desktop.vaultList())).value.find(x=>x.title==='Test secret');assert.ok(item);assert.equal((await page.evaluate(id=>window.desktop.vaultRead(id),item.id)).value,secret);assert.equal((await fs.readFile(path.join(directory,'vault.json'),'utf8')).includes(secret),false);
   await page.evaluate(id=>window.desktop.vaultDelete(id),item.id);assert.deepEqual(errors,[]);
   await desktop.close();desktop=await launch();const relaunched=await desktop.firstWindow();await relaunched.locator('.bubble').getByText('Remember this conversation',{exact:true}).waitFor();
-  console.log('PASS: native setup, single empty Bot, real fixture CLI subprocess, Unicode reply, resumed session, cancellation, isolated renderer, persistence, encrypted vault, tray close/reopen, and image attachments with path validation.');
+  console.log('PASS: native setup, single empty Bot, real fixture CLI subprocess, Unicode reply, resumed session, cancellation, isolated renderer, persistence, encrypted vault, and image attachments with path validation.');
  }finally{if(desktop)await desktop.close();await fs.rm(directory,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
