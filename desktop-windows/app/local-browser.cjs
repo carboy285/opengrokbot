@@ -1,11 +1,35 @@
 const {BrowserWindow,WebContentsView,ipcMain,dialog}=require('electron');
 const path=require('node:path');
 const {fileURLToPath}=require('node:url');
+const attachments=require('./attachments.cjs');
 const chromeFile=path.resolve(__dirname,'../renderer/browser.html');
 const allowed=value=>{try{const url=new URL(value);return ['https:','http:'].includes(url.protocol)&&!url.username&&!url.password&&value.length<=4000;}catch{return false;}};
 const expression='JSON.stringify({url:location.href,title:document.title,text:(document.body?.innerText||"").slice(0,16000),links:[...document.links].slice(0,25).map(a=>({text:a.innerText.slice(0,100),url:a.href}))})';
+const settleExpression='document.readyState+"|"+(document.body?.innerText||"").length';
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+/** Dynamic pages (fantasy draft rooms, dashboards) keep rendering after the load event. Wait until the page stops loading and its text length stops changing. */
+async function settle(web,{interval=300,limit=5000}={}){
+ let previous=null,stable=0;const end=Date.now()+limit;
+ while(Date.now()<end){
+  let state;try{state=await web.executeJavaScript(settleExpression);}catch{return;}
+  const ready=!web.isLoading()&&String(state).startsWith('complete|');
+  stable=ready&&state===previous?stable+1:0;previous=state;
+  if(stable>=2)return;
+  await pause(interval);
+ }
+}
+/** Captures what the page looks like and stores it where the Bot's CLI can open it. Never throws; the text result is still useful without it. */
+async function captureView(web,directory){
+ try{
+  const image=await web.capturePage();
+  if(!image||image.isEmpty())return {error:'The browser window has nothing to capture. Make sure it is not minimized.'};
+  const size=image.getSize();
+  const jpeg=(size.width>1400?image.resize({width:1400}):image).toJPEG(80);
+  return {path:await attachments.savePageScreenshot(directory,jpeg)};
+ }catch{return {error:'The screenshot could not be captured.'};}
+}
 class LocalBrowsers{
- constructor(getBot){this.getBot=getBot;this.entries=new Map();
+ constructor(getBot,getDirectory){this.getBot=getBot;this.getDirectory=getDirectory;this.entries=new Map();
   for(const name of ['ready','navigate','back','forward','reload','clear'])ipcMain.handle('bot-browser:'+name,async(event,value)=>{
    const entry=[...this.entries.values()].find(entry=>entry.window.webContents===event.sender&&event.senderFrame===event.sender.mainFrame);
    try{if(!entry||fileURLToPath(event.senderFrame.url)!==chromeFile)throw new Error('Unknown browser window.');
@@ -46,7 +70,12 @@ class LocalBrowsers{
   const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is already reading a page.');entry.reading=true;let timer;
   try{
    await Promise.race([entry.view.webContents.loadURL(address),new Promise((_,reject)=>{timer=setTimeout(()=>{entry.view.webContents.stop();reject(new Error('The local browser timed out loading this page.'));},20000);})]);
-   return await entry.view.webContents.executeJavaScript(expression);
+   await settle(entry.view.webContents);
+   const page=JSON.parse(await entry.view.webContents.executeJavaScript(expression));
+   const shot=this.getDirectory?await captureView(entry.view.webContents,this.getDirectory(this.getBot(id).id)):{error:'Screenshots are unavailable.'};
+   if(shot.path){page.screenshot=shot.path;page.screenshotNote='A screenshot of the page exactly as rendered (layout, images, charts, scores, canvas content that text extraction misses). Open this image file with your file or image viewing tool and use it together with the text.';}
+   else page.screenshotError=shot.error;
+   return JSON.stringify(page);
   }catch{throw new Error('The local browser could not finish reading the page. Its window stays open so you can inspect it or sign in, then retry.');}
   finally{clearTimeout(timer);entry.reading=false;}
  }
@@ -54,4 +83,4 @@ class LocalBrowsers{
  close(id){this.entries.get(id)?.window.close();}
  closeAll(){for(const entry of [...this.entries.values()])entry.window.close();}
 }
-module.exports={LocalBrowsers};
+module.exports={LocalBrowsers,settle,captureView};

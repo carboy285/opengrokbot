@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { mkdtemp, readdir, readFile, rm } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { saveRemoteImages, attachmentMessage } = require('./attachments.cjs');
+const { saveRemoteImages, attachmentMessage, savePageScreenshot } = require('./attachments.cjs');
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
@@ -59,5 +59,18 @@ test('copies local files, saves pasted images, and validates stored names', asyn
     await assert.rejects(existingNames(dir, ['00000000-0000-0000-0000-000000000000-missing.txt']));
     await mkdir(path.join(dir, 'Attachments', '11111111-1111-1111-1111-111111111111-dir'));
     await assert.rejects(existingNames(dir, ['11111111-1111-1111-1111-111111111111-dir']), /Missing/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('stores page screenshots, rejects non-JPEG bytes, and keeps only the newest dozen', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grok-att-'));
+  try {
+    await assert.rejects(savePageScreenshot(dir, Buffer.from('<html>')));
+    const paths = [];
+    for (let i = 0; i < 15; i++) paths.push(await savePageScreenshot(dir, jpeg));
+    assert.match(paths[0], /^Attachments\/[0-9a-f-]{36}-Page\.jpg$/);
+    const files = await readdir(path.join(dir, 'Attachments'));
+    assert.equal(files.length, 12);
+    assert.ok(files.includes(paths[14].slice('Attachments/'.length)));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

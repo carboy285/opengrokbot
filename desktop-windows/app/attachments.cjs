@@ -1,5 +1,5 @@
 'use strict';
-const { mkdir, writeFile, copyFile, lstat } = require('node:fs/promises');
+const { mkdir, writeFile, copyFile, lstat, readdir, rm } = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
@@ -85,10 +85,30 @@ async function existingNames(directory, names) {
   return names;
 }
 
+
+const PAGE_SHOT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-Page\.jpg$/i;
+const PAGE_SHOT_KEEP = 12;
+
+/** Stores a screenshot of a page the Bot's browser read as <directory>/Attachments/<uuid>-Page.jpg and keeps only the newest few. Returns the relative path the CLI can open. */
+async function savePageScreenshot(directory, jpeg) {
+  if (!Buffer.isBuffer(jpeg) || !looksLikeImage(jpeg, 'image/jpeg') || jpeg.length > LOCAL_MAX_BYTES) throw new Error('Unsupported screenshot.');
+  const folder = path.join(directory, 'Attachments');
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  const name = `${randomUUID()}-Page.jpg`;
+  await writeFile(path.join(folder, name), jpeg, { mode: 0o600 });
+  try {
+    const old = [];
+    for (const entry of await readdir(folder)) if (PAGE_SHOT.test(entry) && entry !== name) old.push({ entry, time: (await lstat(path.join(folder, entry))).mtimeMs });
+    old.sort((a, b) => b.time - a.time);
+    for (const item of old.slice(PAGE_SHOT_KEEP - 1)) await rm(path.join(folder, item.entry), { force: true });
+  } catch {}
+  return `Attachments/${name}`;
+}
+
 function attachmentMessage(base, names) {
   if (!names.length) return base;
   const lead = base.trim() ? base : 'Please review the attached files.';
   return `${lead}\n\nAttached files in this Bot’s working folder:\n${names.map(name => `- Attachments/${name}`).join('\n')}\nUse your available tools to read these files; do not assume an image was viewed.`;
 }
 
-module.exports = { saveRemoteImages, copyLocalFiles, saveDataFile, existingNames, attachmentMessage, MAX_COUNT, MAX_TOTAL_BYTES };
+module.exports = { savePageScreenshot, saveRemoteImages, copyLocalFiles, saveDataFile, existingNames, attachmentMessage, MAX_COUNT, MAX_TOTAL_BYTES };

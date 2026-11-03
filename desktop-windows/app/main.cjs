@@ -195,7 +195,7 @@ const cloud = new CloudHost({
  changed:status=>{mirror.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
 });
 const localVMs = new (require('./local-vm.cjs').LocalVMs)({getBot:id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),load:()=>loadJSON('bot-vms.json',{}),save:value=>atomicJSON('bot-vms.json',value),root:file('VirtualMachines')});
-const localBrowsers = new (require('./local-browser.cjs').LocalBrowsers)(id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()));
+const localBrowsers = new (require('./local-browser.cjs').LocalBrowsers)(id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),botDirectory);
 const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
 function openMirror(){
  if(mirrorWindow&&!mirrorWindow.isDestroyed()){mirrorWindow.show();mirrorWindow.focus();return;}
