@@ -47,32 +47,40 @@ struct MacBotInspectorView: View {
                 Spacer(minLength: 0)
             } else { VStack(spacing: 0) {
                     Button { editingAvatar = true } label: {
-                        MacBotAvatar(color: bot.color, size: 86, appearance: bot.appearance)
-                    }.buttonStyle(.plain).help("Change Bot avatar").accessibilityLabel("Change Bot avatar").padding(.top, 14)
-                    Text(bot.name).font(.system(size: 24, weight: .medium))
+                        MacBotAvatar(color: bot.color, size: 72, appearance: bot.appearance)
+                    }.buttonStyle(.plain).help("Change Bot avatar").accessibilityLabel("Change Bot avatar")
+                    Text(bot.name).font(.system(size: 22, weight: .semibold))
                         .multilineTextAlignment(.center).textSelection(.enabled)
-                        .padding(.horizontal, 24).padding(.top, 30)
-                    HStack(spacing: 4) {
+                        .padding(.horizontal, 24).padding(.top, 14)
+                    if bot.isMain != true, !bot.purpose.isEmpty {
+                        Text(bot.purpose).font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+                            .multilineTextAlignment(.center).lineLimit(3).textSelection(.enabled)
+                            .padding(.horizontal, 28).padding(.top, 4)
+                    }
+                    HStack(spacing: 2) {
                         ForEach(BotInspectorTab.allCases) { item in
                             Button { tab = item; if item == .library { refreshFiles() } } label: {
-                                Text(item.rawValue).font(.system(size: 16))
-                                    .foregroundStyle(tab == item ? Color.primary : MacTheme.secondary)
-                                    .padding(.horizontal, 13).padding(.vertical, 9)
-                                    .background(tab == item ? MacTheme.panel : .clear, in: Capsule())
+                                Text(item.rawValue).font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(tab == item ? ink : MacTheme.secondary)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 7)
+                                    .background(tab == item ? tint : .clear, in: Capsule())
+                                    .contentShape(Capsule())
                             }.buttonStyle(.plain)
                                 .accessibilityIdentifier("bot-inspector-tab-\(item.rawValue.lowercased())")
                                 .accessibilityAddTraits(tab == item ? [.isSelected] : [])
                         }
-                    }.padding(.top, 30).padding(.bottom, 46)
+                    }
+                    .padding(3).background(MacTheme.panel, in: Capsule())
+                    .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 20)
                     ScrollView {
-                    VStack(spacing: 0) {
-                    switch tab {
-                    case .details: details
-                    case .library: library
-                    case .computer: computer
-                    }
-                }.frame(maxWidth: .infinity).padding(.bottom, 30)
-                    }
+                        VStack(alignment: .leading, spacing: 0) {
+                            switch tab {
+                            case .details: details
+                            case .library: library
+                            case .computer: computer
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 30)
+                    }.scrollIndicators(.hidden)
             } }
         }
         .frame(maxHeight: .infinity).background(MacTheme.canvas)
@@ -84,167 +92,200 @@ struct MacBotInspectorView: View {
         .onChange(of: bot.id) { _, _ in editingAvatar = false; editingDetails = false; creatingRoutine = false; editingRoutine = nil; folderDraft = bot.folder ?? "" }
     }
 
+    private var tint: Color { bot.appearance == nil && bot.color == "white" ? .primary : AvatarArtwork.color(bot.appearance?.color ?? bot.color) }
+    private var ink: Color {
+        let name = bot.appearance?.color ?? bot.color
+        if bot.appearance == nil && bot.color == "white" { return MacTheme.canvas }
+        return ["white", "amber", "orange", "green", "teal", "gray"].contains(name) ? .black : .white
+    }
+    private var isPinned: Bool { bot.isPinned ?? (bot.isMain == true) }
+    private var busy: Bool { desktop.runningBots.contains(bot.id) }
+
     private var details: some View {
-        VStack(spacing: 28) {
-            VStack(alignment: .leading, spacing: 14) {
-                Button((bot.isPinned ?? (bot.isMain == true)) ? "Unpin Bot" : "Pin to top") { desktop.remote.setPinned(bot, pinned: !(bot.isPinned ?? (bot.isMain == true))) }
-                TextField("Folder · blank for Unfiled", text: $folderDraft).textFieldStyle(.roundedBorder)
-                Button("Save folder") { _ = app.organize(bot, folder: folderDraft) }.disabled(folderDraft.count > 80)
-                Text("Drag Bots in the sidebar to change their order.").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 22) {
+            InspectorCard(title: "Organize", footer: "Drag Bots in the sidebar to change their order.") {
+                Toggle("Pinned to top", isOn: Binding(get: { isPinned }, set: { desktop.remote.setPinned(bot, pinned: $0) }))
+                HStack(spacing: 8) {
+                    TextField("Folder, blank for Unfiled", text: $folderDraft).textFieldStyle(.roundedBorder)
+                    Button("Save") { _ = app.organize(bot, folder: folderDraft) }
+                        .buttonStyle(InspectorButtonStyle()).disabled(folderDraft.count > 80 || folderDraft == (bot.folder ?? ""))
+                }
             }
-            VStack(alignment: .leading, spacing: 10) {
+            if let members = bot.memberIDs {
+                InspectorCard(title: "Group members", footer: "Each member answers with its own provider and model.") {
+                    ForEach(app.workspace.bots.filter { members.contains($0.id) }) { member in
+                        Button { desktop.selectedID = member.id } label: {
+                            HStack { Text(member.name); Spacer(); Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(MacTheme.secondary) }
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                    }
+                }
+            } else { MacBotProviderSettingsView(bot: bot) }
+            memoryCard
+            InspectorCard(title: "Browser", footer: "Its own browser profile, in a window on this Mac.") {
                 Button("Open local browser", systemImage: "globe") {
                     do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription }
+                }.buttonStyle(InspectorButtonStyle())
+            }
+            MacBotVMControls(bot: bot)
+            routinesCard
+            if !(app.workspace.sharedMemory ?? []).isEmpty {
+                InspectorCard(title: "Shared memory") {
+                    ForEach(app.workspace.sharedMemory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
                 }
-                Text("This Bot has its own local browser profile. Its window is visible on this computer.").font(.caption).foregroundStyle(.secondary)
-                MacBotVMControls(bot: bot)
-                Text("Scheduled tasks").font(.headline)
-                Text("Ask this Bot to schedule a task at a time, repeat hourly/daily/weekly, or react to incoming Bot messages. This app must be running; missed times catch up once.").font(.caption).foregroundStyle(.secondary)
-                Button("Create routine…") { editingRoutine = nil; routineName = ""; routineInstruction = ""; routineDate = Date().addingTimeInterval(3600); routineZone = TimeZone.current.identifier; routineRepeat = "none"; routineTrigger = "time"; routineContains = ""; creatingRoutine = true }
-                if creatingRoutine {
-                    TextField("Routine name", text: $routineName).textFieldStyle(.roundedBorder)
-                    TextField("What should this Bot do?", text: $routineInstruction, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...5)
-                    Picker("Trigger", selection: $routineTrigger) { Text("At a time").tag("time"); Text("Bot message received").tag("message") }
-                    if routineTrigger == "time" {
-                        TextField("IANA time zone, for example America/Chicago", text: $routineZone).textFieldStyle(.roundedBorder)
-                        DatePicker("First run", selection: $routineDate, in: Date()...).environment(\.timeZone, TimeZone(identifier: routineZone) ?? .current)
-                        Picker("Repeat", selection: $routineRepeat) {
-                            Text("Once").tag("none"); Text("Hourly").tag("hourly"); Text("Daily").tag("daily"); Text("Weekly").tag("weekly")
-                        }
-                    } else {
-                        TextField("Optional message text to match", text: $routineContains).textFieldStyle(.roundedBorder)
-                        Text("Triggered by messages from other Bots. Existing messages do not trigger a newly configured routine.").font(.caption).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Button(editingRoutine == nil ? "Save routine" : "Save changes") {
-                            saveRoutine()
-                        }
-                        Button("Cancel") { creatingRoutine = false }
-                    }
+            }
+        }
+    }
+
+    private var memoryCard: some View {
+        InspectorCard(title: "Memory", footer: editingDetails ? nil : "Memory is separate from chat history. Editing it does not erase messages.") {
+            if editingDetails {
+                TextField("Bot name", text: $nameDraft).textFieldStyle(.roundedBorder)
+                TextField("Purpose", text: $purposeDraft, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...6)
+                Text("Private memory, one item per line").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                TextEditor(text: $memoryDraft).font(.system(size: 13)).frame(minHeight: 110)
+                    .scrollContentBackground(.hidden).padding(6)
+                    .background(MacTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
+                HStack(spacing: 8) {
+                    Button("Save") {
+                        let items = memoryDraft.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+                        if app.updateDetails(bot, name: nameDraft, purpose: purposeDraft, memory: items) { editingDetails = false }
+                    }.buttonStyle(InspectorButtonStyle(tint: tint, ink: ink))
+                    Button("Cancel") { editingDetails = false }.buttonStyle(InspectorButtonStyle())
                 }
-                ForEach(bot.schedules ?? []) { task in
-                    Text(task.name)
-                    Text("\(task.enabled ? (task.nextRun ?? "Incoming Bot message") : "Paused") · \(task.recurrence) · \(task.timezone)").font(.caption)
-                    if let last = task.lastRun { Text("Last run: \(last) · \(task.lastResult ?? "outcome unavailable")").font(.caption).foregroundStyle(.secondary) }
+            } else {
+                if (bot.memory ?? []).isEmpty {
+                    Text("Nothing saved yet.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                } else {
+                    ForEach(bot.memory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
+                }
+                Button("Edit name, purpose and memory") { nameDraft = bot.name; purposeDraft = bot.purpose; memoryDraft = (bot.memory ?? []).joined(separator: "\n"); editingDetails = true }
+                    .buttonStyle(InspectorButtonStyle())
+            }
+        }
+    }
+
+    private var routinesCard: some View {
+        InspectorCard(title: "Routines", footer: "Ask the Bot to run a task at a set time, repeat it hourly, daily or weekly, or run it when another Bot messages it. The app must be running; missed runs catch up once.") {
+            Button("Create routine…") { editingRoutine = nil; routineName = ""; routineInstruction = ""; routineDate = Date().addingTimeInterval(3600); routineZone = TimeZone.current.identifier; routineRepeat = "none"; routineTrigger = "time"; routineContains = ""; creatingRoutine = true }
+                .buttonStyle(InspectorButtonStyle())
+            if creatingRoutine {
+                Divider()
+                TextField("Routine name", text: $routineName).textFieldStyle(.roundedBorder)
+                TextField("What should this Bot do?", text: $routineInstruction, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...5)
+                Picker("Trigger", selection: $routineTrigger) { Text("At a time").tag("time"); Text("Bot message received").tag("message") }
+                if routineTrigger == "time" {
+                    TextField("Time zone, for example America/Chicago", text: $routineZone).textFieldStyle(.roundedBorder)
+                    DatePicker("First run", selection: $routineDate, in: Date()...).environment(\.timeZone, TimeZone(identifier: routineZone) ?? .current)
+                    Picker("Repeat", selection: $routineRepeat) {
+                        Text("Once").tag("none"); Text("Hourly").tag("hourly"); Text("Daily").tag("daily"); Text("Weekly").tag("weekly")
+                    }
+                } else {
+                    TextField("Message text to match (optional)", text: $routineContains).textFieldStyle(.roundedBorder)
+                    Text("Runs when another Bot sends a message. Messages sent before you save do not trigger it.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                }
+                HStack(spacing: 8) {
+                    Button(editingRoutine == nil ? "Save routine" : "Save changes") { saveRoutine() }.buttonStyle(InspectorButtonStyle(tint: tint, ink: ink))
+                    Button("Cancel") { creatingRoutine = false }.buttonStyle(InspectorButtonStyle())
+                }
+            }
+            if (bot.schedules ?? []).isEmpty, !creatingRoutine {
+                Text("No routines yet.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+            }
+            ForEach(bot.schedules ?? []) { task in
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(task.name).font(.system(size: 14, weight: .semibold))
+                    Text("\(task.enabled ? (task.nextRun ?? "When another Bot messages") : "Paused") · \(task.recurrence) · \(task.timezone)").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                    if let last = task.lastRun { Text("Last run \(last) · \(task.lastResult ?? "no result")").font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
                     if !(task.history ?? []).isEmpty {
                         DisclosureGroup("Run history") {
-                            ForEach((task.history ?? []).reversed()) { run in Text("\(run.date) · \(run.status)").font(.caption).textSelection(.enabled) }
-                        }
+                            ForEach((task.history ?? []).reversed()) { run in Text("\(run.date) · \(run.status)").font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                        }.font(.system(size: 12))
                     }
-                    HStack {
-                        Button("Run now") { desktop.runRoutineNow(task, for: bot, app: app) }.disabled(desktop.runningBots.contains(bot.id) || bot.memberIDs != nil)
+                    HStack(spacing: 6) {
+                        Button("Run now") { desktop.runRoutineNow(task, for: bot, app: app) }.disabled(busy || bot.memberIDs != nil)
                         Button("Edit") {
                             editingRoutine = task; routineName = task.name; routineInstruction = task.text; routineZone = task.timezone
                             routineDate = task.nextRun.flatMap(BotSchedule.date) ?? Date().addingTimeInterval(3600)
                             routineRepeat = task.recurrence; routineTrigger = task.eventBased ? "message" : "time"; routineContains = task.contains ?? ""; creatingRoutine = true
-                        }.disabled(desktop.runningBots.contains(bot.id))
+                        }.disabled(busy)
                         Button(task.enabled ? "Pause" : "Resume") {
                             var updated = task; updated.enabled.toggle(); _ = app.updateSchedule(updated, botID: bot.id)
                         }
-                        Button("Delete", role: .destructive) { routineToDelete = task }
-                    }
+                        Button("Delete", role: .destructive) { routineToDelete = task }.buttonStyle(InspectorButtonStyle(destructive: true, compact: true))
+                    }.buttonStyle(InspectorButtonStyle(compact: true))
                 }
             }
-            VStack(alignment: .leading, spacing: 10) {
-                if editingDetails {
-                    TextField("Bot name", text: $nameDraft).textFieldStyle(.roundedBorder)
-                    TextField("Purpose", text: $purposeDraft, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...6)
-                    Text("Saved private memory · one item per line").font(.caption)
-                    TextEditor(text: $memoryDraft).frame(minHeight: 100).border(Color.secondary.opacity(0.3))
-                    HStack {
-                        Button("Save details") {
-                            let items = memoryDraft.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-                            if app.updateDetails(bot, name: nameDraft, purpose: purposeDraft, memory: items) { editingDetails = false }
-                        }
-                        Button("Cancel") { editingDetails = false }
-                    }
-                } else {
-                    Button("Edit name, purpose and memory") { nameDraft = bot.name; purposeDraft = bot.purpose; memoryDraft = (bot.memory ?? []).joined(separator: "\n"); editingDetails = true }
-                    Text("Saved memory is separate from chat history. Editing it does not erase messages.").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if let members = bot.memberIDs {
-                Text("Group members").font(.headline)
-                ForEach(app.workspace.bots.filter { members.contains($0.id) }) { member in
-                    Button(member.name) { desktop.selectedID = member.id }
-                }
-                Text("Each member answers with its own selected provider and model.").font(.caption).foregroundStyle(MacTheme.secondary)
-            } else { MacBotProviderSettingsView(bot: bot) }
-            if !(bot.memory ?? []).isEmpty {
-                Text("This Bot’s memory").font(.headline)
-                ForEach(bot.memory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
-            }
-            if !(app.workspace.sharedMemory ?? []).isEmpty {
-                Text("Shared memory").font(.headline)
-                ForEach(app.workspace.sharedMemory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
-            }
-            if bot.isMain != true, !bot.purpose.isEmpty {
-                Text(bot.purpose).font(.system(size: 16)).textSelection(.enabled)
-            }
-            if (bot.schedules ?? []).isEmpty {
-                Text("This Bot has no scheduled routines.").font(.system(size: 17)).foregroundStyle(MacTheme.secondary)
-            }
-        }.multilineTextAlignment(.center).padding(.horizontal, 34).padding(.top, 7)
+        }
     }
 
     private var library: some View {
-        VStack(spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             if files.isEmpty {
-                Image(systemName: "doc.text").font(.system(size: 30, weight: .light)).foregroundStyle(MacTheme.secondary)
-                Text("No files yet").font(.system(size: 18, weight: .medium))
-                Text("Files created in this Bot’s working folder appear here.")
-                    .font(.system(size: 14)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
+                VStack(spacing: 10) {
+                    Image(systemName: "doc.text").font(.system(size: 28, weight: .light)).foregroundStyle(MacTheme.secondary)
+                    Text("No files yet").font(.system(size: 17, weight: .semibold))
+                    Text("Files this Bot creates in its working folder show up here.")
+                        .font(.system(size: 13)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
+                }.frame(maxWidth: .infinity).padding(.vertical, 36)
             } else {
                 ForEach(files, id: \.path) { file in
                     Button { NSWorkspace.shared.activateFileViewerSelecting([file]) } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "doc.text").font(.system(size: 22))
-                            Text(file.lastPathComponent).font(.system(size: 14)).lineLimit(2).multilineTextAlignment(.leading)
-                            Spacer()
-                            Image(systemName: "arrow.up.right").foregroundStyle(MacTheme.secondary)
-                        }.padding(15).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 14))
+                            Image(systemName: "doc.text").font(.system(size: 18)).foregroundStyle(MacTheme.secondary)
+                            Text(displayName(file.lastPathComponent))
+                                .font(.system(size: 14)).lineLimit(2).multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(MacTheme.secondary)
+                        }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 14)).contentShape(RoundedRectangle(cornerRadius: 14))
                     }.buttonStyle(.plain).help("Show \(file.lastPathComponent) in Finder")
                 }
             }
-            if let fileError { Text(fileError).font(.caption).foregroundStyle(MacTheme.secondary) }
-            HStack {
+            if let fileError { Text(fileError).font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
+            HStack(spacing: 8) {
                 Button("Refresh") { refreshFiles() }
                 Button("Open folder") { desktop.openWorkingDirectory(for: bot) }
-            }.controlSize(.small).padding(.top, 6)
-        }.padding(.horizontal, 28)
+            }.buttonStyle(InspectorButtonStyle()).padding(.top, 4)
+        }
+    }
+
+    /// Attachments are stored as "<uuid>-<name>"; show just the name.
+    private func displayName(_ stored: String) -> String {
+        let pattern = #"^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}-"#
+        return stored.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
     }
 
     private var computer: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "desktopcomputer").font(.system(size: 34, weight: .light)).foregroundStyle(MacTheme.secondary)
-            Text("Runs on this Mac").font(.system(size: 18, weight: .medium))
-            if let provider = desktop.providersToRun(for: bot).first {
-                Label(provider.cli.provider.name, systemImage: "terminal").font(.system(size: 15))
-                Text(provider.choice.model.isEmpty ? "CLI default model" : provider.choice.model).font(.system(size: 13))
-                Text(desktop.runningBots.contains(bot.id) ? "Working…" : (desktop.providerHealth[provider.cli.provider] ?? "Installed · authentication not yet verified")).font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
-            } else {
-                Text("Choose an AI CLI to start chatting.").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+        VStack(alignment: .leading, spacing: 22) {
+            InspectorCard(title: "Runs on this Mac", footer: "Each Bot keeps its own working folder. Keep the app running for scheduled work.") {
+                if let provider = desktop.providersToRun(for: bot).first {
+                    Label(provider.cli.provider.name, systemImage: "terminal").font(.system(size: 15, weight: .medium))
+                    Text(provider.choice.model.isEmpty ? "CLI default model" : provider.choice.model).font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                    Text(busy ? "Working…" : (desktop.providerHealth[provider.cli.provider] ?? "Installed, sign-in not checked")).font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                } else {
+                    Text("Choose an AI CLI to start chatting.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                }
             }
-            Text("Each Bot keeps its own working folder on this Mac.")
-                .font(.system(size: 14)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
-            Text("AI CLI work runs on this Mac. Keep the app running for scheduled work; VM guest commands run in the assigned VM when enabled.").font(.caption).foregroundStyle(.secondary)
-            Button("Open browser") { do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription } }
-            Button("Open working folder") { desktop.openWorkingDirectory(for: bot) }
-            if MacBotVMs.shared.assigned(bot.id) != nil { Button("Open VM console") { Task { await MacBotVMs.shared.open(bot) } } }
-            if desktop.runningBots.contains(bot.id) { Button("Stop response") { desktop.stop(botID: bot.id) } }
-            Button("AI CLI setup") { desktop.panel = .setup }
-            DisclosureGroup("Recent recorded activity") {
+            InspectorCard(title: "Actions") {
+                Button("Open browser", systemImage: "globe") { do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription } }
+                Button("Open working folder", systemImage: "folder") { desktop.openWorkingDirectory(for: bot) }
+                if MacBotVMs.shared.assigned(bot.id) != nil { Button("Open VM console", systemImage: "display") { Task { await MacBotVMs.shared.open(bot) } } }
+                if busy { Button("Stop response", systemImage: "stop.fill") { desktop.stop(botID: bot.id) }.buttonStyle(InspectorButtonStyle(tint: tint, ink: ink)) }
+                Button("AI CLI setup", systemImage: "wrench.and.screwdriver") { desktop.panel = .setup }
+            }.buttonStyle(InspectorButtonStyle())
+            InspectorCard(title: "Recent activity", footer: "Only activity the app recorded shows here.") {
                 let events = app.entries(for: bot).filter { $0.kind == .activity }.suffix(5)
-                if events.isEmpty { Text("No recorded activity yet.").font(.caption).foregroundStyle(.secondary) }
+                if events.isEmpty { Text("Nothing recorded yet.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary) }
                 ForEach(Array(events)) { event in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(event.date, format: .dateTime.hour().minute()).font(.caption).foregroundStyle(.secondary)
-                        Text(event.text).font(.caption).textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(event.date, format: .dateTime.hour().minute()).font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                        Text(event.text).font(.system(size: 13)).textSelection(.enabled)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            Text("Detailed tool calls appear only when recorded by the app.").font(.caption).foregroundStyle(.secondary)
-        }.padding(.horizontal, 28)
+        }
     }
 
     private func saveRoutine() {
@@ -281,5 +322,47 @@ struct MacBotInspectorView: View {
             }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             fileError = nil
         } catch { files = []; fileError = "The files could not be read. Try opening the folder in Finder." }
+    }
+}
+
+/// A titled group of controls on a rounded card. Everything inside aligns to the leading edge.
+struct InspectorCard<Content: View>: View {
+    let title: String?
+    var footer: String? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(MacTheme.secondary)
+                    .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+            }
+            VStack(alignment: .leading, spacing: 12) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 16))
+            if let footer {
+                Text(footer).font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 4)
+            }
+        }
+    }
+}
+
+/// One button look for the whole panel: a filled capsule, tinted when it is the main action.
+struct InspectorButtonStyle: ButtonStyle {
+    var tint: Color? = nil
+    var ink: Color = .white
+    var destructive = false
+    var compact = false
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: compact ? 12 : 14, weight: .medium))
+            .foregroundStyle(destructive ? Color.red : (tint == nil ? Color.primary : ink))
+            .padding(.horizontal, compact ? 10 : 14).frame(minHeight: compact ? 28 : 34)
+            .background((tint ?? MacTheme.raised).opacity(configuration.isPressed ? 0.7 : 1), in: Capsule())
+            .opacity(enabled ? 1 : 0.4)
+            .contentShape(Capsule())
     }
 }

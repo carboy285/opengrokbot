@@ -41,4 +41,14 @@ async function download(installer, destination, fetchImpl = fetch) {
   return destination;
 }
 
-module.exports = { check, newer, trusted, trustedDownload, download };
+/**
+ * Command line that runs the downloaded installer silently, then reopens the app.
+ * Returns null when a path contains characters cmd.exe would treat specially; callers then fall back to the normal installer window.
+ */
+function installCommand(installer, exe) {
+  const safe = value => typeof value === 'string' && /^[A-Za-z]:\\[^"&|<>^%!\r\n]+$/.test(value);
+  if (!safe(installer) || !safe(exe)) return null;
+  return { file: 'cmd.exe', args: ['/d', '/s', '/c', `"timeout /t 2 /nobreak >nul & "${installer}" /S && start "" "${exe}""`] };
+}
+
+module.exports = { check, newer, trusted, trustedDownload, download, installCommand };
