@@ -17,3 +17,13 @@ Known limits: replies are spoken after they finish generating (not streamed); ec
 ## Image attachments
 - Mac: ⌘V pastes a clipboard image or copied file into the message box; the plus popover has Add files and Paste image.
 - iPhone: plus menu → Photo library or Paste image. Images are compressed to about 1.5 MB, at most 3 per message, and sent through the encrypted relay. The Mac or Windows host must run this version or newer.
+
+## 0.7.6 additions
+- Replies are spoken sentence by sentence while they stream. Talking over the Bot (or tapping the orb) stops speech and stops the Bot generating.
+- iPhone: when the message box is focused and an image is on the clipboard, a "Paste image from clipboard" button appears. The **Talk to my Bot** shortcut (Shortcuts app, Siri, Action Button) opens voice mode with your main Bot.
+- Windows: Attach files… in the plus menu, Ctrl+V to paste images, and attachment chips above the message box.
+
+# Notifications, updates and backups (0.7.6)
+- **Notifications**: Mac and Windows notify you when a Bot finishes while the app is in the background. The iPhone shows a banner when a Bot finishes in another chat or shortly after you leave the app; it only knows about replies while it is connected (this is not a push service).
+- **Updates**: Settings → Updates → *Download and install*. Windows downloads the installer, checks its size and SHA-256 digest, runs it and closes the app. Mac downloads the DMG to Downloads, checks it against the published .sha256 file and opens it so you can drag the new app into Applications.
+- **Backups**: Settings → Backup (Windows) or Settings → Updates (Mac). Backups are encrypted with your password (PBKDF2-SHA256, 600,000 rounds, AES-256-GCM) and exclude AI sign-ins, API keys and vault secrets. Restore works on the same platform the backup was made on; the current workspace is saved as a safety copy first.

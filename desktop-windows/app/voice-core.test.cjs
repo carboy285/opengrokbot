@@ -55,3 +55,15 @@ test('vad detects talking over the bot only when sustained and loud', async () =
   const done = [...feed(vad, 0.5, 0.2), ...feed(vad, 1.1, 0)];
   assert.equal(done.at(-1).type, 'utterance');
 });
+
+test('nextChunk releases finished sentences only and never splits code blocks', async () => {
+  const { nextChunk } = await load();
+  assert.deepEqual(nextChunk('Hello there. How are', 0, false), { chunk: 'Hello there.', next: 12 });
+  assert.deepEqual(nextChunk('Hello there. How are', 12, false), { chunk: '', next: 12 });
+  assert.deepEqual(nextChunk('Hello there. How are you? I', 12, false), { chunk: ' How are you?', next: 25 });
+  assert.deepEqual(nextChunk('Hello there. How are', 12, true), { chunk: ' How are', next: 20 });
+  assert.deepEqual(nextChunk('Run this. ```js\nx = 1. y = 2. ', 0, false), { chunk: 'Run this. ', next: 10 });
+  assert.deepEqual(nextChunk('No end yet', 0, false), { chunk: '', next: 0 });
+  assert.deepEqual(nextChunk('Emoji 👋 done. More', 0, false), { chunk: 'Emoji 👋 done.', next: 13 });
+  assert.deepEqual(nextChunk('abc', 5, false), { chunk: '', next: 5 });
+});

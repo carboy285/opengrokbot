@@ -45,11 +45,12 @@ struct ImageChips: View {
                         if let ui = UIImage(data: item.data) {
                             Image(uiImage: ui).resizable().scaledToFill().frame(width: 64, height: 64)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .accessibilityLabel("Attached image \(index + 1)")
                         }
                         Button { remove(index) } label: {
-                            Image(systemName: "xmark.circle.fill").font(.system(size: 20))
+                            Image(systemName: "xmark.circle.fill").font(.system(size: 20)).frame(width: 44, height: 44, alignment: .topTrailing)
                                 .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.65))
-                        }.buttonStyle(.plain).offset(x: 6, y: -6).accessibilityLabel("Remove image")
+                        }.buttonStyle(.plain).offset(x: 6, y: -6).accessibilityLabel("Remove image \(index + 1)")
                     }.frame(width: 64, height: 64)
                 }
             }.padding(.horizontal, 8).padding(.top, 8)

@@ -220,7 +220,8 @@ struct MacConversationView: View {
                     guard let entry = workspace.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
                     let finished = entry.state != .streaming && !model.runningBots.contains(current.id)
                     return VoiceReply(id: entry.id, text: entry.text, finished: finished)
-                })
+                },
+                stopReply: { model.stop(botID: current.id) })
         }
     }
 

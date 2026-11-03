@@ -70,6 +70,28 @@ enum VoiceKeys {
 }
 
 enum VoiceText {
+    /// Splits a reply that is still streaming into speakable pieces. Returns the text from `offset` up to the
+    /// last finished sentence (or everything once `final`), never cutting inside a ``` code block.
+    static func nextChunk(_ text: String, from offset: Int, final: Bool) -> (chunk: String, next: Int) {
+        let chars = Array(text)
+        guard offset < chars.count else { return ("", max(offset, chars.count)) }
+        if final { return (String(chars[offset...]), chars.count) }
+        var end = offset
+        var i = chars.count - 2
+        while i >= offset {
+            if ".!?\n".contains(chars[i]) && chars[i + 1].isWhitespace { end = i + 1; break }
+            i -= 1
+        }
+        guard end > offset else { return ("", offset) }
+        let candidate = String(chars[..<end])
+        let fences = candidate.components(separatedBy: "```").count - 1
+        if fences % 2 == 1, let open = candidate.range(of: "```", options: .backwards) {
+            end = candidate.distance(from: candidate.startIndex, to: open.lowerBound)
+            guard end > offset else { return ("", offset) }
+        }
+        return (String(chars[offset..<end]), end)
+    }
+
     /// Makes a Bot reply pleasant to hear: no code blocks, links or markdown symbols.
     static func speakable(_ raw: String) -> String {
         var text = raw
@@ -127,6 +149,9 @@ final class VoiceSession: ObservableObject {
     private let playerDelegate = PlayerDelegate()
     private var player: AVAudioPlayer?
     private var speechDone: CheckedContinuation<Void, Never>?
+    private var speechQueue: [String] = []
+    private var draining = false
+    private var streamFinished = false
     // Cloud voice-activity detection
     private var preRoll: [Float] = []
     private var utterance: [Float] = []
@@ -177,7 +202,7 @@ final class VoiceSession: ObservableObject {
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
-        partial = ""; level = 0; utterance = []; preRoll = []; inSpeech = false
+        partial = ""; level = 0; utterance = []; preRoll = []; inSpeech = false; speechQueue = []
         state = .idle
     }
 
@@ -350,8 +375,38 @@ final class VoiceSession: ObservableObject {
         let text = VoiceText.speakable(raw)
         guard active else { return }
         guard !text.isEmpty else { resumeListening(); return }
+        beginSpeaking(); enqueue(text); endSpeaking()
+    }
+
+    /// Starts a spoken reply that arrives in pieces. Call `enqueue` for each piece and `endSpeaking` at the end.
+    func beginSpeaking() {
+        guard active else { return }
         state = .speaking; partial = ""; bargeSeconds = 0; preRoll = []
+        speechQueue = []; streamFinished = false
         if transcriber == .apple { startRecognition() }
+    }
+
+    func enqueue(_ text: String) {
+        guard active, state == .speaking, !text.isEmpty else { return }
+        speechQueue.append(text)
+        if !draining { Task { await drain() } }
+    }
+
+    func endSpeaking() {
+        streamFinished = true
+        if !draining, state == .speaking, active { resumeListening() }
+    }
+
+    private func drain() async {
+        draining = true
+        while state == .speaking, active, !speechQueue.isEmpty {
+            await speakPiece(speechQueue.removeFirst())
+        }
+        draining = false
+        if state == .speaking, active, streamFinished { resumeListening() }
+    }
+
+    private func speakPiece(_ text: String) async {
         let provider = VoiceSettings.speaker
         if provider != .apple, provider.supportsSpeech, !VoiceKeys.get(provider).isEmpty {
             do {
@@ -364,11 +419,11 @@ final class VoiceSession: ObservableObject {
         } else {
             await speakWithApple(text)
         }
-        if state == .speaking, active { resumeListening() }
     }
 
     func interrupt() {
         guard state == .speaking else { return }
+        speechQueue = []
         stopOutput()
         state = .listening
     }
@@ -449,8 +504,10 @@ final class VoiceConversation: ObservableObject {
 
     var isRunning: Bool { running }
 
-    func start(send: @escaping (String) async -> Bool, latestReply: @escaping () -> VoiceReply?) async {
-        self.send = send; self.latestReply = latestReply
+    private var stopReply: (() -> Void)?
+
+    func start(send: @escaping (String) async -> Bool, latestReply: @escaping () -> VoiceReply?, stopReply: (() -> Void)? = nil) async {
+        self.send = send; self.latestReply = latestReply; self.stopReply = stopReply
         session.onUtterance = { [weak self] text in self?.handle(text) }
         running = await session.begin()
     }
@@ -470,15 +527,29 @@ final class VoiceConversation: ObservableObject {
                 session.message = "That message couldn’t be sent. Check the Bot and try again."
                 session.resumeListening(); return
             }
-            var waited = 0.0
+            // Speak finished sentences while the reply is still being written.
+            var offset = 0, started = false, waited = 0.0
             while running, !Task.isCancelled, waited < 180 {
-                try? await Task.sleep(nanoseconds: 300_000_000); waited += 0.3
-                if let reply = latestReply?(), reply.id != previous, reply.finished {
-                    if reply.text.isEmpty { session.resumeListening() } else { await session.speak(reply.text) }
+                try? await Task.sleep(nanoseconds: 250_000_000); waited += 0.25
+                guard let reply = latestReply?(), reply.id != previous else { continue }
+                if started, session.state != .speaking {
+                    // You talked over the Bot: stop generating so your next message can be sent.
+                    if !reply.finished { stopReply?() }
+                    return
+                }
+                let piece = VoiceText.nextChunk(reply.text, from: offset, final: reply.finished)
+                offset = piece.next
+                let spoken = VoiceText.speakable(piece.chunk)
+                if !spoken.isEmpty {
+                    if !started { session.beginSpeaking(); started = true }
+                    session.enqueue(spoken)
+                }
+                if reply.finished {
+                    if started { session.endSpeaking() } else { session.resumeListening() }
                     return
                 }
             }
-            if running { session.resumeListening() }
+            if running { if started { session.endSpeaking() } else { session.resumeListening() } }
         }
     }
 }

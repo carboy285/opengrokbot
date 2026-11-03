@@ -128,7 +128,7 @@ struct MacSettingsView: View {
         }
     }
 
-    private var updates: some View { DesktopUpdatesView(updates: desktop.updates) }
+    private var updates: some View { VStack(spacing: 18) { DesktopUpdatesView(updates: desktop.updates); MacBackupView() } }
 
     private func unavailable(title: String, detail: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {

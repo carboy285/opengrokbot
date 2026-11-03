@@ -10,6 +10,27 @@ export function speakable(raw) {
     .slice(0, 4000);
 }
 
+/**
+ * Splits a reply that is still streaming into speakable pieces: text from `offset` up to the last finished
+ * sentence (or everything once `final`), never cutting inside a ``` code block. Mirrors VoiceText.nextChunk in Swift.
+ */
+export function nextChunk(text, offset, final) {
+  const chars = Array.from(String(text ?? ''));
+  if (offset >= chars.length) return { chunk: '', next: Math.max(offset, chars.length) };
+  if (final) return { chunk: chars.slice(offset).join(''), next: chars.length };
+  let end = offset;
+  for (let i = chars.length - 2; i >= offset; i--) {
+    if ('.!?\n'.includes(chars[i]) && /\s/.test(chars[i + 1])) { end = i + 1; break; }
+  }
+  if (end <= offset) return { chunk: '', next: offset };
+  const candidate = chars.slice(0, end).join('');
+  if ((candidate.split('```').length - 1) % 2 === 1) {
+    end = Array.from(candidate.slice(0, candidate.lastIndexOf('```'))).length;
+    if (end <= offset) return { chunk: '', next: offset };
+  }
+  return { chunk: chars.slice(offset, end).join(''), next: end };
+}
+
 /** 16-bit mono PCM WAV at 16 kHz, accepted by every transcription provider. */
 export function encodeWav(samples, sampleRate) {
   const target = 16000, ratio = Math.max(1, sampleRate / target);

@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.7.5/ --output=artifacts/OpenGrokBot-0.7.5-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.7.6/ --output=artifacts/OpenGrokBot-0.7.6-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -93,6 +93,8 @@ jobs:
         run: |
           if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) { throw 'Configure WINDOWS_CERTIFICATE_PFX_BASE64 and WINDOWS_CERTIFICATE_PASSWORD before requesting signed installers.' }
       - run: npm ci
+      - name: Run desktop unit tests
+        run: npm run test:desktop
       - name: Package Windows installer
         shell: pwsh
         run: npm run dist:windows
@@ -119,7 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.7.5 adds hands-free voice mode on iPhone, Mac and Windows (Apple on-device speech by default; optional Groq, OpenAI and ElevenLabs keys; Windows listening needs a cloud key such as a free Groq key), photo and clipboard-image attachments from iPhone to your Mac or Windows host, a cleaner attachment menu and image pasting on Mac, and avatar-colored Mac controls. This is a development release.
+          0.7.6: voice replies are spoken while they stream and talking over the Bot stops it; Windows file attachments and Ctrl+V image paste; one-tap clipboard image paste and message search results on iPhone; reply notifications on Mac, Windows and iPhone (iPhone while connected); Download and install updates on Windows and Mac; password-encrypted backups on Windows and Mac; a first-run guide and a Talk to my Bot shortcut on iPhone; avatar-colored Windows controls and accessibility fixes. Automated Swift and desktop checks now run on every pull request. This is a development release.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -135,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.5" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.6" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.7.5 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.5 · Voice mode & image attachments' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.7.6 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.6 · Streaming voice, attachments everywhere & backups' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

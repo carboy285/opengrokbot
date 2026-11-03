@@ -307,6 +307,17 @@ final class AppModel: ObservableObject {
         catch { errorMessage = "The reply is visible but could not be saved. Check available storage before closing the app." }
     }
 
+    /// Replaces everything with a restored backup. CLI session IDs belong to the original device and are dropped.
+    @discardableResult
+    func restoreWorkspace(_ restored: Workspace) -> Bool {
+        guard restored.bots.filter({ $0.isMain == true }).count == 1 else { errorMessage = "This backup is missing its main Bot."; return false }
+        var value = restored
+        value.sessions = [:]
+        for index in value.entries.indices where value.entries[index].state == .streaming { value.entries[index].state = .stopped }
+        loadFailed = false
+        return commit { $0 = value }
+    }
+
     func session(for key: String) -> String? { workspace.sessions?[key] }
     func setSession(_ id: String, for key: String) { commit { value in if value.sessions == nil { value.sessions = [:] }; value.sessions?[key] = id } }
     func clearSession(for key: String) { commit { $0.sessions?.removeValue(forKey: key) } }

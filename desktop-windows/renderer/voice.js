@@ -1,4 +1,4 @@
-import { Vad, encodeWav, rms, speakable } from './voice-core.mjs';
+import { Vad, encodeWav, nextChunk, rms, speakable } from './voice-core.mjs';
 
 // Hands-free voice mode for Windows.
 // Listening needs a cloud key (Groq has a free tier) because Electron has no built-in speech recognition.
@@ -35,6 +35,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     const processor = audio.createScriptProcessor(2048, 1, 1);
     const vad = new Vad({ sampleRate: audio.sampleRate });
     const state = { mode: 'listening', alive: true, cancelSpeech: null };
+    let queue = [], draining = false, streamDone = false;
     session = { stop };
 
     const set = (mode, text) => { state.mode = mode; status.textContent = text; overlay.dataset.mode = mode; };
@@ -46,7 +47,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
       orb.style.transform = `scale(${1 + Math.min(1, rms(chunk) * 8) * 0.25})`;
       const heard = vad.push(chunk, state.mode === 'speaking' ? 'speaking' : 'listening');
       if (!heard) return;
-      if (heard.type === 'barge') { if (settings.talkOver) { state.cancelSpeech?.(); set('listening', 'Listening…'); } else vad.reset(); return; }
+      if (heard.type === 'barge') { if (settings.talkOver) { queue = []; state.cancelSpeech?.(); set('listening', 'Listening…'); } else vad.reset(); return; }
       handleUtterance(heard.samples);
     };
     source.connect(processor); processor.connect(audio.destination);
@@ -61,30 +62,40 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
         caption.textContent = text; set('thinking', 'Thinking…');
         const before = latestReply(bot)?.id;
         await sendText(bot, text);
-        for (let waited = 0; state.alive && waited < 180000; waited += 300) {
-          await new Promise(done => setTimeout(done, 300));
+        // Speak finished sentences while the reply is still being written.
+        let offset = 0, started = false;
+        for (let waited = 0; state.alive && waited < 180000; waited += 250) {
+          await new Promise(done => setTimeout(done, 250));
           const reply = latestReply(bot);
-          if (reply && reply.id !== before && reply.finished) { await speak(reply.text); return; }
+          if (!reply || reply.id === before) continue;
+          if (started && state.mode !== 'speaking') { if (!reply.finished) bridge.stop?.(bot.id); return; }
+          const piece = nextChunk(reply.text, offset, reply.finished);
+          offset = piece.next;
+          const spoken = speakable(piece.chunk);
+          if (spoken) { if (!started) { beginSpeaking(); started = true; } enqueue(spoken); }
+          if (reply.finished) { if (started) endSpeaking(); else resume(); return; }
         }
-        resume();
+        if (started) endSpeaking(); else resume();
       } catch (error) { note.textContent = error.message; resume(); }
     }
 
     function resume() { if (!state.alive) return; vad.reset(); set('listening', 'Listening…'); }
 
-    async function speak(raw) {
-      const text = speakable(raw);
-      if (!text || !state.alive) { resume(); return; }
-      vad.reset(); set('speaking', 'Speaking · click the orb to interrupt'); caption.textContent = '';
-      try {
-        if (settings.speaker === 'system' || !settings.keys[settings.speaker]) await speakSystem(text);
-        else {
-          let bytes;
-          try { bytes = Uint8Array.from(atob(await result(bridge.voiceSpeak(text))), c => c.charCodeAt(0)); }
-          catch (error) { note.textContent = `${error.message} Using the Windows voice instead.`; await speakSystem(text); resume(); return; }
-          await playAudio(bytes);
-        }
-      } finally { if (state.mode === 'speaking') resume(); }
+    function beginSpeaking() { vad.reset(); queue = []; streamDone = false; set('speaking', 'Speaking · click the orb to interrupt'); caption.textContent = ''; }
+    function enqueue(text) { if (state.mode !== 'speaking') return; queue.push(text); if (!draining) drain(); }
+    function endSpeaking() { streamDone = true; if (!draining && state.mode === 'speaking') resume(); }
+    async function drain() {
+      draining = true;
+      while (state.alive && state.mode === 'speaking' && queue.length) await speakPiece(queue.shift());
+      draining = false;
+      if (state.alive && state.mode === 'speaking' && streamDone) resume();
+    }
+    async function speakPiece(text) {
+      if (settings.speaker === 'system' || !settings.keys[settings.speaker]) { await speakSystem(text); return; }
+      let bytes;
+      try { bytes = Uint8Array.from(atob(await result(bridge.voiceSpeak(text))), c => c.charCodeAt(0)); }
+      catch (error) { note.textContent = `${error.message} Using the Windows voice instead.`; await speakSystem(text); return; }
+      if (state.mode === 'speaking') await playAudio(bytes);
     }
 
     function speakSystem(text) {
@@ -114,14 +125,14 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
       });
     }
 
-    orb.addEventListener('click', () => { if (state.mode === 'speaking') { state.cancelSpeech?.(); resume(); } });
+    orb.addEventListener('click', () => { if (state.mode === 'speaking') { queue = []; state.cancelSpeech?.(); resume(); } });
     end.addEventListener('click', stop);
     gear.addEventListener('click', () => { stop(); openSettings?.(); });
     overlay.addEventListener('keydown', event => { if (event.key === 'Escape') stop(); });
 
     function stop() {
       if (!session) return;
-      session = null; state.alive = false; state.cancelSpeech?.();
+      session = null; state.alive = false; queue = []; state.cancelSpeech?.();
       window.speechSynthesis.cancel();
       processor.disconnect(); source.disconnect(); stream.getTracks().forEach(track => track.stop()); audio.close().catch(() => {});
       overlay.remove();
@@ -131,6 +142,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
   function stop() { session?.stop(); }
 
   async function renderSettings(page) {
+    if (!bridge.voiceSettings) { page.append(el('p', 'muted', 'Voice settings are available in the installed app.')); return; }
     const settings = await result(bridge.voiceSettings());
     const form = el('div', 'voice-settings');
     const row = (label, control) => { const wrap = el('label', 'voice-row'); wrap.append(el('span', '', label), control); return wrap; };

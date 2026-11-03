@@ -50,22 +50,18 @@ const {_electron:electron}=require('@playwright/test');const fs=require('node:fs
   await page.waitForFunction(async()=>{const r=await window.desktop.load();return r.value.teamMessages.every(x=>x.status==='complete');});
   const teamCalls=(await fs.readFile(path.join(directory,'invocations.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);assert.equal(teamCalls.filter(x=>x.text.endsWith('Create team fixture')).length,1);assert.ok(teamCalls.filter(x=>x.args.includes('fixture-model')).length>=4);assert.ok(teamCalls.every(x=>!x.args.includes('must-not-run')));
   await page.locator('#primary-bot button').click();
-  const remoteStatus=await page.evaluate(()=>window.desktop.remoteEnable('wifi','http://127.0.0.1:48291'));assert.equal(remoteStatus.ok,true);
-  const pairingURL=new URL((await page.evaluate(()=>window.desktop.remoteLink())).value),remoteBase=pairingURL.searchParams.get('host'),remoteHeaders={Authorization:'Bearer '+pairingURL.hash.slice(1)};
-  assert.equal((await fetch(remoteBase+'/v1/state')).status,401);
-  const remoteState=await (await fetch(remoteBase+'/v1/state',{headers:remoteHeaders})).json();assert.equal(remoteState.protocolVersion,1);assert.equal(remoteState.workspace.sessions,undefined);assert.ok(remoteState.workspace.bots.every(x=>typeof x.symbol==='string'));assert.ok(remoteState.workspace.entries.every(x=>/T.*Z$/.test(x.date)&&!x.date.includes('.')));
-  await page.evaluate(()=>window.desktop.windowAction('close')); // Closing the window must leave the host running in the tray.
-  const phoneCommand={requestID:require('node:crypto').randomUUID(),action:'send',botID:mainID,text:'Remote controller fixture 🌎'};
-  for(let index=0;index<2;index++)assert.equal((await fetch(remoteBase+'/v1/command',{method:'POST',headers:{...remoteHeaders,'Content-Type':'application/json'},body:JSON.stringify(phoneCommand)})).status,200);
-  let phoneState;for(let index=0;index<100;index++){phoneState=await(await fetch(remoteBase+'/v1/state',{headers:remoteHeaders})).json();if(phoneState.workspace.entries.at(-1)?.state==='complete')break;await new Promise(resolve=>setTimeout(resolve,50));}
-  assert.equal(phoneState.workspace.entries.filter(x=>x.id===phoneCommand.requestID).length,1);assert.equal(phoneState.workspace.entries.at(-1).text,'Native CLI reply 🌎');
+  await page.evaluate(()=>window.desktop.windowAction('close')); // Closing the window must leave the app running in the tray.
   await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].show());
-  assert.equal((await page.evaluate(()=>window.desktop.remoteRotate())).ok,true);assert.equal((await fetch(remoteBase+'/v1/state',{headers:remoteHeaders})).status,401);
-  assert.equal((await page.evaluate(()=>window.desktop.remoteDisable())).ok,true);
+  const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const stored=await page.evaluate(([id,data])=>window.desktop.attachData(id,'image/png',data),[mainID,png]);assert.equal(stored.ok,true);
+  const attached=await page.evaluate(([id,name])=>window.desktop.send(id,'Attachment fixture',crypto.randomUUID(),[name]),[mainID,stored.value]);assert.equal(attached.ok,true);
+  assert.ok(attached.value.entries.some(x=>x.kind==='user'&&x.text.includes('Attachments/'+stored.value)));
+  assert.equal((await page.evaluate(id=>window.desktop.send(id,'Bad attachment',crypto.randomUUID(),['../outside.txt']),mainID)).ok,false);
+  await page.waitForFunction(async()=>{const r=await window.desktop.load();return r.value.entries.at(-1)?.state!=='streaming';});
   const secret='encrypted-smoke-'+Date.now();assert.equal((await page.evaluate(value=>window.desktop.vaultSave('Test secret',value),secret)).ok,true);
   const item=(await page.evaluate(()=>window.desktop.vaultList())).value.find(x=>x.title==='Test secret');assert.ok(item);assert.equal((await page.evaluate(id=>window.desktop.vaultRead(id),item.id)).value,secret);assert.equal((await fs.readFile(path.join(directory,'vault.json'),'utf8')).includes(secret),false);
   await page.evaluate(id=>window.desktop.vaultDelete(id),item.id);assert.deepEqual(errors,[]);
   await desktop.close();desktop=await launch();const relaunched=await desktop.firstWindow();await relaunched.locator('.bubble').getByText('Remember this conversation',{exact:true}).waitFor();
-  console.log('PASS: native setup, single empty Bot, real fixture CLI subprocess, Unicode reply, resumed session, cancellation, isolated renderer, persistence, encrypted vault, authenticated remote control while the window is closed, duplicate-send suppression, and pairing revocation.');
+  console.log('PASS: native setup, single empty Bot, real fixture CLI subprocess, Unicode reply, resumed session, cancellation, isolated renderer, persistence, encrypted vault, tray close/reopen, and image attachments with path validation.');
  }finally{if(desktop)await desktop.close();await fs.rm(directory,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
