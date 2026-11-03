@@ -3,6 +3,8 @@ import Foundation
 
 /// Each request owns one subprocess. Prompts use stdin or a private file, never a shell.
 final class LocalCLIRun: @unchecked Sendable {
+    private let keys: KeychainSecretStore
+    init(keys: KeychainSecretStore = ProviderAPIKeys.defaultStore) { self.keys = keys }
     private let lock = NSLock()
     private let process = Process()
     private var cancelled = false
@@ -26,8 +28,8 @@ final class LocalCLIRun: @unchecked Sendable {
         }
     }
 
-    static func stream(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil, model: String = "") -> AsyncThrowingStream<CLIEvent, Error> {
-        LocalCLIRun().events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model)
+    static func stream(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil, model: String = "", keys: KeychainSecretStore = ProviderAPIKeys.defaultStore) -> AsyncThrowingStream<CLIEvent, Error> {
+        LocalCLIRun(keys: keys).events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model)
     }
 
     func events(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil, model: String = "") -> AsyncThrowingStream<CLIEvent, Error> {
@@ -70,7 +72,9 @@ final class LocalCLIRun: @unchecked Sendable {
             process.executableURL = URL(fileURLWithPath: cli.path)
             process.arguments = command.arguments + mcp.arguments
             process.currentDirectoryURL = directory
+            // An API key the user saved for this provider goes to the CLI only through its environment: never argv, files, or logs.
             process.environment = CLIInstallationScanner.environment.merging(mcp.environment) { _, new in new }
+                .merging(ProviderAPIKeys.environment(for: cli.provider, store: keys)) { _, new in new }
             process.standardInput = input; process.standardOutput = output; process.standardError = error
             // A child exiting before consuming stdin must not terminate the GUI with SIGPIPE.
             _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
@@ -183,5 +187,59 @@ enum CLIInstallationScanner {
             _ = drains.wait(timeout: .now() + 1)
             return (task.terminationStatus, String(data: collected.value, encoding: .utf8) ?? "")
         } catch { return (-1, "") }
+    }
+}
+
+
+/// Optional API keys for the provider CLIs. A saved key is injected into that CLI's environment instead of its
+/// sign-in/subscription; remove the key to go back to the CLI's own login. Keys live only in this Mac's Keychain.
+enum ProviderAPIKeys {
+    static let defaultStore = KeychainSecretStore(service: "org.opengrokbot.mac.provider-api-keys")
+
+    struct Info {
+        let variables: [String]
+        let console: URL
+        let example: String
+        let billing: String
+    }
+
+    /// Environment variable(s) each CLI reads. OpenCode is not listed: it keeps its own per-provider keys (`opencode auth login`).
+    static func info(for provider: CLIProvider) -> Info? {
+        switch provider {
+        case .codex: Info(variables: ["CODEX_API_KEY", "OPENAI_API_KEY"], console: URL(string: "https://platform.openai.com/api-keys")!, example: "sk-…", billing: "OpenAI API usage is billed per token to your API account, separately from a ChatGPT subscription.")
+        case .claude: Info(variables: ["ANTHROPIC_API_KEY"], console: URL(string: "https://console.anthropic.com/settings/keys")!, example: "sk-ant-…", billing: "Claude Code uses a configured API key instead of your Claude subscription, so usage is billed per token to your Anthropic API account.")
+        case .grok: Info(variables: ["XAI_API_KEY"], console: URL(string: "https://console.x.ai")!, example: "xai-…", billing: "xAI API usage is billed per token to your xAI account, separately from any X or Grok subscription.")
+        case .gemini: Info(variables: ["GEMINI_API_KEY"], console: URL(string: "https://aistudio.google.com/apikey")!, example: "AIza…", billing: "Gemini API usage follows your Google AI Studio plan and quota.")
+        case .opencode: nil
+        }
+    }
+
+    /// Keys contain no whitespace or control characters. Anything else is a paste mistake and is rejected rather than stored.
+    static func normalized(_ raw: String) -> String? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (8...512).contains(value.count), value.unicodeScalars.allSatisfy({ (0x21...0x7E).contains($0.value) }) else { return nil }
+        return value
+    }
+
+    static func masked(_ key: String) -> String { "••••" + key.suffix(4) }
+
+    static func get(_ provider: CLIProvider, store: KeychainSecretStore = defaultStore) -> String? {
+        guard let data = try? store.read(account: provider.rawValue), let text = String(data: data, encoding: .utf8) else { return nil }
+        return normalized(text)
+    }
+
+    @discardableResult
+    static func save(_ raw: String, for provider: CLIProvider, store: KeychainSecretStore = defaultStore) throws -> Bool {
+        guard info(for: provider) != nil, let key = normalized(raw) else { return false }
+        try store.save(Data(key.utf8), account: provider.rawValue)
+        return true
+    }
+
+    static func remove(_ provider: CLIProvider, store: KeychainSecretStore = defaultStore) throws { try store.delete(account: provider.rawValue) }
+
+    /// Variables to add to the CLI's environment; empty when no key is saved (the CLI then uses its own sign-in).
+    static func environment(for provider: CLIProvider, store: KeychainSecretStore = defaultStore) -> [String:String] {
+        guard let info = info(for: provider), let key = get(provider, store: store) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: info.variables.map { ($0, key) })
     }
 }

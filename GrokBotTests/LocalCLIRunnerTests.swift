@@ -117,5 +117,53 @@ final class LocalCLIRunnerTests: XCTestCase {
         XCTAssertFalse(arguments.contains("never-called"))
     }
 
+
+    func testAPIKeysAreValidatedMaskedAndMappedToTheRightVariables() throws {
+        XCTAssertEqual(ProviderAPIKeys.normalized("  sk-ant-abcdef123456\n"), "sk-ant-abcdef123456")
+        XCTAssertNil(ProviderAPIKeys.normalized("short"))
+        XCTAssertNil(ProviderAPIKeys.normalized("two words in a key"))
+        XCTAssertNil(ProviderAPIKeys.normalized("sk-abcdef\n123456"))
+        XCTAssertNil(ProviderAPIKeys.normalized("sk-abcdef123456🔑"))
+        XCTAssertEqual(ProviderAPIKeys.masked("sk-ant-abcdef123456"), "••••3456")
+        XCTAssertEqual(ProviderAPIKeys.info(for: .claude)?.variables, ["ANTHROPIC_API_KEY"])
+        XCTAssertEqual(ProviderAPIKeys.info(for: .grok)?.variables, ["XAI_API_KEY"])
+        XCTAssertEqual(ProviderAPIKeys.info(for: .gemini)?.variables, ["GEMINI_API_KEY"])
+        XCTAssertEqual(ProviderAPIKeys.info(for: .codex)?.variables, ["CODEX_API_KEY", "OPENAI_API_KEY"])
+        XCTAssertNil(ProviderAPIKeys.info(for: .opencode))
+    }
+
+    func testSavedAPIKeyReachesOnlyThatCLIsEnvironmentNeverItsArguments() async throws {
+        let store = KeychainSecretStore(service: "org.opengrokbot.tests.provider-keys." + UUID().uuidString)
+        defer { for provider in CLIProvider.allCases { try? ProviderAPIKeys.remove(provider, store: store) } }
+        XCTAssertTrue(ProviderAPIKeys.environment(for: .claude, store: store).isEmpty)
+        XCTAssertFalse(try ProviderAPIKeys.save("not a key", for: .claude, store: store))
+        XCTAssertFalse(try ProviderAPIKeys.save("sk-ant-abcdef123456", for: .opencode, store: store))
+        XCTAssertTrue(try ProviderAPIKeys.save("sk-ant-test-key-123456", for: .claude, store: store))
+        XCTAssertEqual(ProviderAPIKeys.environment(for: .claude, store: store), ["ANTHROPIC_API_KEY": "sk-ant-test-key-123456"])
+        XCTAssertTrue(ProviderAPIKeys.environment(for: .grok, store: store).isEmpty)
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("claude-fixture")
+        let script = """
+        #!/bin/sh
+        printf '%s\\n' "$@" > arguments.txt
+        printf '%s' "$ANTHROPIC_API_KEY" > anthropic-key.txt
+        cat > received-prompt.txt
+        printf '%s\\n' '{"type":"result","result":"ok","session_id":"s1"}'
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let cli = InstalledCLI(provider: .claude, path: executable.path, version: "fixture")
+        for try await _ in LocalCLIRun.stream(cli: cli, prompt: "hello", session: nil, directory: root, keys: store) {}
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("anthropic-key.txt"), encoding: .utf8), "sk-ant-test-key-123456")
+        XCTAssertFalse(try String(contentsOf: root.appendingPathComponent("arguments.txt"), encoding: .utf8).contains("sk-ant"))
+        XCTAssertFalse(try String(contentsOf: root.appendingPathComponent("received-prompt.txt"), encoding: .utf8).contains("sk-ant"))
+
+        try ProviderAPIKeys.remove(.claude, store: store)
+        XCTAssertTrue(ProviderAPIKeys.environment(for: .claude, store: store).isEmpty)
+    }
+
 }
 #endif

@@ -41,6 +41,7 @@ struct MacSettingsView: View {
                         case .general: general
                         case .computer: computer
                         case .permissions: unavailable(title: "Your CLI keeps its permissions", detail: "Codex runs with read-only workspace access. Other CLIs keep their own configured permissions. This app does not add approval-bypass flags or auto-approve tools.", icon: "shield")
+                        case .apiKeys: MacAPIKeysView()
                         case .vault: MacVaultView()
                         case .usage: unavailable(title: "AI usage belongs to your CLI account", detail: "OpenGrokBot has no subscription or inference fees of its own. Your chosen CLI provider may have usage limits or charges. No account usage percentage is guessed here.", icon: "chart.bar")
                         case .updates: updates
@@ -151,4 +152,69 @@ struct MacSettingsView: View {
     }
 
     private func openDocumentation(_ address: String) { if let url = URL(string: address) { NSWorkspace.shared.open(url) } }
+}
+
+
+/// Optional API keys for the provider CLIs. Subscriptions need no key: sign in through the CLI instead.
+private struct MacAPIKeysView: View {
+    private static let providers = CLIProvider.allCases.filter { ProviderAPIKeys.info(for: $0) != nil }
+    @State private var drafts: [CLIProvider:String] = [:]
+    @State private var saved: [CLIProvider:String] = [:]
+    @State private var feedback: [CLIProvider:String] = [:]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Use your own API keys").font(.system(size: 18, weight: .medium))
+                Text("A ChatGPT, Claude or Grok subscription works without a key: sign in through that provider’s CLI in Setup. Add an API key here only if you want a Bot to use pay-per-token API access instead. A saved key replaces the CLI’s own sign-in for that provider until you remove it.")
+                    .font(.system(size: 15)).lineSpacing(5).foregroundStyle(MacTheme.secondary)
+                Text("Keys are stored only in this Mac’s Keychain and handed to the CLI through its environment. They are never shown to Bots, written to files, or synced.")
+                    .font(.system(size: 13)).lineSpacing(4).foregroundStyle(MacTheme.secondary)
+            }.padding(22).frame(maxWidth: .infinity, alignment: .leading).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+            ForEach(Self.providers) { provider in card(provider) }
+            Text("OpenCode manages its own provider keys: run opencode auth login in Terminal.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+        }.onAppear(perform: load)
+    }
+
+    private func card(_ provider: CLIProvider) -> some View {
+        let info = ProviderAPIKeys.info(for: provider)!
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(provider.name).font(.system(size: 17, weight: .medium))
+                Spacer()
+                if let mask = saved[provider] { Label("Using API key \(mask)", systemImage: "checkmark.seal.fill").font(.system(size: 13)).foregroundStyle(.green) }
+                else { Text("Using CLI sign-in").font(.system(size: 13)).foregroundStyle(MacTheme.secondary) }
+            }
+            HStack {
+                SecureField(info.example, text: Binding(get: { drafts[provider] ?? "" }, set: { drafts[provider] = $0 })).textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("api-key-\(provider.rawValue)")
+                MacPillButton(title: saved[provider] == nil ? "Save to Keychain" : "Replace key", prominent: true) { save(provider) }
+                    .disabled((drafts[provider] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if saved[provider] != nil { MacPillButton(title: "Remove") { remove(provider) } }
+            }
+            Text(info.billing).font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary)
+            HStack {
+                Link("Get a key ↗", destination: info.console).font(.system(size: 12))
+                Text("Sets \(info.variables.joined(separator: ", ")) for \(provider.name) only.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+            }
+            if let message = feedback[provider] { Text(message).font(.system(size: 13)).foregroundStyle(MacTheme.secondary) }
+        }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func load() { for provider in Self.providers { saved[provider] = ProviderAPIKeys.get(provider).map(ProviderAPIKeys.masked) } }
+
+    private func save(_ provider: CLIProvider) {
+        let draft = drafts[provider] ?? ""
+        do {
+            guard try ProviderAPIKeys.save(draft, for: provider) else { feedback[provider] = "That does not look like an API key. Paste only the key, with no spaces or line breaks."; return }
+            drafts[provider] = ""; feedback[provider] = "Saved. New messages from Bots using \(provider.name) will use this key."
+        } catch { feedback[provider] = "The Keychain could not save this key. Unlock your Mac and try again." }
+        load()
+    }
+
+    private func remove(_ provider: CLIProvider) {
+        do { try ProviderAPIKeys.remove(provider); feedback[provider] = "Removed. \(provider.name) will use its own sign-in again." }
+        catch { feedback[provider] = "The Keychain could not remove this key. Unlock your Mac and try again." }
+        load()
+    }
 }

@@ -14,13 +14,14 @@ enum MacPanel: String, Identifiable {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "General", computer = "Computer", permissions = "Permissions", vault = "Vault", usage = "Usage & Billing", updates = "Updates"
+    case general = "General", computer = "Computer", permissions = "Permissions", apiKeys = "API Keys", vault = "Vault", usage = "Usage & Billing", updates = "Updates"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .general: "gearshape"
         case .computer: "desktopcomputer"
         case .permissions: "shield"
+        case .apiKeys: "key"
         case .vault: "lock.square"
         case .usage: "chart.bar"
         case .updates: "arrow.down.circle"
@@ -371,7 +372,11 @@ extension MacAppModel {
         guard let cli = selectedCLI else { return }
         checkingLogin = true; loginVerified = false
         Task {
-            if cli.provider == .codex {
+            if ProviderAPIKeys.get(cli.provider) != nil {
+                loginVerified = true
+                providerHealth[cli.provider] = "Using API key"
+                setupFeedback = "\(cli.provider.name) will use the API key saved in Settings → API Keys. Remove the key there to use the CLI’s own sign-in."
+            } else if cli.provider == .codex {
                 let status = await Task.detached { CLIInstallationScanner.capture(path: cli.path, arguments: ["login", "status"], timeout: 12).exit }.value
                 loginVerified = status == 0
                 providerHealth[cli.provider] = loginVerified ? "Signed in" : "Needs sign-in"

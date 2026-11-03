@@ -64,6 +64,8 @@ This independent app does not sign in to the proprietary Grok Bot service, sync 
 
 ## Data and credentials
 
+**Optional provider API keys (macOS).** Subscriptions (ChatGPT, Claude, Grok) work by signing in through the provider's CLI; no key is needed. To use pay-per-token API access instead, open **Settings → API Keys** and save a key for Codex/OpenAI (`CODEX_API_KEY` and `OPENAI_API_KEY`), Claude Code (`ANTHROPIC_API_KEY`), Grok Build (`XAI_API_KEY`) or Gemini CLI (`GEMINI_API_KEY`). A saved key replaces that CLI's sign-in until removed, so usage is billed to the API account. Keys are kept in the Mac Keychain and passed to that CLI only through its process environment, never in arguments, files, or prompts. OpenCode keeps its own keys (`opencode auth login`). The Windows app does not have this setting yet.
+
 Conversation text and session IDs are stored locally in normal application data directories. AI CLIs send prompts to their configured provider or local model. CLI login credentials remain with those CLIs.
 
 Composio project credentials and scoped session URLs stay in **macOS Keychain** or **Windows encrypted device storage**. They are not placed in command arguments, generated MCP configuration files, or logs. MCP configuration uses environment placeholders in private per-Bot working directories. Composio API requests go to its fixed HTTPS origin; returned browser/MCP URLs must use trusted Composio HTTPS hosts. Removing the project locally stops access from new runs; revoke connected accounts in Composio to remove authorization at the service.
