@@ -36,6 +36,8 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
+**0.7.8** lets Bots see a screenshot of the web pages they browse and adds optional per-provider API keys on Mac (Settings → API Keys).
+
 **0.7.3** hides the horizontal scrollbar under pinned Bots on Mac while preserving sideways scrolling. [Downloads](docs/DOWNLOADS.md).
 
 The **0.7.2 update** improves remote bot loading between Windows, Mac and iPhone with a smaller initial roster, compatible workspace replies, reconnect controls and visible errors. It also adds recent-use sorting for unpinned Bots, visible local Bot browsers and Linux VM setup through UTM/VirtualBox. See [0.7.2 remote setup and limits](docs/REMOTE_0_7_2.md). It retains [0.7.1 features](docs/BUGFIX_0_7_1.md), including shared pins and scheduled tasks. Local browser profiles replace the cloud-browser requirement.

@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.7.7/ --output=artifacts/OpenGrokBot-0.7.7-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.7.8/ --output=artifacts/OpenGrokBot-0.7.8-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,7 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.7.7: a redesigned Bot details panel on Mac, iPhone and Windows, and in-app updates that download, verify, then Restart and install in place on Mac and Windows (Mac swaps the app and reopens it; Windows runs the installer silently and reopens). Install 0.7.7 by hand once; later updates can use Restart and install. This is a development release.
+          0.7.8: Bots now see the web pages they browse (a screenshot of the rendered page is saved to the Bot's Attachments folder, so dynamic pages such as fantasy draft rooms are readable), and on Mac you can add optional API keys for Codex/OpenAI, Claude Code, Grok Build and Gemini CLI in Settings → API Keys. Includes the 0.7.8 Bot details redesign and in-app updates. This is a development release.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -137,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.7" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.8" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.7.7 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.7 · Bot details redesign & in-app updates' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.7.8 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.8 · Bot details redesign & in-app updates' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
