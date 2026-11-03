@@ -15,6 +15,10 @@ final class DesktopUpdates: ObservableObject {
     @Published private(set) var releaseURL: URL?
     @Published private(set) var checkedAt: Date?
     @Published private(set) var downloading = false
+    /// Set once a verified update is unpacked next to the app and ready to swap in.
+    @Published private(set) var stagedVersion: String?
+    private var stagedApp: URL?
+    var readyToInstall: Bool { stagedApp != nil }
     private var installer: (dmg: URL, checksum: URL)?
     var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.7.3" }
     private struct Asset: Decodable { var name: String; var browser_download_url: String }
@@ -49,9 +53,10 @@ final class DesktopUpdates: ObservableObject {
     }
     var canInstall: Bool { available && installer != nil }
 
-    /// Downloads the DMG to ~/Downloads, checks it against the published SHA-256, and opens it so you can replace the app.
-    func downloadAndOpen() async {
-        guard let installer, !downloading else { return }
+    /// Downloads the DMG, checks it against the published SHA-256, unpacks the app next to this one and checks its signature.
+    /// Nothing is replaced until you choose Restart and install.
+    func downloadAndStage() async {
+        guard let installer, !downloading, stagedApp == nil else { return }
         downloading = true; defer { downloading = false }
         message = "Downloading \(version)…"
         do {
@@ -67,9 +72,29 @@ final class DesktopUpdates: ObservableObject {
             let target = downloads.appendingPathComponent(installer.dmg.lastPathComponent)
             try? FileManager.default.removeItem(at: target)
             try FileManager.default.moveItem(at: temporary, to: target)
-            NSWorkspace.shared.open(target)
-            message = "Downloaded and verified. Quit OpenGrokBot, drag the new app into Applications to replace the old one, then open it again."
+            message = "Unpacking \(version)…"
+            let wanted = version.hasPrefix("v") ? String(version.dropFirst()) : version
+            let bundleID = Bundle.main.bundleIdentifier ?? ""
+            let running = Bundle.main.bundleURL
+            do {
+                let staged = try await Task.detached { try UpdateStaging.stage(dmg: target, expectedVersion: wanted, bundleID: bundleID, runningApp: running) }.value
+                stagedApp = staged; stagedVersion = version
+                message = "\(version) is ready. Restart to install it. Your workspace is kept."
+            } catch {
+                // Could not swap in place (for example, the app is in a folder you can't write to): fall back to the disk image.
+                NSWorkspace.shared.open(target)
+                message = "Downloaded and verified. \((error as? LocalizedError)?.errorDescription ?? "Automatic install isn’t available here.") Drag the new app into Applications to replace the old one."
+            }
         } catch { message = "The update could not be downloaded. Try again, or use the download page." }
+    }
+
+    /// Quits the app, swaps the new version in, and opens it again.
+    func restartAndInstall() {
+        guard let staged = stagedApp else { return }
+        do {
+            try UpdateStaging.launchInstaller(staged: staged, target: Bundle.main.bundleURL)
+            NSApp.terminate(nil)
+        } catch { message = "The install could not be started. Open the disk image in Downloads and drag the app into Applications." }
     }
 
     func openDownload() {
@@ -97,6 +122,8 @@ final class DesktopUpdates: ObservableObject {
 
 struct DesktopUpdatesView: View {
     @ObservedObject var updates: DesktopUpdates
+    /// True while a Bot is replying; installing then would cut the reply off.
+    var busy = false
     @AppStorage("checkAppUpdates") private var automatic = true
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -105,14 +132,18 @@ struct DesktopUpdatesView: View {
             Toggle("Notify me about updates once a day when the app is open", isOn: $automatic)
             HStack {
                 Button(updates.checking ? "Checking…" : "Check for updates") { Task { await updates.check() } }.disabled(updates.checking)
-                if updates.canInstall {
-                    Button(updates.downloading ? "Downloading…" : "Download and install") { Task { await updates.downloadAndOpen() } }
+                if updates.readyToInstall {
+                    Button("Restart and install") { updates.restartAndInstall() }
+                        .buttonStyle(.borderedProminent).disabled(busy)
+                } else if updates.canInstall {
+                    Button(updates.downloading ? "Downloading…" : "Download update") { Task { await updates.downloadAndStage() } }
                         .buttonStyle(.borderedProminent).disabled(updates.downloading)
                 }
                 if updates.available { Button("Open download page") { updates.openDownload() } }
             }
+            if updates.readyToInstall && busy { Text("A Bot is still replying. Restart when it finishes.").font(.footnote).foregroundStyle(.secondary) }
             if let date = updates.checkedAt { Text("Last checked \(date.formatted())").font(.caption).foregroundStyle(.secondary) }
-            Text("Install the new build using the same app location. Your saved workspace is kept. Updates are downloaded from this project’s GitHub releases.").font(.footnote).foregroundStyle(.secondary)
+            Text("Updates come from this project’s GitHub releases and are checked before they are installed. Restart replaces the app in place and reopens it; your workspace is kept.").font(.footnote).foregroundStyle(.secondary)
         }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 18))
     }
 }
@@ -238,5 +269,83 @@ struct MacBackupView: View {
             if app.restoreWorkspace(restored) { restorePassword = ""; status = "Backup restored. A safety copy of the previous workspace is in Application Support/OpenGrokBot." }
             else { status = app.errorMessage ?? "The backup could not be restored." }
         } catch { status = (error as? LocalizedError)?.errorDescription ?? "The backup could not be restored." }
+    }
+}
+
+/// Unpacks a downloaded update and swaps it in after the app quits.
+enum UpdateStaging {
+    struct Failure: LocalizedError {
+        let errorDescription: String?
+        init(_ message: String) { errorDescription = message }
+    }
+
+    @discardableResult
+    private static func run(_ path: String, _ arguments: [String]) throws -> String {
+        let process = Process(), pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: path); process.arguments = arguments
+        process.standardOutput = pipe; process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw Failure(String(data: data, encoding: .utf8) ?? "A helper tool failed.") }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// Mounts the DMG, copies the app next to the running one (same volume, so the swap is a rename), and verifies it.
+    static func stage(dmg: URL, expectedVersion: String, bundleID: String, runningApp: URL) throws -> URL {
+        let parent = runningApp.deletingLastPathComponent()
+        guard FileManager.default.isWritableFile(atPath: parent.path) else { throw Failure("This app’s folder isn’t writable.") }
+        let mount = FileManager.default.temporaryDirectory.appendingPathComponent("opengrokbot-mount-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
+        try run("/usr/bin/hdiutil", ["attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mount.path, dmg.path])
+        defer {
+            _ = try? run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
+            try? FileManager.default.removeItem(at: mount)
+        }
+        let apps = (try FileManager.default.contentsOfDirectory(at: mount, includingPropertiesForKeys: nil)).filter { $0.pathExtension == "app" }
+        guard let source = apps.first(where: { Bundle(url: $0)?.bundleIdentifier == bundleID }),
+              let info = Bundle(url: source)?.infoDictionary,
+              (info["CFBundleShortVersionString"] as? String) == expectedVersion else { throw Failure("The disk image doesn’t contain the expected version.") }
+        let folder = parent.appendingPathComponent(".OpenGrokBot-update", isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let staged = folder.appendingPathComponent(runningApp.lastPathComponent)
+        try run("/usr/bin/ditto", [source.path, staged.path])
+        do { try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path]) }
+        catch { try? FileManager.default.removeItem(at: folder); throw Failure("The new app failed its signature check.") }
+        return staged
+    }
+
+    private static let script = """
+    #!/bin/sh
+    # Waits for OpenGrokBot to quit, swaps in the staged app, and reopens it.
+    PID="$1"; NEW="$2"; TARGET="$3"; BACKUP="$TARGET.previous"
+    i=0
+    while kill -0 "$PID" 2>/dev/null && [ "$i" -lt 150 ]; do sleep 0.2; i=$((i+1)); done
+    if [ -d "$NEW" ]; then
+      rm -rf "$BACKUP"
+      if mv "$TARGET" "$BACKUP"; then
+        if mv "$NEW" "$TARGET"; then
+          xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null
+          rm -rf "$BACKUP"
+        else
+          mv "$BACKUP" "$TARGET"
+        fi
+      fi
+      rmdir "$(dirname "$NEW")" 2>/dev/null
+    fi
+    open "$TARGET"
+    rm -f "$0"
+    """
+
+    static func launchInstaller(staged: URL, target: URL) throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("opengrokbot-install-" + UUID().uuidString + ".sh")
+        try script.write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/nohup")
+        process.arguments = ["/bin/sh", file.path, String(ProcessInfo.processInfo.processIdentifier), staged.path, target.path]
+        process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
+        try process.run()
     }
 }

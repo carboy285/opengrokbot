@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('desktop', {
   saveDrafts:value=>ipcRenderer.invoke('drafts:save',value),
   checkUpdates:()=>ipcRenderer.invoke('updates:check'),
   openUpdate:url=>ipcRenderer.invoke('updates:open',url),
+  downloadUpdate:()=>ipcRenderer.invoke('updates:download'),
   installUpdate:()=>ipcRenderer.invoke('updates:install'),
   exportBackup:password=>ipcRenderer.invoke('backup:export',password),
   importBackup:password=>ipcRenderer.invoke('backup:import',password),

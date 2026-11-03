@@ -46,3 +46,15 @@ test('download verifies size and sha256 and removes bad files', async () => {
     await assert.rejects(download({ url }, bad, async () => new Response('', { status: 404 })), /could not be downloaded/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('installCommand builds a silent install-then-relaunch command and refuses risky paths', () => {
+  const { installCommand } = require('./updates.cjs');
+  const command = installCommand('C:\\Users\\Me\\AppData\\Local\\Temp\\OpenGrokBot-v0.7.7-Setup.exe', 'C:\\Users\\Me\\AppData\\Local\\Programs\\OpenGrokBot\\OpenGrokBot.exe');
+  assert.equal(command.file, 'cmd.exe');
+  assert.deepEqual(command.args.slice(0, 3), ['/d', '/s', '/c']);
+  assert.match(command.args[3], /\/S && start "" "C:\\Users\\Me\\AppData\\Local\\Programs\\OpenGrokBot\\OpenGrokBot\.exe"/);
+  assert.equal(installCommand('C:\\Temp\\a&calc.exe', 'C:\\x\\y.exe'), null);
+  assert.equal(installCommand('C:\\Temp\\ok.exe', 'C:\\x\\100%.exe'), null);
+  assert.equal(installCommand('relative.exe', 'C:\\x\\y.exe'), null);
+  assert.equal(installCommand(undefined, 'C:\\x\\y.exe'), null);
+});
