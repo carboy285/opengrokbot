@@ -165,13 +165,13 @@ function renderInspector(){
  for(const name of ['Details','Library','Computer']){const tab=button(name,()=>{inspectorTab=name;renderInspector();},name===inspectorTab?'active':'');tab.setAttribute('aria-current',String(name===inspectorTab));tabs.append(tab);}
  const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
  if(inspectorTab==='Details'){
-  body.append(button('Set up / open Linux VM',()=>showBotVM(bot)));
-  append(body,node('h3','','Local browser'),node('p','muted','A visible browser on this computer, with a separate cookie/login profile for this Bot.'),button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(error){toast(error.message);}}));
-  append(body,node('h3','','Scheduled tasks'),node('p','muted','Ask this Bot to schedule a one-time or recurring task, or run when another Bot messages it. Tasks run while this desktop app is running; missed times catch up once.'));
+  append(body,node('h3','','Linux VM'),node('p','muted','Runs in VirtualBox on this PC.'),button('Set up or open Linux VM',()=>showBotVM(bot)));
+  append(body,node('h3','','Local browser'),node('p','muted','Its own browser profile, in a window on this PC.'),button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(error){toast(error.message);}}));
+  append(body,node('h3','','Routines'),node('p','muted','Ask the Bot to run a task once, on a repeat, or when another Bot messages it. The app must be running; missed runs catch up once.'));
   for(const task of bot.schedules||[]){const history=node('details'),summary=node('summary','','Run history');history.append(summary);for(const run of task.history||[])history.append(node('p','muted',`${run.date} · ${run.status}`));if(task.history?.length)body.append(history);append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}${task.lastRun?' · Last run: '+task.lastRun+' · '+(task.lastResult||'outcome unavailable'):''}`),button('Cancel task',async()=>{await result(bridge.cancelTask(bot.id,task.id));}));}
   if(bot.memberIDs){body.append(node('h3','','Group members'));for(const member of workspace.bots.filter(x=>bot.memberIDs.includes(x.id)))body.append(button(member.name,()=>selectBot(member.id)));body.append(node('p','muted','Each member answers with its own provider and model.'));}
   else{
-   append(body,node('h3','','Providers & models'),node('p','muted','Choose available providers and select the one provider and model that answers for this Bot.'));
+   append(body,node('h3','','Providers & models'),node('p','muted','Pick the provider and model that answer for this Bot. Access follows each CLI’s account.'));
    if(config.providers.length>1){const select=node('select','field');select.setAttribute('aria-label','Active provider');for(const choice of config.providers){const option=node('option','',setup.providers.find(x=>x.id===choice.provider)?.name||choice.provider);option.value=choice.provider;select.append(option);}select.value=config.activeProvider||config.providers[0].provider;select.disabled=busy;select.addEventListener('change',()=>configureBot(bot,{...config,activeProvider:select.value}));append(body,node('label','','Active provider'),select);}
    for(const provider of setup.providers){
     const choice=config.providers.find(x=>x.provider===provider.id),installed=setup.installed.find(x=>x.provider===provider.id),card=node('div','provider-card');
@@ -188,7 +188,7 @@ function renderInspector(){
      if(['codex','opencode'].includes(provider.id)){const load=button('Load available models',async()=>{load.disabled=true;load.textContent='Loading models…';try{const models=await result(bridge.listModels(provider.id));modelCatalogs.set(provider.id,models);inspectorSignature='';renderInspector();if(!models.length)toast('No model list returned. Enter an exact model ID.');}catch(error){toast(error.message);load.disabled=false;}});load.disabled=!installed;load.setAttribute('aria-label',`Load ${provider.name} models`);card.append(load);}
     }body.append(card);
    }
-   body.append(node('p','muted','Only the active provider’s selected model responds to this Bot’s messages.'));
+   body.append(node('p','muted','Only the active provider and model answer for this Bot.'));
   }
   if(!bot.isMain)body.append(node('p','',bot.purpose));
   for(const [title,memory] of [['This Bot’s memory',bot.memory],['Shared memory',workspace.sharedMemory]])if(memory?.length){body.append(node('h3','',title));for(const fact of memory)body.append(node('p','memory-fact',fact));}

@@ -81,3 +81,25 @@
 #composer #save-note{background:var(--bot-accent,var(--primary));color:var(--bot-ink,#fff)}
 #composer #save-note:disabled{opacity:.35}
 .settings-card input[type=password]{display:block;width:100%;max-width:420px;margin:8px 0;padding:10px 12px;border:1px solid var(--line,#333);border-radius:10px;background:var(--panel,#1f1f1f);color:var(--text,#fff)}
+
+/* Bot details panel: one left edge, quiet section headers, one button size */
+.inspector-actions .circle { width:38px; height:38px; font-size:17px; }
+.inspector-profile { gap:10px; padding:4px 24px 0; }
+.inspector-profile>.avatar, .inspector-profile .avatar-edit>.avatar { --size:72px; }
+.inspector-profile h2 { font-size:22px; font-weight:600; }
+.inspector-tabs { gap:2px; margin:20px 20px 18px; padding:3px; background:var(--panel); border-radius:99px; }
+.inspector-tabs button { flex:1; padding:7px 10px; font-size:14px; font-weight:500; }
+.inspector-tabs button.active { background:var(--bot-accent,var(--primary)); color:var(--bot-ink,var(--inverse)); }
+.inspector-body { padding:0 20px 30px; gap:10px; text-align:left; align-items:stretch; }
+.inspector-body h3 { margin:16px 0 0; font-size:13px; font-weight:600; color:var(--muted); }
+.inspector-body h3:first-child { margin-top:0; }
+.inspector-body p { margin:0; font-size:13px; line-height:1.5; text-align:left; }
+.inspector-body p.muted { font-size:12.5px; }
+.inspector-body>.pill, .inspector-body details>.pill, .inspector-body .row-actions>.pill { align-self:flex-start; width:auto; margin-left:0; padding:8px 16px; min-height:36px; font-size:14px; font-weight:500; }
+.inspector-body>.pill.primary { background:var(--bot-accent,var(--primary)); color:var(--bot-ink,var(--inverse)); }
+.inspector-body .provider-card { border-radius:16px; padding:16px; }
+.inspector-body .provider-card>button, .inspector-body .provider-card .pill { align-self:flex-start; width:auto; margin-left:0; font-size:13px; padding:6px 12px; }
+.inspector-body .field { font-size:14px; padding:10px 12px; border-radius:12px; }
+.inspector-body details { background:var(--panel); border-radius:12px; padding:10px 12px; font-size:13px; }
+.inspector-body summary { cursor:pointer; }
+.inspector-body .empty-state, .inspector-body .empty { text-align:center; }

@@ -83,20 +83,41 @@ struct MacBotVMControls: View {
     let bot: Bot
     @ObservedObject private var vms = MacBotVMs.shared
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Linux VM").font(.headline)
-            Text("Install UTM and download a Linux .utm template from its gallery. Setup imports a separate copy for this Bot and opens its console. Default: 2 CPU cores, 4 GB RAM; disk size comes from the template.").font(.caption).foregroundStyle(.secondary)
-            Link("Download UTM", destination: URL(string: "https://mac.getutm.app/")!)
-            Link("Download a Linux template", destination: URL(string: "https://mac.getutm.app/gallery/")!)
-            Button(vms.busy.contains(bot.id) ? "Setting up VM…" : vms.assigned(bot.id) == nil ? "Set up this Bot’s Linux VM…" : "Open this Bot’s VM") { Task { if vms.assigned(bot.id) == nil { await vms.provision(bot) } else { await vms.open(bot) } } }.disabled(vms.busy.contains(bot.id))
-            if vms.assigned(bot.id) != nil {
-                Button("Enable remote VM viewing") { vms.enableViewing(bot.id) }
-                Text("macOS Screen Recording permission is required. Only this Bot’s matching UTM console window is captured; the rest of the host screen is excluded.").font(.caption).foregroundStyle(.secondary)
-                Toggle("Allow this Bot to run guest commands", isOn: Binding(get: { vms.commandsEnabled(bot.id) }, set: { vms.setCommands($0, id: bot.id) }))
-                Text("Requires qemu-guest-agent in Linux. Commands run through UTM’s guest agent and may run as root inside the VM.").font(.caption).foregroundStyle(.secondary)
+        InspectorCard(title: "Linux VM", footer: "The AI CLI stays on this Mac. Guest commands run inside Linux through UTM’s guest agent; no AI agent is installed in the guest.") {
+            Text("Runs in UTM on this Mac. Install UTM and a Linux template, then set up the VM. It starts with 2 CPU cores and 4 GB RAM; disk size comes from the template.")
+                .font(.system(size: 13)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            if vms.assigned(bot.id) == nil {
+                VMLinkRow(title: "Download UTM", url: "https://mac.getutm.app/")
+                VMLinkRow(title: "Download a Linux template", url: "https://mac.getutm.app/gallery/")
             }
-            if let feedback = vms.feedback[bot.id] { Text(feedback).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
-            Text("The VM console opens locally in UTM. The AI CLI remains on the host. Optional guest commands run inside Linux through guest tools; no separate AI agent is installed in the guest.").font(.caption).foregroundStyle(.secondary)
+            Button(vms.busy.contains(bot.id) ? "Setting up VM…" : vms.assigned(bot.id) == nil ? "Set up this Bot’s Linux VM…" : "Open this Bot’s VM") { Task { if vms.assigned(bot.id) == nil { await vms.provision(bot) } else { await vms.open(bot) } } }
+                .buttonStyle(InspectorButtonStyle()).disabled(vms.busy.contains(bot.id))
+            if vms.assigned(bot.id) != nil {
+                Divider()
+                Button("Enable remote VM viewing") { vms.enableViewing(bot.id) }.buttonStyle(InspectorButtonStyle())
+                Text("Needs macOS Screen Recording permission. Only this Bot’s UTM console window is captured.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+                Toggle("Allow guest commands", isOn: Binding(get: { vms.commandsEnabled(bot.id) }, set: { vms.setCommands($0, id: bot.id) }))
+                Text("Needs qemu-guest-agent in Linux. Commands may run as root inside the VM.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let feedback = vms.feedback[bot.id] { Text(feedback).font(.system(size: 12)).foregroundStyle(MacTheme.secondary).textSelection(.enabled) }
+        }
+    }
+}
+
+private struct VMLinkRow: View {
+    let title: String
+    let url: String
+    var body: some View {
+        if let destination = URL(string: url) {
+            Link(destination: destination) {
+                HStack {
+                    Text(title).font(.system(size: 14))
+                    Spacer()
+                    Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(MacTheme.secondary)
+                }
+                .padding(.horizontal, 12).frame(minHeight: 36)
+                .background(MacTheme.raised, in: RoundedRectangle(cornerRadius: 10)).contentShape(RoundedRectangle(cornerRadius: 10))
+            }.buttonStyle(.plain)
         }
     }
 }
