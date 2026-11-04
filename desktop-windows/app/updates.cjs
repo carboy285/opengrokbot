@@ -3,8 +3,9 @@ const DOWNLOAD = PREFIX + 'download/';
 const { createWriteStream } = require('node:fs');
 const { rm } = require('node:fs/promises');
 const { createHash } = require('node:crypto');
-function version(value) { const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(value || ''); return match ? match.slice(1, 4).map(Number) : null; }
-function newer(next, current) { const a = version(next), b = version(current); if (!a || !b) return false; for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; }
+// Release numbers such as 0.8.0 or 0.7.9.1 (three or four parts), padded to four so they compare correctly.
+function version(value) { const match = /^v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:[-+].*)?$/.exec(value || ''); return match ? [match[1], match[2], match[3], match[4] || '0'].map(Number) : null; }
+function newer(next, current) { const a = version(next), b = version(current); if (!a || !b) return false; for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; }
 function trusted(url) { return typeof url === 'string' && url.startsWith(PREFIX) && !new URL(url).username && !new URL(url).password; }
 async function check(current, fetchImpl = fetch) {
   const response = await fetchImpl('https://api.github.com/repos/carboy285/opengrokbot/releases?per_page=20', { redirect: 'error', signal: AbortSignal.timeout(15000), headers: { Accept: 'application/vnd.github+json' } });

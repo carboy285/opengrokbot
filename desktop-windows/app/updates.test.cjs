@@ -5,7 +5,7 @@ const { mkdtemp, readFile, rm, access } = require('node:fs/promises');
 const { createHash } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { check, download, trustedDownload } = require('./updates.cjs');
+const { check, download, trustedDownload, newer } = require('./updates.cjs');
 
 const base = 'https://github.com/carboy285/opengrokbot/releases/';
 const release = (tag, assets = []) => ({ tag_name: tag, draft: false, prerelease: true, html_url: base + 'tag/' + tag, assets });
@@ -57,4 +57,18 @@ test('installCommand builds a silent install-then-relaunch command and refuses r
   assert.equal(installCommand('C:\\Temp\\ok.exe', 'C:\\x\\100%.exe'), null);
   assert.equal(installCommand('relative.exe', 'C:\\x\\y.exe'), null);
   assert.equal(installCommand(undefined, 'C:\\x\\y.exe'), null);
+});
+
+test('four-part versions such as 0.7.9.1 compare correctly with three-part ones', async () => {
+  assert.ok(newer('v0.8.0', '0.7.9.1'), 'An installed 0.7.9.1 must see 0.8.0');
+  assert.ok(newer('v0.7.9.2', '0.7.9.1'));
+  assert.ok(newer('v0.7.9.1', '0.7.9'));
+  assert.ok(!newer('v0.7.9', '0.7.9.1'));
+  assert.ok(!newer('v0.7.9.1', '0.7.9.1'));
+  assert.ok(!newer('v0.8.0', '0.8.0'));
+  assert.ok(newer('v0.8.0', '0.7.9-1'));
+  assert.ok(!newer('garbage', '0.7.9.1') && !newer('v0.8.0', 'garbage') && !newer('v0.8.0.1.2', '0.8.0'));
+  const result = await check('0.7.9.1', async () => new Response(JSON.stringify([release('v0.7.9.1'), release('v0.8.0')])));
+  assert.equal(result.available, true);
+  assert.equal(result.version, 'v0.8.0');
 });

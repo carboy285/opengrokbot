@@ -108,13 +108,15 @@ final class DesktopUpdates: ObservableObject {
     private static func trustedDownload(_ url: URL) -> Bool {
         url.scheme == "https" && url.host == "github.com" && url.user == nil && url.password == nil && url.path.hasPrefix("/carboy285/opengrokbot/releases/download/")
     }
-    private static func numbers(_ value: String) -> [Int]? {
+    /// Release numbers such as 0.8.0 or 0.7.9.1 (three or four parts), padded to four so they compare correctly.
+    static func numbers(_ value: String) -> [Int]? {
         let clean = value.hasPrefix("v") ? String(value.dropFirst()) : value
         let core = clean.split(whereSeparator: { $0 == "-" || $0 == "+" }).first ?? ""
         let parts = core.split(separator: ".").compactMap { Int($0) }
-        return parts.count == 3 ? parts : nil
+        guard (3...4).contains(parts.count), parts.count == core.split(separator: ".").count else { return nil }
+        return parts + Array(repeating: 0, count: 4 - parts.count)
     }
-    private static func newer(_ lhs: String, than rhs: String) -> Bool {
+    static func newer(_ lhs: String, than rhs: String) -> Bool {
         guard let a = numbers(lhs), let b = numbers(rhs) else { return false }
         return b.lexicographicallyPrecedes(a)
     }

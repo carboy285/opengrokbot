@@ -537,5 +537,17 @@ final class MacBigUpdateTests: XCTestCase {
         XCTAssertTrue(app.setAIConfiguration(BotAIConfiguration(providers: [BotAIProvider(provider: .codex)], activeProvider: .codex, replyMode: .compare), for: main))
         XCTAssertEqual(app.workspace.bots.first?.aiConfiguration?.replyMode, .one, "Compare needs at least two providers")
     }
+
+    func testUpdateCheckUnderstandsFourPartVersionsLike0791() {
+        XCTAssertTrue(DesktopUpdates.newer("v0.8.0", than: "0.7.9.1"), "An installed 0.7.9.1 must see 0.8.0")
+        XCTAssertTrue(DesktopUpdates.newer("v0.7.9.2", than: "0.7.9.1"))
+        XCTAssertTrue(DesktopUpdates.newer("v0.7.9.1", than: "0.7.9"))
+        XCTAssertFalse(DesktopUpdates.newer("v0.7.9", than: "0.7.9.1"))
+        XCTAssertFalse(DesktopUpdates.newer("v0.7.9.1", than: "0.7.9.1"))
+        XCTAssertFalse(DesktopUpdates.newer("v0.8.0", than: "0.8.0"))
+        XCTAssertTrue(DesktopUpdates.newer("v0.8.0", than: "0.7.9-1"))
+        XCTAssertNil(DesktopUpdates.numbers("garbage")); XCTAssertNil(DesktopUpdates.numbers("v0.8")); XCTAssertNil(DesktopUpdates.numbers("v0.8.0.1.2"))
+        XCTAssertEqual(DesktopUpdates.numbers("v0.7.9.1"), [0, 7, 9, 1]); XCTAssertEqual(DesktopUpdates.numbers("0.8.0"), [0, 8, 0, 0])
+    }
 }
 #endif
