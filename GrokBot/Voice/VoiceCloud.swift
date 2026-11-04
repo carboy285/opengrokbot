@@ -14,6 +14,7 @@ enum VoiceCloud {
         case .openAI: endpoint = "https://api.openai.com/v1/audio/transcriptions"; model = "whisper-1"
         case .elevenLabs: endpoint = "https://api.elevenlabs.io/v1/speech-to-text"; model = "scribe_v1"
         case .apple: throw Failure("Apple recognition runs on the device.")
+        case .nvidiaNIM: throw Failure("NVIDIA NIM is used for speaking only. Choose another provider for listening.")
         }
         guard let url = URL(string: endpoint) else { throw Failure("Invalid speech service address.") }
         let boundary = "voice-" + UUID().uuidString
@@ -42,18 +43,40 @@ enum VoiceCloud {
         case .openAI:
             request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/speech")!, timeoutInterval: 45)
             request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: ["model": "tts-1", "voice": "alloy", "input": text, "response_format": "mp3"])
+        case .groq:
+            // Groq's Orpheus voices: short requests, so replies are split before they get here (see maxSpeechCharacters).
+            request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/audio/speech")!, timeoutInterval: 30)
+            request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["model": "canopylabs/orpheus-v1-english", "voice": VoiceSettings.groqVoice, "input": text, "response_format": "wav"])
         case .elevenLabs:
             let id = VoiceSettings.elevenLabsVoiceID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
             guard let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(id)?output_format=mp3_44100_64") else { throw Failure("The ElevenLabs voice ID looks invalid.") }
             request = URLRequest(url: url, timeoutInterval: 45)
             request.setValue(key, forHTTPHeaderField: "xi-api-key")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "model_id": "eleven_flash_v2_5"])
+        case .nvidiaNIM:
+            guard let url = VoiceSettings.nimSynthesizeURL(VoiceSettings.nimBaseURL) else { throw Failure("The NVIDIA NIM address in voice settings looks invalid. Use something like http://localhost:9000.") }
+            request = URLRequest(url: url, timeoutInterval: 30)
+            if !key.isEmpty { request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization") }
+            let boundary = "voice-" + UUID().uuidString
+            request.setValue("multipart/form-data; boundary=" + boundary, forHTTPHeaderField: "Content-Type")
+            var body = Data()
+            for (name, value) in [("language", "en-US"), ("text", text), ("voice", VoiceSettings.nimVoice)] {
+                body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
+            }
+            body.append(Data("--\(boundary)--\r\n".utf8))
+            request.httpBody = body
         default: throw Failure("This provider can’t speak replies.")
         }
         request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await perform(request, provider: provider)
+        do { return try await perform(request, provider: provider) }
+        catch let error as URLError where provider == .nvidiaNIM {
+            throw Failure("Couldn’t reach your NVIDIA NIM at \(VoiceSettings.nimBaseURL) (\(error.localizedDescription)). Is the container running?")
+        }
     }
 
     private static func perform(_ request: URLRequest, provider: VoiceProvider) async throws -> Data {

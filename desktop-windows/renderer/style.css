@@ -57,18 +57,25 @@
 /* Voice mode */
 .composer-area .voice-button{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:50%;background:var(--bot-accent,#9355ff);color:var(--bot-ink,#fff);font-size:20px;cursor:pointer}
 .composer-area .voice-button:hover{filter:brightness(1.08)}
-.voice-overlay{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:30px;background:rgba(17,17,17,.94);color:var(--text,#fff);backdrop-filter:blur(18px)}
-.voice-title{font-size:20px}
-.voice-orb{width:150px;height:150px;border-radius:50%;background:var(--bot-accent,#9355ff);box-shadow:0 0 0 26px color-mix(in srgb,var(--bot-accent,#9355ff) 20%,transparent);transition:transform .12s ease-out;cursor:pointer}
-.voice-overlay[data-mode="thinking"] .voice-orb{animation:voice-pulse 1.2s ease-in-out infinite}
-@keyframes voice-pulse{50%{opacity:.55}}
-.voice-status{font-size:20px;font-weight:600}
-.voice-caption{min-height:64px;max-width:640px;text-align:center;color:var(--muted,#a0a0a0);font-size:17px}
-.voice-note{max-width:560px;text-align:center;font-size:13px;color:#f69a0a}
-.voice-end{padding:12px 26px;border-radius:99px;background:var(--bot-accent,#9355ff);color:var(--bot-ink,#fff);font-size:16px;font-weight:600;cursor:pointer}
-.voice-gear{position:absolute;top:16px;left:16px;width:44px;height:44px;border-radius:50%;font-size:20px;color:var(--muted,#a0a0a0);cursor:pointer}
+/* Voice mode: a compact card that floats over the chat (matches the iPhone and Mac apps). */
+.voice-overlay{position:fixed;top:56px;left:0;right:0;z-index:50;display:flex;justify-content:center;padding:0 16px;pointer-events:none}
+.voice-card{pointer-events:auto;width:min(440px,100%);display:grid;gap:14px;padding:16px;border-radius:28px;background:#fafafa;color:#222;border:1px solid rgba(0,0,0,.06);box-shadow:0 10px 26px rgba(0,0,0,.28)}
+.voice-top{display:flex;align-items:center;gap:14px}
+.voice-orb{flex:none;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;gap:5px;background:linear-gradient(#b078ff,#7855f8);transition:transform .12s ease-out;cursor:pointer}
+.voice-orb span{width:5px;height:15px;border-radius:3px;background:#fff}
+.voice-wave{flex:1;height:38px;display:flex;align-items:center;gap:3px;overflow:hidden}
+.voice-wave i{display:block;flex:none;width:3px;height:4px;border-radius:2px;background:rgba(110,79,242,.9)}
+.voice-overlay[data-muted="true"] .voice-wave i{background:rgba(0,0,0,.22)}
+.voice-line{min-height:18px;font-size:13px;line-height:1.35;color:rgba(0,0,0,.55);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.voice-line[hidden]{display:none}
+.voice-controls{display:flex;align-items:center;justify-content:space-between}
+.voice-controls button{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:rgba(0,0,0,.06);color:rgba(0,0,0,.74);cursor:pointer;transition:background .12s}
+.voice-controls button:hover{background:rgba(0,0,0,.1)}
+.voice-controls button[aria-pressed="true"]{background:rgba(0,0,0,.13)}
+.voice-controls .voice-end{background:#eb3838;color:#fff}
+.voice-controls .voice-end:hover{background:#d92f2f}
 .voice-settings{display:grid;gap:14px}.voice-row{display:grid;grid-template-columns:200px 1fr;gap:12px;align-items:center}.voice-key{display:flex;gap:8px}.voice-key input,.voice-settings select,.voice-settings input[type=text],.voice-settings input:not([type]){flex:1;padding:9px 10px;border:1px solid var(--line,#333);border-radius:10px;background:var(--panel,#1f1f1f);color:var(--text,#fff)}
-@media (prefers-reduced-motion:reduce){.voice-overlay[data-mode="thinking"] .voice-orb{animation:none}.voice-orb{transition:none}}
+@media (prefers-reduced-motion:reduce){.voice-orb{transition:none}}
 
 /* Attachments + avatar-colored controls */
 .attachment-chips{display:flex;gap:8px;flex-wrap:wrap;max-width:1000px;margin:0 auto 8px;padding:0 8px}

@@ -164,8 +164,8 @@ final class AppModel: ObservableObject {
         guard let bot = workspace.bots.firstIndex(where: { $0.id == botID }) else { return false }
         return commit { $0.bots[bot].schedules?.removeAll { $0.id == id } }
     }
-    func activity(_ text: String, for botID: UUID) {
-        _ = commit { $0.entries.append(Entry(botID: botID, kind: .activity, text: text)) }
+    func activity(_ text: String, for botID: UUID, detail: String? = nil) {
+        _ = commit { var entry = Entry(botID: botID, kind: .activity, text: text); entry.detail = detail; $0.entries.append(entry) }
     }
 
     /// Applies only completed assistant output; all mutations save together before publishing.

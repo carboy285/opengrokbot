@@ -50,5 +50,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>OpenGrokBot can speak Bot replies using a NVIDIA NIM speech server you run on your network, only if you choose it in voice settings.</string>
 </dict>
 </plist>

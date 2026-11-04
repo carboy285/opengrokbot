@@ -28,6 +28,13 @@ async function captureView(web,directory){
   return {path:await attachments.savePageScreenshot(directory,jpeg)};
  }catch{return {error:'The screenshot could not be captured.'};}
 }
+/** Shapes what the Bot receives. A failed load becomes a readable result (not a thrown error) so the Bot can try another way. */
+function finishPage(address,page,{loadError,note}={}){
+ const result=page&&typeof page==='object'?{...page}:{url:address,title:'',text:'',links:[]};
+ if(loadError){return {url:address,title:'',text:'',links:[],loadError};}
+ if(note)result.loadNote=note;
+ return result;
+}
 class LocalBrowsers{
  constructor(getBot,getDirectory){this.getBot=getBot;this.getDirectory=getDirectory;this.entries=new Map();
   for(const name of ['ready','navigate','back','forward','reload','clear'])ipcMain.handle('bot-browser:'+name,async(event,value)=>{
@@ -67,20 +74,28 @@ class LocalBrowsers{
  }
  async read(id,address){
   if(!allowed(address))throw new Error('Choose an HTTP or HTTPS page.');
-  const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is already reading a page.');entry.reading=true;let timer;
+  const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is already reading a page.');entry.reading=true;
+  const web=entry.view.webContents;let timer,note,loadError;
   try{
-   await Promise.race([entry.view.webContents.loadURL(address),new Promise((_,reject)=>{timer=setTimeout(()=>{entry.view.webContents.stop();reject(new Error('The local browser timed out loading this page.'));},20000);})]);
-   await settle(entry.view.webContents);
-   const page=JSON.parse(await entry.view.webContents.executeJavaScript(expression));
-   const shot=this.getDirectory?await captureView(entry.view.webContents,this.getDirectory(this.getBot(id).id)):{error:'Screenshots are unavailable.'};
+   try{
+    // A slow page is not a failure: after 45 seconds stop loading and use whatever has rendered so far.
+    await Promise.race([web.loadURL(address),new Promise(resolve=>{timer=setTimeout(()=>{web.stop();note='The page was slow to load, so this is what had loaded when I stopped waiting. If something is missing, try another page or approach.';resolve();},45000);})]);
+   }catch(error){
+    // ERR_ABORTED is a redirect or a stop; anything else is a real failure the Bot should hear about so it can try another way.
+    if(error?.code!=='ERR_ABORTED'&&error?.errno!==-3)loadError=String(error?.message||'The page could not be loaded.').slice(0,200);
+   }finally{clearTimeout(timer);}
+   await settle(web);
+   let page;try{page=JSON.parse(await web.executeJavaScript(expression));}catch{page=null;}
+   page=finishPage(address,page,{loadError,note});
+   const shot=this.getDirectory?await captureView(web,this.getDirectory(this.getBot(id).id)):{error:'Screenshots are unavailable.'};
    if(shot.path){page.screenshot=shot.path;page.screenshotNote='A screenshot of the page exactly as rendered (layout, images, charts, scores, canvas content that text extraction misses). Open this image file with your file or image viewing tool and use it together with the text.';}
    else page.screenshotError=shot.error;
    return JSON.stringify(page);
   }catch{throw new Error('The local browser could not finish reading the page. Its window stays open so you can inspect it or sign in, then retry.');}
-  finally{clearTimeout(timer);entry.reading=false;}
+  finally{entry.reading=false;}
  }
  async preview(id){const bot=this.getBot(id),entry=bot&&this.entries.get(bot.id);if(!entry||entry.window.isDestroyed())return {title:'Browser not open',url:'',imageData:null};const image=await entry.view.webContents.capturePage();return {title:entry.view.webContents.getTitle(),url:entry.view.webContents.getURL(),imageData:image.resize({width:900}).toJPEG(60).toString('base64')};}
  close(id){this.entries.get(id)?.window.close();}
  closeAll(){for(const entry of [...this.entries.values()])entry.window.close();}
 }
-module.exports={LocalBrowsers,settle,captureView};
+module.exports={LocalBrowsers,settle,captureView,finishPage};

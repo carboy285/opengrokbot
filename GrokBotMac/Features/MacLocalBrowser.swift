@@ -47,6 +47,8 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
     private var readerNavigation: WKNavigation?
     private var timeout: Task<Void,Never>?
     private var readDirectory: URL?
+    private var timedOut = false
+    private var readerAddress = ""
     init(bot: Bot) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: bot.id)
@@ -61,17 +63,24 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
     }
     func read(_ address: String, directory: URL) async throws -> String {
         guard reader == nil else { throw CloudError.message("This Bot’s browser is already reading a page.") }
-        readDirectory = directory
+        readDirectory = directory; timedOut = false; readerAddress = address
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 reader = continuation
                 do { try navigate(address, forReader: true) } catch { finish(.failure(error)); return }
+                // A slow page is not a failure: after 45 seconds, stop loading and hand back whatever has rendered so far.
                 timeout = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(20)); try Task.checkCancellation(); self?.web.stopLoading(); self?.finish(.failure(CloudError.message("The local browser timed out. Its window stays open so you can inspect it or sign in, then retry."))) } catch {}
+                    do {
+                        try await Task.sleep(for: .seconds(45)); try Task.checkCancellation()
+                        guard let self, self.reader != nil else { return }
+                        self.timedOut = true; self.web.stopLoading()
+                        await self.completeRead(note: "The page was slow to load, so this is what had loaded when I stopped waiting. If something is missing, try another page or approach.")
+                    } catch {}
                 }
             }
         } onCancel: { Task { @MainActor [weak self] in self?.web.stopLoading(); self?.finish(.failure(CancellationError())) } }
     }
+
     // MARK: Secure login
     private static let fillScript = """
     const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled && !el.readOnly; };
@@ -145,13 +154,14 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
             try? await Task.sleep(for: .milliseconds(300))
         }
     }
-    private func completeRead() async {
+    private func completeRead(note: String? = nil) async {
         await settle()
         guard reader != nil else { return }
         guard let raw = try? await web.evaluateJavaScript(Self.readScript) as? String else { finish(.failure(CloudError.message("This page could not be read."))); return }
         guard reader != nil else { return }
         var page = (raw.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String:Any] ?? [:]
         guard !page.isEmpty else { finish(.success(raw)); return }
+        if let note { page["loadNote"] = note }
         switch await captureScreenshot() {
         case .success(let path):
             page["screenshot"] = path
@@ -178,7 +188,13 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
             return .success("Attachments/" + name)
         } catch { return .failure(CloudError.message("The screenshot could not be saved.")) }
     }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { update(); feedback = "Page navigation failed. Retry or choose another page."; if navigation === readerNavigation { finish(.failure(error)) } }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        update(); feedback = "Page navigation failed. Retry or choose another page."
+        guard navigation === readerNavigation, !timedOut else { return }
+        // Tell the Bot exactly what went wrong so it can try another way, rather than ending its turn.
+        let page: [String: Any] = ["url": web.url?.absoluteString ?? readerAddress, "title": "", "text": "", "links": [], "loadError": (error as NSError).localizedDescription]
+        finish(.success((try? JSONSerialization.data(withJSONObject: page, options: [.withoutEscapingSlashes])).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"loadError\":\"The page could not be loaded.\"}"))
+    }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { self.webView(webView, didFail: navigation, withError: error) }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         decisionHandler(Self.allowed(navigationAction.request.url) && !navigationAction.shouldPerformDownload ? .allow : .cancel)

@@ -3,6 +3,18 @@
 // Keys are stored encrypted by main.cjs; this module only receives them for a single request.
 
 const PROVIDERS = new Set(['groq', 'openAI', 'elevenLabs']);
+// Providers that can speak replies. NVIDIA NIM is a speech server you run yourself, so its key is optional.
+const SPEAKERS = new Set(['openAI', 'elevenLabs', 'groq', 'nvidiaNIM']);
+const GROQ_VOICES = ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'];
+
+/** The synthesize endpoint for a NIM base address, or null unless it is a plain http(s) server address. */
+function nimURL(base) {
+  const text = String(base ?? '').trim();
+  if (!text || text.length > 300) return null;
+  let url; try { url = new URL(text); } catch { return null; }
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash) return null;
+  return `${url.origin}${url.pathname.replace(/\/$/, '')}/v1/audio/synthesize`;
+}
 
 class VoiceError extends Error {}
 
@@ -30,21 +42,38 @@ async function transcribe({ provider, key, wav, fetchImpl = fetch }) {
   return typeof body.text === 'string' ? body.text.trim() : '';
 }
 
-async function synthesize({ provider, key, text, voiceID, fetchImpl = fetch }) {
-  if (!['openAI', 'elevenLabs'].includes(provider) || !key) throw new VoiceError('This provider cannot speak replies.');
+async function synthesize({ provider, key, text, voiceID, groqVoice, nimBase, nimVoice, fetchImpl = fetch }) {
+  if (!SPEAKERS.has(provider) || (!key && provider !== 'nvidiaNIM')) throw new VoiceError('This provider cannot speak replies.');
   if (typeof text !== 'string' || !text.trim() || text.length > 4500) throw new VoiceError('Invalid text.');
-  let url, headers, body;
+  let url, headers, body, timeout = 45000;
   if (provider === 'openAI') {
     url = 'https://api.openai.com/v1/audio/speech'; headers = { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
     body = JSON.stringify({ model: 'tts-1', voice: 'alloy', input: text, response_format: 'mp3' });
+  } else if (provider === 'groq') {
+    const voice = GROQ_VOICES.includes(groqVoice) ? groqVoice : 'autumn';
+    url = 'https://api.groq.com/openai/v1/audio/speech'; headers = { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }; timeout = 30000;
+    body = JSON.stringify({ model: 'canopylabs/orpheus-v1-english', voice, input: text, response_format: 'wav' });
+  } else if (provider === 'nvidiaNIM') {
+    url = nimURL(nimBase);
+    if (!url) throw new VoiceError('The NVIDIA NIM address in Settings → Voice looks invalid. Use something like http://localhost:9000.');
+    const voice = String(nimVoice || 'Magpie-Multilingual.EN-US.Aria');
+    if (!/^[A-Za-z0-9._-]{1,80}$/.test(voice)) throw new VoiceError('The NVIDIA NIM voice name looks invalid.');
+    headers = key ? { Authorization: `Bearer ${key}` } : {}; timeout = 30000;
+    const form = new FormData(); form.append('language', 'en-US'); form.append('text', text); form.append('voice', voice); body = form;
   } else {
     const id = String(voiceID || '21m00Tcm4TlvDq8ikWAM');
     if (!/^[A-Za-z0-9]{8,40}$/.test(id)) throw new VoiceError('The ElevenLabs voice ID looks invalid.');
     url = `https://api.elevenlabs.io/v1/text-to-speech/${id}?output_format=mp3_44100_64`; headers = { 'xi-api-key': key, 'Content-Type': 'application/json' };
     body = JSON.stringify({ text, model_id: 'eleven_flash_v2_5' });
   }
-  const response = await check(await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(45000) }), provider);
+  let response;
+  try { response = await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(timeout) }); }
+  catch (error) {
+    if (provider === 'nvidiaNIM') throw new VoiceError(`Couldn’t reach your NVIDIA NIM at ${nimBase}. Is the container running?`);
+    throw error;
+  }
+  response = await check(response, provider === 'nvidiaNIM' ? 'NVIDIA NIM' : provider);
   return Buffer.from(await response.arrayBuffer());
 }
 
-module.exports = { transcribe, synthesize, VoiceError, PROVIDERS };
+module.exports = { transcribe, synthesize, nimURL, VoiceError, PROVIDERS, SPEAKERS, GROQ_VOICES };

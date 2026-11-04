@@ -43,6 +43,8 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var senderBotID: UUID? = nil
     var senderName: String? = nil
     var delivery: String? = nil
+    /// Full text for the Bot's own context when `text` is only a short summary shown in the chat (for example a page the browser read).
+    var detail: String? = nil
     let date: Date
 
     init(botID: UUID, kind: Kind, text: String, id: UUID = UUID()) {

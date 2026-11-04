@@ -34,3 +34,21 @@ test('group chat queues requests for each member without inventing user messages
  assert.equal(state.teamMessages.length,2);assert.ok(state.teamMessages.every(x=>group.memberIDs.includes(x.to)&&x.from===group.id));assert.equal(state.entries.filter(x=>x.kind==='user').length,1);
  validateWorkspace(state);
 });
+
+test('the chat shows the tab heading and site for a page read, never the page text', () => {
+  const page = JSON.stringify({ url: 'https://www.youtube.com/results?q=x', title: 'midterm election results - YouTube', text: 'Skip navigation Sign in Home Shorts', links: [] });
+  assert.equal(team.pageSummary(page), 'Read “midterm election results - YouTube” · www.youtube.com');
+  assert.equal(team.pageSummary('{"url":"https://example.com/a","title":"","text":"x"}'), 'Read example.com');
+  assert.match(team.pageSummary('{"url":"https://example.com","title":"Slow","text":"x","loadNote":"slow"}'), /\(partly loaded\)$/);
+  assert.equal(team.pageSummary('{"url":"https://nope.example","title":"","text":"","loadError":"ERR_NAME_NOT_RESOLVED"}'), 'Couldn’t open nope.example: ERR_NAME_NOT_RESOLVED');
+  assert.equal(team.pageSummary('not json'), null);
+});
+
+test('Bots are told to keep working across many steps and try another way when something fails', () => {
+  assert.equal(team.MAX_STEPS, 40);
+  assert.match(team.RETRY_HINT, /different approach/);
+  const state = previewWorkspace();
+  const prompt = team.instructions(state.bots[0], state, false);
+  assert.match(prompt, /do not stop or apologize/);
+  assert.match(prompt, /Up to forty/);
+});

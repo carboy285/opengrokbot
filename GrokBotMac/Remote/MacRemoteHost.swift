@@ -220,6 +220,7 @@ final class MacRemoteHost: ObservableObject {
     private func snapshot() -> RemoteSnapshot? {
         guard let app, let desktop else { return nil }
         var workspace = app.workspace; workspace.sessions = nil
+        workspace.entries = workspace.entries.map { var entry = $0; entry.detail = nil; return entry } // The phone shows summaries only.
         return RemoteSnapshot(hostName: Host.current().localizedName ?? "Mac", revision: revision, workspace: workspace, running: Array(desktop.runningBots), providers: desktop.installedCLIs.map { RemoteProvider(provider: $0.provider, version: $0.version) }, defaultProvider: desktop.selectedCLI?.provider)
     }
     func dispatch(_ request: RemoteHostRequest) async -> RemoteHostResponse {

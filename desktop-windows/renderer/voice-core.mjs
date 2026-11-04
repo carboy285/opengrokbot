@@ -14,13 +14,19 @@ export function speakable(raw) {
  * Splits a reply that is still streaming into speakable pieces: text from `offset` up to the last finished
  * sentence (or everything once `final`), never cutting inside a ``` code block. Mirrors VoiceText.nextChunk in Swift.
  */
-export function nextChunk(text, offset, final) {
+export function nextChunk(text, offset, final, eager = false) {
   const chars = Array.from(String(text ?? ''));
   if (offset >= chars.length) return { chunk: '', next: Math.max(offset, chars.length) };
   if (final) return { chunk: chars.slice(offset).join(''), next: chars.length };
   let end = offset;
   for (let i = chars.length - 2; i >= offset; i--) {
     if ('.!?\n'.includes(chars[i]) && /\s/.test(chars[i + 1])) { end = i + 1; break; }
+  }
+  if (end === offset && eager) {
+    // Nothing has been spoken yet: start at the first natural pause instead of waiting for a whole sentence.
+    for (let j = offset + 24; j < chars.length - 1; j++) {
+      if (',;:—'.includes(chars[j]) && /\s/.test(chars[j + 1])) { end = j + 1; break; }
+    }
   }
   if (end <= offset) return { chunk: '', next: offset };
   const candidate = chars.slice(0, end).join('');
@@ -29,6 +35,30 @@ export function nextChunk(text, offset, final) {
     if (end <= offset) return { chunk: '', next: offset };
   }
   return { chunk: chars.slice(offset, end).join(''), next: end };
+}
+
+/** Longest text one speech request should carry for a provider; longer replies are split at natural pauses. */
+export function maxSpeechLength(provider) { return provider === 'groq' ? 190 : provider === 'nvidiaNIM' ? 400 : Infinity; }
+
+/** Splits text into pieces of at most `max` characters, preferring sentence ends, then commas, then spaces. Mirrors VoiceText.split in Swift. */
+export function splitText(text, max) {
+  const clean = String(text ?? '').trim();
+  if (!clean) return [];
+  if (!(max > 0) || clean.length <= max) return [clean];
+  const parts = []; let rest = clean;
+  while (rest.length > max) {
+    const window = rest.slice(0, max);
+    const cut = (marks, minimum) => { let at = -1; for (const mark of marks) at = Math.max(at, window.lastIndexOf(mark)); return at >= 0 && at + 1 >= minimum ? at + 1 : -1; };
+    let end = cut('.!?', Math.floor(max / 3));
+    if (end < 0) end = cut(',;:', Math.floor(max / 3));
+    if (end < 0) end = cut(' ', 1);
+    if (end < 0) end = max;
+    const piece = rest.slice(0, end).trim();
+    if (piece) parts.push(piece);
+    rest = rest.slice(end).trimStart();
+  }
+  if (rest) parts.push(rest);
+  return parts;
 }
 
 /** 16-bit mono PCM WAV at 16 kHz, accepted by every transcription provider. */
@@ -58,7 +88,7 @@ export function rms(samples) {
 
 /** Voice-activity detector. Time is measured in samples, so it behaves the same at any sample rate. */
 export class Vad {
-  constructor({ sampleRate, speechThreshold = 0.012, bargeThreshold = 0.08, silenceMs = 1000, bargeMs = 400, maxSeconds = 60 }) {
+  constructor({ sampleRate, speechThreshold = 0.012, bargeThreshold = 0.08, silenceMs = 700, bargeMs = 400, maxSeconds = 60 }) {
     Object.assign(this, { sampleRate, speechThreshold, bargeThreshold, silenceMs, bargeMs, maxSeconds });
     this.reset();
   }

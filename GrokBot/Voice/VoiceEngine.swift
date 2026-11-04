@@ -8,7 +8,7 @@ import SwiftUI
 // Optional cloud engines (Groq / OpenAI / ElevenLabs) use keys stored in the Keychain.
 
 enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
-    case apple, groq, openAI, elevenLabs
+    case apple, groq, openAI, elevenLabs, nvidiaNIM
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -16,11 +16,23 @@ enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
         case .groq: "Groq"
         case .openAI: "OpenAI"
         case .elevenLabs: "ElevenLabs"
+        case .nvidiaNIM: "NVIDIA NIM (Magpie)"
         }
     }
-    var supportsTranscription: Bool { true }
-    var supportsSpeech: Bool { self != .groq }
-    var needsKey: Bool { self != .apple }
+    /// NVIDIA NIM here is speech output only.
+    var supportsTranscription: Bool { self != .nvidiaNIM }
+    var supportsSpeech: Bool { true }
+    var needsKey: Bool { self != .apple && self != .nvidiaNIM }
+    /// A NIM you run yourself needs no key; a gateway in front of it may.
+    var keyIsOptional: Bool { self == .nvidiaNIM }
+    /// Longest text one speech request should carry. Longer replies are split at natural pauses.
+    var maxSpeechCharacters: Int? {
+        switch self {
+        case .groq: 190
+        case .nvidiaNIM: 400
+        default: nil
+        }
+    }
     static var transcribers: [VoiceProvider] { allCases.filter(\.supportsTranscription) }
     static var speakers: [VoiceProvider] { allCases.filter(\.supportsSpeech) }
 }
@@ -33,6 +45,28 @@ enum VoiceSettings {
     static var speaker: VoiceProvider {
         get { VoiceProvider(rawValue: UserDefaults.standard.string(forKey: "voiceSpeaker") ?? "") ?? .apple }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "voiceSpeaker") }
+    }
+    static let groqVoices = ["autumn", "diana", "hannah", "austin", "daniel", "troy"]
+    static var groqVoice: String {
+        get { UserDefaults.standard.string(forKey: "voiceGroqVoice").flatMap { groqVoices.contains($0) ? $0 : nil } ?? "autumn" }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceGroqVoice") }
+    }
+    /// A NVIDIA Magpie TTS NIM you run yourself (Docker, NVIDIA GPU). NVIDIA's hosted cloud API uses gRPC and is not supported here.
+    static var nimBaseURL: String {
+        get { UserDefaults.standard.string(forKey: "voiceNIMBaseURL") ?? "http://localhost:9000" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceNIMBaseURL") }
+    }
+    static var nimVoice: String {
+        get { UserDefaults.standard.string(forKey: "voiceNIMVoice") ?? "Magpie-Multilingual.EN-US.Aria" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceNIMVoice") }
+    }
+    /// The synthesize endpoint for a base address, or nil if the address is not a plain http(s) server address.
+    static func nimSynthesizeURL(_ base: String) -> URL? {
+        let text = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count <= 300, var parts = URLComponents(string: text), let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else { return nil }
+        parts.path = (parts.path.hasSuffix("/") ? String(parts.path.dropLast()) : parts.path) + "/v1/audio/synthesize"
+        return parts.url
     }
     static var elevenLabsVoiceID: String {
         get { UserDefaults.standard.string(forKey: "voiceElevenLabsVoiceID") ?? "21m00Tcm4TlvDq8ikWAM" }
@@ -72,7 +106,7 @@ enum VoiceKeys {
 enum VoiceText {
     /// Splits a reply that is still streaming into speakable pieces. Returns the text from `offset` up to the
     /// last finished sentence (or everything once `final`), never cutting inside a ``` code block.
-    static func nextChunk(_ text: String, from offset: Int, final: Bool) -> (chunk: String, next: Int) {
+    static func nextChunk(_ text: String, from offset: Int, final: Bool, eager: Bool = false) -> (chunk: String, next: Int) {
         let chars = Array(text)
         guard offset < chars.count else { return ("", max(offset, chars.count)) }
         if final { return (String(chars[offset...]), chars.count) }
@@ -82,6 +116,14 @@ enum VoiceText {
             if ".!?\n".contains(chars[i]) && chars[i + 1].isWhitespace { end = i + 1; break }
             i -= 1
         }
+        if end == offset, eager {
+            // Nothing has been spoken yet: start at the first natural pause instead of waiting for a whole sentence.
+            var j = offset + 24
+            while j < chars.count - 1 {
+                if ",;:—".contains(chars[j]) && chars[j + 1].isWhitespace { end = j + 1; break }
+                j += 1
+            }
+        }
         guard end > offset else { return ("", offset) }
         let candidate = String(chars[..<end])
         let fences = candidate.components(separatedBy: "```").count - 1
@@ -90,6 +132,29 @@ enum VoiceText {
             guard end > offset else { return ("", offset) }
         }
         return (String(chars[offset..<end]), end)
+    }
+
+    /// Splits text into pieces of at most `maxLength` characters, preferring sentence ends, then commas, then spaces.
+    static func split(_ text: String, maxLength: Int) -> [String] {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return [] }
+        guard maxLength > 0, clean.count > maxLength else { return [clean] }
+        var parts: [String] = []
+        var rest = Substring(clean)
+        while rest.count > maxLength {
+            let window = rest.prefix(maxLength)
+            func cut(_ marks: String, minimum: Int) -> String.Index? {
+                guard let found = window.lastIndex(where: { marks.contains($0) }) else { return nil }
+                let after = window.index(after: found)
+                return window.distance(from: window.startIndex, to: after) >= minimum ? after : nil
+            }
+            let end = cut(".!?", minimum: maxLength / 3) ?? cut(",;:", minimum: maxLength / 3) ?? cut(" ", minimum: 1) ?? window.endIndex
+            let piece = rest[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !piece.isEmpty { parts.append(piece) }
+            rest = rest[end...].drop(while: { $0.isWhitespace })
+        }
+        if !rest.isEmpty { parts.append(String(rest)) }
+        return parts
     }
 
     /// Makes a Bot reply pleasant to hear: no code blocks, links or markdown symbols.
@@ -133,6 +198,8 @@ final class VoiceSession: ObservableObject {
     @Published private(set) var partial = ""
     @Published private(set) var level: Float = 0
     @Published var message: String?
+    /// While muted nothing you say is heard. The Bot can still speak.
+    @Published private(set) var muted = false
     /// Called with each finished thing the user said. The owner sends it and later calls `speak`.
     var onUtterance: ((String) -> Void)?
 
@@ -202,7 +269,7 @@ final class VoiceSession: ObservableObject {
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
-        partial = ""; level = 0; utterance = []; preRoll = []; inSpeech = false; speechQueue = []
+        partial = ""; level = 0; utterance = []; preRoll = []; inSpeech = false; speechQueue = []; muted = false
         state = .idle
     }
 
@@ -210,7 +277,17 @@ final class VoiceSession: ObservableObject {
         guard active else { return }
         partial = ""; utterance = []; inSpeech = false; bargeSeconds = 0
         state = .listening
-        if transcriber == .apple { startRecognition() }
+        if transcriber == .apple, !muted { startRecognition() }
+    }
+
+    func setMuted(_ on: Bool) {
+        guard active, on != muted else { return }
+        muted = on
+        if on {
+            silenceTimer?.invalidate(); silenceTimer = nil
+            generation += 1; task?.cancel(); task = nil; sink.set(nil)
+            partial = ""; utterance = []; preRoll = []; inSpeech = false
+        } else if state == .listening, transcriber == .apple { startRecognition() }
     }
 
     nonisolated static func requestAccess(needsSpeech: Bool) async -> Bool {
@@ -273,7 +350,7 @@ final class VoiceSession: ObservableObject {
     private func consume(level rms: Float, samples: [Float], count: Int) {
         guard active else { return }
         level = max(rms * 8, level * 0.8)
-        guard transcriber != .apple, state == .listening || state == .speaking else { return }
+        guard transcriber != .apple, !muted, state == .listening || state == .speaking else { return }
         let seconds = Double(count) / sampleRate
         let speakingNow = state == .speaking
         let threshold: Float = speakingNow ? (usingHeadset ? 0.03 : 0.08) : 0.012
@@ -291,7 +368,7 @@ final class VoiceSession: ObservableObject {
             bargeSeconds = 0
             if inSpeech {
                 utterance.append(contentsOf: samples)
-                if Date().timeIntervalSince(lastVoice) > 1.0 { finishCloudUtterance() }
+                if Date().timeIntervalSince(lastVoice) > 0.7 { finishCloudUtterance() }
             }
         }
         if !inSpeech {
@@ -354,7 +431,7 @@ final class VoiceSession: ObservableObject {
 
     private func armSilenceTimer(_ text: String) {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 1.3, repeats: false) { [weak self] _ in
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.9, repeats: false) { [weak self] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.commit(text) } }
         }
     }
@@ -383,12 +460,13 @@ final class VoiceSession: ObservableObject {
         guard active else { return }
         state = .speaking; partial = ""; bargeSeconds = 0; preRoll = []
         speechQueue = []; streamFinished = false
-        if transcriber == .apple { startRecognition() }
+        if transcriber == .apple, !muted { startRecognition() }
     }
 
     func enqueue(_ text: String) {
         guard active, state == .speaking, !text.isEmpty else { return }
-        speechQueue.append(text)
+        let limit = VoiceSettings.speaker.maxSpeechCharacters
+        speechQueue.append(contentsOf: limit.map { VoiceText.split(text, maxLength: $0) } ?? [text])
         if !draining { Task { await drain() } }
     }
 
@@ -397,27 +475,42 @@ final class VoiceSession: ObservableObject {
         if !draining, state == .speaking, active { resumeListening() }
     }
 
-    private func drain() async {
-        draining = true
-        while state == .speaking, active, !speechQueue.isEmpty {
-            await speakPiece(speechQueue.removeFirst())
-        }
-        draining = false
-        if state == .speaking, active, streamFinished { resumeListening() }
+    /// One piece of speech: cloud audio that is already being fetched, or nil to use the on-device voice.
+    private struct Fetch {
+        let text: String
+        let audio: Task<Data, Error>?
+        let provider: VoiceProvider
     }
 
-    private func speakPiece(_ text: String) async {
+    /// Starts fetching audio for a piece right away, so the next sentence is ready when the current one ends.
+    private func fetch(_ text: String) -> Fetch {
         let provider = VoiceSettings.speaker
-        if provider != .apple, provider.supportsSpeech, !VoiceKeys.get(provider).isEmpty {
-            do {
-                let data = try await VoiceCloud.synthesize(text: text, provider: provider, key: VoiceKeys.get(provider))
-                if state == .speaking { await play(data) }
-            } catch {
-                message = "\(provider.title) voice failed (\(error.localizedDescription)); using the built-in voice."
-                if state == .speaking { await speakWithApple(text) }
-            }
-        } else {
-            await speakWithApple(text)
+        let key = VoiceKeys.get(provider)
+        guard provider != .apple, provider.supportsSpeech, provider.keyIsOptional || !key.isEmpty else { return Fetch(text: text, audio: nil, provider: provider) }
+        return Fetch(text: text, audio: Task { try await VoiceCloud.synthesize(text: text, provider: provider, key: key) }, provider: provider)
+    }
+
+    private func drain() async {
+        draining = true
+        var ready: Fetch? = speechQueue.isEmpty ? nil : fetch(speechQueue.removeFirst())
+        while state == .speaking, active, let current = ready {
+            ready = speechQueue.isEmpty ? nil : fetch(speechQueue.removeFirst())
+            await speakPiece(current)
+            if ready == nil, !speechQueue.isEmpty { ready = fetch(speechQueue.removeFirst()) }
+        }
+        ready?.audio?.cancel()
+        draining = false
+        if state == .speaking, active, streamFinished, speechQueue.isEmpty { resumeListening() }
+    }
+
+    private func speakPiece(_ item: Fetch) async {
+        guard let audio = item.audio else { await speakWithApple(item.text); return }
+        do {
+            let data = try await audio.value
+            if state == .speaking { await play(data) }
+        } catch {
+            message = "\(item.provider.title) voice failed (\(error.localizedDescription)); using the built-in voice."
+            if state == .speaking { await speakWithApple(item.text) }
         }
     }
 
@@ -530,14 +623,14 @@ final class VoiceConversation: ObservableObject {
             // Speak finished sentences while the reply is still being written.
             var offset = 0, started = false, waited = 0.0
             while running, !Task.isCancelled, waited < 180 {
-                try? await Task.sleep(nanoseconds: 250_000_000); waited += 0.25
+                try? await Task.sleep(nanoseconds: 100_000_000); waited += 0.1
                 guard let reply = latestReply?(), reply.id != previous else { continue }
                 if started, session.state != .speaking {
                     // You talked over the Bot: stop generating so your next message can be sent.
                     if !reply.finished { stopReply?() }
                     return
                 }
-                let piece = VoiceText.nextChunk(reply.text, from: offset, final: reply.finished)
+                let piece = VoiceText.nextChunk(reply.text, from: offset, final: reply.finished, eager: !started)
                 offset = piece.next
                 let spoken = VoiceText.speakable(piece.chunk)
                 if !spoken.isEmpty {

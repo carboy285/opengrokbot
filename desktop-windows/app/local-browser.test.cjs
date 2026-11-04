@@ -9,7 +9,7 @@ const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const Module = require('node:module');
 const original = Module._load;
 Module._load = function (request, ...rest) { return request === 'electron' ? {} : original.call(this, request, ...rest); };
-const { settle, captureView } = require('./local-browser.cjs');
+const { settle, captureView, finishPage } = require('./local-browser.cjs');
 Module._load = original;
 
 const image = (width, empty = false) => ({ isEmpty: () => empty, getSize: () => ({ width, height: 600 }), resize(o) { return image(o.width); }, toJPEG: () => jpeg, width });
@@ -44,4 +44,14 @@ test('captureView returns an error, never throws, for empty or failed captures',
     assert.match((await captureView({ capturePage: async () => image(100, true) }, dir)).error, /nothing to capture/);
     assert.match((await captureView({ capturePage: async () => { throw new Error('x'); } }, dir)).error, /could not be captured/);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('finishPage turns slow or failed loads into results the Bot can act on', () => {
+  const page = { url: 'https://example.com/a', title: 'Example', text: 'Hello', links: [] };
+  assert.deepEqual(finishPage('https://example.com/a', page), page);
+  assert.match(finishPage('https://example.com/a', page, { note: 'slow' }).loadNote, /slow/);
+  assert.equal(finishPage('https://example.com/a', page, { note: 'slow' }).text, 'Hello', 'A partial page keeps what loaded');
+  const failed = finishPage('https://nope.example/', { url: 'chrome-error://chromewebdata/', title: 'nope.example', text: 'This site can’t be reached' }, { loadError: 'ERR_NAME_NOT_RESOLVED' });
+  assert.deepEqual(failed, { url: 'https://nope.example/', title: '', text: '', links: [], loadError: 'ERR_NAME_NOT_RESOLVED' });
+  assert.deepEqual(finishPage('https://x.example/', null), { url: 'https://x.example/', title: '', text: '', links: [] });
 });

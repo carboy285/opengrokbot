@@ -40,6 +40,19 @@ final class MacDeviceActions {
         return note
     }
 
+    /// What the chat shows. Private data read from this Mac stays out of the visible conversation; the Bot still receives it all.
+    static func summary(of result: String) -> String {
+        guard result.hasPrefix("Apple "), let range = result.range(of: " result \(privacy):\n") else { return String(result.prefix(300)) }
+        let service = String(result[result.index(result.startIndex, offsetBy: 6)..<range.lowerBound])
+        let lines = result[range.upperBound...].split(separator: "\n").filter { $0.hasPrefix("- ") || $0.contains(" | ") || $0.contains(": ") }.count
+        return "Looked at Apple \(service)" + (lines > 0 ? " · \(lines) item\(lines == 1 ? "" : "s")" : "")
+    }
+
+    /// True when a result describes something that did not work, so the Bot should try another way.
+    static func isFailure(_ result: String) -> Bool {
+        ["turned off", "could not be", "not allowed", "off or not allowed", "No saved secure login", "declined", "failed", "Unsupported", "needs "].contains { result.contains($0) }
+    }
+
     func run(_ action: BotAction, bot: Bot, unattended: Bool) async -> String {
         await dispatch(action, bot: bot, unattended: unattended)
     }

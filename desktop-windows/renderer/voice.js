@@ -1,4 +1,4 @@
-import { Vad, encodeWav, nextChunk, rms, speakable } from './voice-core.mjs';
+import { Vad, encodeWav, maxSpeechLength, nextChunk, rms, speakable, splitText } from './voice-core.mjs';
 
 // Hands-free voice mode for Windows.
 // Listening needs a cloud key (Groq has a free tier) because Electron has no built-in speech recognition.
@@ -6,6 +6,15 @@ import { Vad, encodeWav, nextChunk, rms, speakable } from './voice-core.mjs';
 
 const el = (tag, className = '', text = '') => { const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text; return node; };
 const toBase64 = bytes => { let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(binary); };
+
+const icon = body => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICONS = {
+  gear: icon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  chat: icon('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+  mic: icon('<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>'),
+  micOff: icon('<line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.1 2.1M15 9.3V4a3 3 0 0 0-5.9-.8"/><path d="M19 10v2a7 7 0 0 1-.1 1.2M5 10v2a7 7 0 0 0 11.7 5.2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>'),
+  close: icon('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>')
+};
 
 export function createVoice({ bridge, result, toast, currentBot, latestReply, sendText, openSettings }) {
   let session = null;
@@ -23,28 +32,43 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
     catch { toast('The microphone is blocked. Allow microphone access in Windows privacy settings.'); return; }
 
-    const overlay = el('div', 'voice-overlay'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-label', 'Voice mode');
-    const orb = el('div', 'voice-orb'), status = el('div', 'voice-status', 'Listening…'), caption = el('div', 'voice-caption'), note = el('div', 'voice-note');
-    const end = el('button', 'voice-end', 'End voice mode'); end.type = 'button';
-    const gear = el('button', 'voice-gear', '⚙'); gear.type = 'button'; gear.setAttribute('aria-label', 'Voice settings');
-    overlay.append(gear, el('strong', 'voice-title', bot.name), orb, status, caption, note, end);
+    const overlay = el('div', 'voice-overlay'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-label', `Voice mode with ${bot.name}`);
+    const card = el('div', 'voice-card'), top = el('div', 'voice-top');
+    const orb = el('button', 'voice-orb'); orb.type = 'button'; orb.setAttribute('aria-label', 'Interrupt the Bot'); orb.append(el('span'), el('span'));
+    const wave = el('div', 'voice-wave'); wave.setAttribute('aria-hidden', 'true');
+    const bars = Array.from({ length: 32 }, () => { const bar = document.createElement('i'); wave.append(bar); return bar; });
+    top.append(orb, wave);
+    const line = el('div', 'voice-line'); line.setAttribute('aria-live', 'polite');
+    const controls = el('div', 'voice-controls');
+    const control = (className, body, label) => { const node = el('button', className); node.type = 'button'; node.innerHTML = body; node.setAttribute('aria-label', label); return node; };
+    const gear = control('voice-gear', ICONS.gear, 'Voice settings');
+    const chat = control('voice-chat', ICONS.chat, 'Hide captions'); chat.setAttribute('aria-pressed', 'true');
+    const mic = control('voice-mic', ICONS.mic, 'Mute microphone'); mic.setAttribute('aria-pressed', 'false');
+    const end = control('voice-end', ICONS.close, 'End voice mode');
+    controls.append(gear, chat, mic, end);
+    card.append(top, line, controls); overlay.append(card);
     document.body.append(overlay); end.focus();
+    let statusText = 'Listening…', captionText = '', noteText = '', level = 0, frame = 0;
+    const renderLine = () => { line.textContent = noteText || captionText || (state.muted ? 'Muted' : statusText); };
+    const setNote = text => { noteText = text; renderLine(); };
+    const setCaption = text => { captionText = text; renderLine(); };
 
     const audio = new AudioContext();
     const source = audio.createMediaStreamSource(stream);
     const processor = audio.createScriptProcessor(2048, 1, 1);
     const vad = new Vad({ sampleRate: audio.sampleRate });
-    const state = { mode: 'listening', alive: true, cancelSpeech: null };
+    const state = { mode: 'listening', alive: true, cancelSpeech: null, muted: false };
     let queue = [], draining = false, streamDone = false;
     session = { stop };
 
-    const set = (mode, text) => { state.mode = mode; status.textContent = text; overlay.dataset.mode = mode; };
+    const set = (mode, text) => { state.mode = mode; statusText = text; overlay.dataset.mode = mode; renderLine(); };
     set('listening', 'Listening…');
 
     processor.onaudioprocess = event => {
-      if (!state.alive || state.mode === 'thinking') return;
+      if (!state.alive || state.mode === 'thinking' || state.muted) return;
       const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
-      orb.style.transform = `scale(${1 + Math.min(1, rms(chunk) * 8) * 0.25})`;
+      level = Math.max(level, Math.min(1, rms(chunk) * 8));
+      orb.style.transform = `scale(${1 + level * 0.12})`;
       const heard = vad.push(chunk, state.mode === 'speaking' ? 'speaking' : 'listening');
       if (!heard) return;
       if (heard.type === 'barge') { if (settings.talkOver) { queue = []; state.cancelSpeech?.(); set('listening', 'Listening…'); } else vad.reset(); return; }
@@ -59,42 +83,60 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
         const text = await result(bridge.voiceTranscribe(wav));
         if (!state.alive) return;
         if (!text) { resume(); return; }
-        caption.textContent = text; set('thinking', 'Thinking…');
+        setCaption(text); set('thinking', 'Thinking…');
         const before = latestReply(bot)?.id;
         await sendText(bot, text);
         // Speak finished sentences while the reply is still being written.
         let offset = 0, started = false;
-        for (let waited = 0; state.alive && waited < 180000; waited += 250) {
-          await new Promise(done => setTimeout(done, 250));
+        for (let waited = 0; state.alive && waited < 180000; waited += 100) {
+          await new Promise(done => setTimeout(done, 100));
           const reply = latestReply(bot);
           if (!reply || reply.id === before) continue;
           if (started && state.mode !== 'speaking') { if (!reply.finished) bridge.stop?.(bot.id); return; }
-          const piece = nextChunk(reply.text, offset, reply.finished);
+          const piece = nextChunk(reply.text, offset, reply.finished, !started);
           offset = piece.next;
           const spoken = speakable(piece.chunk);
           if (spoken) { if (!started) { beginSpeaking(); started = true; } enqueue(spoken); }
           if (reply.finished) { if (started) endSpeaking(); else resume(); return; }
         }
         if (started) endSpeaking(); else resume();
-      } catch (error) { note.textContent = error.message; resume(); }
+      } catch (error) { setNote(error.message); resume(); }
     }
 
-    function resume() { if (!state.alive) return; vad.reset(); set('listening', 'Listening…'); }
+    function resume() { if (!state.alive) return; vad.reset(); setCaption(''); setNote(''); set('listening', 'Listening…'); }
 
-    function beginSpeaking() { vad.reset(); queue = []; streamDone = false; set('speaking', 'Speaking · click the orb to interrupt'); caption.textContent = ''; }
-    function enqueue(text) { if (state.mode !== 'speaking') return; queue.push(text); if (!draining) drain(); }
+    function beginSpeaking() { vad.reset(); queue = []; streamDone = false; setCaption(''); set('speaking', 'Speaking · click the orb to interrupt'); }
+    function enqueue(text) {
+      if (state.mode !== 'speaking') return;
+      for (const part of splitText(text, maxSpeechLength(settings.speaker))) queue.push(part);
+      if (!draining) drain();
+    }
     function endSpeaking() { streamDone = true; if (!draining && state.mode === 'speaking') resume(); }
+    const cloudSpeaker = () => settings.speaker !== 'system' && (settings.speaker === 'nvidiaNIM' || settings.keys[settings.speaker]);
+    // Start fetching audio for a piece right away, so the next sentence is ready when the current one ends.
+    function fetchPiece(text) {
+      if (!cloudSpeaker()) return { text, audio: null };
+      const audio = result(bridge.voiceSpeak(text)).then(encoded => Uint8Array.from(atob(encoded), c => c.charCodeAt(0)));
+      audio.catch(() => {});
+      return { text, audio };
+    }
     async function drain() {
       draining = true;
-      while (state.alive && state.mode === 'speaking' && queue.length) await speakPiece(queue.shift());
+      let ready = queue.length ? fetchPiece(queue.shift()) : null;
+      while (state.alive && state.mode === 'speaking' && ready) {
+        const current = ready;
+        ready = queue.length ? fetchPiece(queue.shift()) : null;
+        await speakPiece(current);
+        if (!ready && queue.length) ready = fetchPiece(queue.shift());
+      }
       draining = false;
-      if (state.alive && state.mode === 'speaking' && streamDone) resume();
+      if (state.alive && state.mode === 'speaking' && streamDone && !queue.length) resume();
     }
-    async function speakPiece(text) {
-      if (settings.speaker === 'system' || !settings.keys[settings.speaker]) { await speakSystem(text); return; }
+    async function speakPiece({ text, audio }) {
+      if (!audio) { await speakSystem(text); return; }
       let bytes;
-      try { bytes = Uint8Array.from(atob(await result(bridge.voiceSpeak(text))), c => c.charCodeAt(0)); }
-      catch (error) { note.textContent = `${error.message} Using the Windows voice instead.`; await speakSystem(text); return; }
+      try { bytes = await audio; }
+      catch (error) { setNote(`${error.message} Using the Windows voice instead.`); await speakSystem(text); return; }
       if (state.mode === 'speaking') await playAudio(bytes);
     }
 
@@ -116,7 +158,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
 
     function playAudio(bytes) {
       return new Promise(done => {
-        const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+        const url = URL.createObjectURL(new Blob([bytes], { type: bytes[0] === 0x52 && bytes[1] === 0x49 ? 'audio/wav' : 'audio/mpeg' }));
         const player = new Audio(url);
         const finish = () => { URL.revokeObjectURL(url); state.cancelSpeech = null; done(); };
         state.cancelSpeech = () => { player.pause(); finish(); };
@@ -128,11 +170,35 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     orb.addEventListener('click', () => { if (state.mode === 'speaking') { queue = []; state.cancelSpeech?.(); resume(); } });
     end.addEventListener('click', stop);
     gear.addEventListener('click', () => { stop(); openSettings?.(); });
+    chat.addEventListener('click', () => {
+      const showing = chat.getAttribute('aria-pressed') !== 'true';
+      chat.setAttribute('aria-pressed', String(showing)); chat.setAttribute('aria-label', showing ? 'Hide captions' : 'Show captions'); line.hidden = !showing;
+    });
+    mic.addEventListener('click', () => {
+      state.muted = !state.muted; vad.reset();
+      mic.setAttribute('aria-pressed', String(state.muted)); mic.setAttribute('aria-label', state.muted ? 'Unmute microphone' : 'Mute microphone');
+      mic.innerHTML = state.muted ? ICONS.micOff : ICONS.mic; overlay.dataset.muted = String(state.muted); renderLine();
+    });
+    // The bars follow your voice while listening, ripple while the Bot speaks, and breathe while it thinks.
+    const animate = time => {
+      const t = time / 1000;
+      bars.forEach((bar, index) => {
+        const phase = index * 0.55, bump = 0.45 + 0.55 * Math.sin(Math.PI * index / (bars.length - 1)), ripple = Math.abs(Math.sin(t * 6 + phase));
+        let height = 4;
+        if (state.mode === 'listening') height = state.muted ? 4 : 4 + level * (0.35 + 0.65 * ripple) * 32;
+        else if (state.mode === 'speaking') height = 4 + 0.55 * (0.4 + 0.6 * Math.abs(Math.sin(t * 5 + phase))) * bump * 32;
+        else if (state.mode === 'thinking') height = 4 + (0.5 + 0.5 * Math.sin(t * 3 + phase)) * 6;
+        bar.style.height = `${height}px`;
+      });
+      level *= 0.85;
+      frame = requestAnimationFrame(animate);
+    };
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) frame = requestAnimationFrame(animate);
     overlay.addEventListener('keydown', event => { if (event.key === 'Escape') stop(); });
 
     function stop() {
       if (!session) return;
-      session = null; state.alive = false; queue = []; state.cancelSpeech?.();
+      session = null; state.alive = false; queue = []; state.cancelSpeech?.(); cancelAnimationFrame(frame);
       window.speechSynthesis.cancel();
       processor.disconnect(); source.disconnect(); stream.getTracks().forEach(track => track.stop()); audio.close().catch(() => {});
       overlay.remove();
@@ -154,11 +220,11 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     form.append(
       el('p', 'muted', 'Listening needs a cloud key because Windows has no offline recognizer here; Groq has a free tier. Speaking is free using Windows voices. Audio and reply text go only to the provider you choose. Keys are encrypted on this PC.'),
       row('Listening', select([['groq', 'Groq (Whisper)'], ['openAI', 'OpenAI (Whisper)'], ['elevenLabs', 'ElevenLabs (Scribe)']], settings.transcriber, value => save({ transcriber: value }))),
-      row('Speaking', select([['system', 'Windows voice (free)'], ['openAI', 'OpenAI'], ['elevenLabs', 'ElevenLabs']], settings.speaker, value => save({ speaker: value }))),
+      row('Speaking', select([['system', 'Windows voice (free)'], ['groq', 'Groq (Orpheus)'], ['elevenLabs', 'ElevenLabs'], ['openAI', 'OpenAI'], ['nvidiaNIM', 'NVIDIA NIM (Magpie, self-hosted)']], settings.speaker, value => save({ speaker: value }))),
     );
     const talk = el('input'); talk.type = 'checkbox'; talk.checked = settings.talkOver; talk.addEventListener('change', () => save({ talkOver: talk.checked }));
     form.append(row('Allow talking over replies', talk));
-    for (const [id, title] of [['groq', 'Groq'], ['openAI', 'OpenAI'], ['elevenLabs', 'ElevenLabs']]) {
+    for (const [id, title] of [['groq', 'Groq'], ['openAI', 'OpenAI'], ['elevenLabs', 'ElevenLabs'], ['nvidiaNIM', 'NVIDIA NIM (only if your server needs one)']]) {
       const input = el('input'); input.type = 'password'; input.autocomplete = 'off'; input.placeholder = settings.keys[id] ? 'Saved — paste a new key to replace' : 'Paste API key';
       const keep = el('button', '', 'Save key'); keep.type = 'button';
       keep.addEventListener('click', async () => { try { await result(bridge.voiceKey(id, input.value.trim())); input.value = ''; input.placeholder = 'Saved — paste a new key to replace'; toast(`${title} key saved.`); } catch (error) { toast(error.message); } });
@@ -168,6 +234,11 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     }
     const voiceID = el('input'); voiceID.value = settings.voiceID; voiceID.addEventListener('change', () => save({ voiceID: voiceID.value.trim() }));
     form.append(row('ElevenLabs voice ID', voiceID));
+    form.append(row('Groq voice', select(['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'].map(name => [name, name[0].toUpperCase() + name.slice(1)]), settings.groqVoice || 'autumn', value => save({ groqVoice: value }))));
+    const nimURL = el('input'); nimURL.value = settings.nimURL || 'http://localhost:9000'; nimURL.addEventListener('change', () => save({ nimURL: nimURL.value.trim() }));
+    const nimVoice = el('input'); nimVoice.value = settings.nimVoice || 'Magpie-Multilingual.EN-US.Aria'; nimVoice.addEventListener('change', () => save({ nimVoice: nimVoice.value.trim() }));
+    form.append(row('NVIDIA NIM address', nimURL), row('NVIDIA NIM voice', nimVoice),
+      el('p', 'muted', 'NVIDIA NIM speaks with a Magpie TTS NIM you run yourself (a Docker container on an NVIDIA GPU, usually at port 9000). NVIDIA’s hosted cloud endpoint uses gRPC and is not supported here. Groq and ElevenLabs voices are usually the quickest to start speaking.'));
     page.append(form);
   }
 

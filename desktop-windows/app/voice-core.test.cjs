@@ -67,3 +67,27 @@ test('nextChunk releases finished sentences only and never splits code blocks', 
   assert.deepEqual(nextChunk('Emoji 👋 done. More', 0, false), { chunk: 'Emoji 👋 done.', next: 13 });
   assert.deepEqual(nextChunk('abc', 5, false), { chunk: '', next: 5 });
 });
+
+test('the first spoken chunk can start at a pause instead of waiting for a whole sentence', async () => {
+  const { nextChunk } = await load();
+  const text = 'I looked at the page you sent me earlier, and then I checked the results';
+  assert.equal(nextChunk(text, 0, false).chunk, '');
+  assert.deepEqual(nextChunk(text, 0, false, true), { chunk: 'I looked at the page you sent me earlier,', next: 41 });
+  assert.equal(nextChunk('Hello there. And more', 0, false, true).chunk, 'Hello there.');
+  assert.equal(nextChunk('Short', 0, true).chunk, 'Short');
+});
+
+test('splitText keeps every word and respects the limit', async () => {
+  const { splitText, maxSpeechLength } = await load();
+  const text = 'One two three. Four five six seven. Eight nine ten eleven twelve.';
+  const parts = splitText(text, 20);
+  assert.deepEqual(parts, ['One two three.', 'Four five six seven.', 'Eight nine ten', 'eleven twelve.']);
+  assert.ok(parts.every(part => part.length <= 20));
+  assert.equal(parts.join(' '), text);
+  assert.deepEqual(splitText('a'.repeat(50), 20).map(part => part.length), [20, 20, 10]);
+  assert.deepEqual(splitText('Hello', 190), ['Hello']);
+  assert.deepEqual(splitText('   ', 190), []);
+  assert.equal(maxSpeechLength('groq'), 190);
+  assert.equal(maxSpeechLength('nvidiaNIM'), 400);
+  assert.equal(maxSpeechLength('openAI'), Infinity);
+});
