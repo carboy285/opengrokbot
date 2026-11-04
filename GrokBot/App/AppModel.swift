@@ -107,7 +107,7 @@ final class AppModel: ObservableObject {
               configuration.providers.count <= CLIProvider.allCases.count,
               Set(configuration.providers.map(\.provider)).count == configuration.providers.count,
               configuration.providers.allSatisfy({ $0.model.count <= 200 && !$0.model.contains(where: { $0.isNewline }) }) else { return false }
-        var selected = configuration; if selected.providers.count < 2 { selected.replyMode = .one }
+        var selected = configuration; if selected.replyMode != .compare || selected.providers.count < 2 { selected.replyMode = .one }
         return commit { $0.bots[index].aiConfiguration = selected }
     }
 

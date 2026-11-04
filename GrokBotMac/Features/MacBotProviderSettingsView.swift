@@ -19,7 +19,7 @@ struct MacBotProviderSettingsView: View {
                 }.disabled(busy).accessibilityIdentifier("bot-active-provider").padding(.horizontal, 4).padding(.bottom, 4)
             }
             if configuration.providers.count > 1 {
-                Toggle("Ask every enabled provider and compare answers", isOn: Binding(get: { configuration.replyMode == .all }, set: { on in update { $0.replyMode = on ? .all : .one } }))
+                Toggle("Ask every enabled provider and compare answers", isOn: Binding(get: { configuration.replyMode == .compare }, set: { on in update { $0.replyMode = on ? .compare : .one } }))
                     .toggleStyle(.checkbox).font(.system(size: 13)).disabled(busy).padding(.horizontal, 4).accessibilityIdentifier("bot-compare-toggle")
             }
             ForEach(CLIProvider.allCases) { provider in

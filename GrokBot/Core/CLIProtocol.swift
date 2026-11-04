@@ -35,7 +35,8 @@ struct BotAIProvider: Codable, Hashable, Sendable, Identifiable {
     var id: String { provider.rawValue }
 }
 
-enum ProviderReplyMode: String, Codable, Hashable, Sendable { case one, all }
+/// `one`: only the active provider answers. `compare`: every enabled provider answers side by side, in plain text with no tools. (`all` is a legacy value that is always treated as `one`.)
+enum ProviderReplyMode: String, Codable, Hashable, Sendable { case one, all, compare }
 
 struct BotAIConfiguration: Codable, Hashable, Sendable {
     var providers: [BotAIProvider]

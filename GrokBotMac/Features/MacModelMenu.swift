@@ -12,7 +12,7 @@ struct MacModelMenu: View {
 
     private var title: String {
         guard let active else { return "Choose a model" }
-        if configuration.replyMode == .all, configuration.providers.count > 1 { return "Comparing \(configuration.providers.count) models" }
+        if configuration.replyMode == .compare, configuration.providers.count > 1 { return "Comparing \(configuration.providers.count) models" }
         return active.provider.name + (active.model.isEmpty ? "" : " · " + active.model)
     }
 
@@ -25,7 +25,7 @@ struct MacModelMenu: View {
             }
             if configuration.providers.count > 1 {
                 Divider()
-                Toggle("Compare all enabled models", isOn: Binding(get: { configuration.replyMode == .all }, set: { on in set(on) })).disabled(busy)
+                Toggle("Compare all enabled models", isOn: Binding(get: { configuration.replyMode == .compare }, set: { on in set(on) })).disabled(busy)
             }
             if let active { Divider(); Text(CLISignIn.credentialLabel(for: active.provider)) }
             Divider()
@@ -66,7 +66,7 @@ struct MacModelMenu: View {
         _ = app.setAIConfiguration(value, for: bot)
     }
     private func set(_ compare: Bool) {
-        var value = configuration; value.replyMode = compare ? .all : .one
+        var value = configuration; value.replyMode = compare ? .compare : .one
         _ = app.setAIConfiguration(value, for: bot)
     }
 }

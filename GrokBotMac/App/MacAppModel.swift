@@ -343,7 +343,7 @@ extension MacAppModel {
 
     func providersToRun(for bot: Bot) -> [(cli: InstalledCLI, choice: BotAIProvider)] {
         let configuration = aiConfiguration(for: bot)
-        let choices = configuration.replyMode == .all && configuration.providers.count > 1 ? configuration.providers : ((configuration.providers.first { $0.provider == configuration.activeProvider } ?? configuration.providers.first).map { [$0] } ?? [])
+        let choices = configuration.replyMode == .compare && configuration.providers.count > 1 ? configuration.providers : ((configuration.providers.first { $0.provider == configuration.activeProvider } ?? configuration.providers.first).map { [$0] } ?? [])
         return choices.compactMap { choice in installedCLIs.first { $0.provider == choice.provider }.map { ($0, choice) } }
     }
 
@@ -457,7 +457,7 @@ extension MacAppModel {
         let key = bot.id.uuidString + "|" + cli.id + (model.isEmpty ? "" : "|" + model)
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
-        let comparing = aiConfiguration(for: bot).replyMode == .all && providersToRun(for: bot).count > 1
+        let comparing = aiConfiguration(for: bot).replyMode == .compare && providersToRun(for: bot).count > 1
         let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil) + (comparing ? "\nComparison turn: several models answer the same question side by side. Answer in plain text only; do not use opengrokbot-action tools.\n" : MacDeviceActions.shared.promptNote())
         let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
         let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")

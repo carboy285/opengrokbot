@@ -524,5 +524,18 @@ final class MacBigUpdateTests: XCTestCase {
         XCTAssertFalse(app.updateSharedMemory(Array(repeating: "x", count: 101)))
         XCTAssertFalse(app.updateSharedMemory([String(repeating: "x", count: 2001)]))
     }
+
+    func testCompareIsOptInAndLegacyAllStillMeansOneProvider() throws {
+        let folder = try temporaryFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        let app = AppModel(store: WorkspaceStore(url: folder.appendingPathComponent("preview.json"))); app.enterPreview()
+        let main = try XCTUnwrap(app.workspace.bots.first)
+        let two = [BotAIProvider(provider: .codex), BotAIProvider(provider: .claude)]
+        XCTAssertTrue(app.setAIConfiguration(BotAIConfiguration(providers: two, activeProvider: .codex, replyMode: .all), for: main))
+        XCTAssertEqual(app.workspace.bots.first?.aiConfiguration?.replyMode, .one, "The legacy value is never honored")
+        XCTAssertTrue(app.setAIConfiguration(BotAIConfiguration(providers: two, activeProvider: .codex, replyMode: .compare), for: main))
+        XCTAssertEqual(app.workspace.bots.first?.aiConfiguration?.replyMode, .compare)
+        XCTAssertTrue(app.setAIConfiguration(BotAIConfiguration(providers: [BotAIProvider(provider: .codex)], activeProvider: .codex, replyMode: .compare), for: main))
+        XCTAssertEqual(app.workspace.bots.first?.aiConfiguration?.replyMode, .one, "Compare needs at least two providers")
+    }
 }
 #endif
