@@ -8,6 +8,8 @@ struct MacSecureLoginsView: View {
     @State private var website = ""
     @State private var username = ""
     @State private var password = ""
+    @State private var useOnePassword = false
+    @State private var onePasswordItem = ""
     @State private var feedback: String?
 
     var body: some View {
@@ -24,11 +26,18 @@ struct MacSecureLoginsView: View {
                 Text("Add a login").font(.system(size: 16, weight: .medium))
                 TextField("Name, for example ESPN", text: $label).textFieldStyle(.roundedBorder)
                 TextField("Website, for example https://www.espn.com/login", text: $website).textFieldStyle(.roundedBorder).autocorrectionDisabled()
-                TextField("Username or email", text: $username).textFieldStyle(.roundedBorder).autocorrectionDisabled()
-                SecureField("Password", text: $password).textFieldStyle(.roundedBorder).accessibilityIdentifier("secure-login-password")
+                Toggle("Use an item from 1Password instead of saving a password here", isOn: $useOnePassword).toggleStyle(.checkbox).font(.system(size: 13))
+                if useOnePassword {
+                    TextField("Exact 1Password item name", text: $onePasswordItem).textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                    Text(OnePassword.executable == nil ? "1Password’s command-line tool (op) was not found. Install it with brew install 1password-cli, then turn on its desktop app integration." : "1Password will ask for Touch ID each time. Nothing is stored here but the item name.")
+                        .font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                } else {
+                    TextField("Username or email", text: $username).textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                    SecureField("Password", text: $password).textFieldStyle(.roundedBorder).accessibilityIdentifier("secure-login-password")
+                }
                 HStack {
                     MacPillButton(title: "Save to Keychain", prominent: true) { save() }
-                        .disabled(label.isEmpty || website.isEmpty || username.isEmpty || password.isEmpty)
+                        .disabled(label.isEmpty || website.isEmpty || (useOnePassword ? onePasswordItem.isEmpty : (username.isEmpty || password.isEmpty)))
                     if let feedback { Text(feedback).font(.system(size: 13)).foregroundStyle(MacTheme.secondary) }
                 }
             }.padding(22).frame(maxWidth: .infinity, alignment: .leading).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 18))
@@ -45,7 +54,7 @@ struct MacSecureLoginsView: View {
                                 Image(systemName: "key.fill").frame(width: 28)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(login.label).font(.system(size: 15, weight: .medium))
-                                    Text("\(login.username) · \(login.host)").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                                    Text(login.onePassword != nil ? "1Password · \(login.host)" : "\(login.username) · \(login.host)").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
                                 }
                                 Spacer()
                                 MacPillButton(title: "Remove") { remove(login) }
@@ -60,8 +69,9 @@ struct MacSecureLoginsView: View {
 
     private func save() {
         do {
-            try store.add(label: label, url: website, username: username, password: password)
-            label = ""; website = ""; username = ""; password = ""
+            if useOnePassword { try store.addOnePassword(label: label, url: website, item: onePasswordItem) }
+            else { try store.add(label: label, url: website, username: username, password: password) }
+            label = ""; website = ""; username = ""; password = ""; onePasswordItem = ""
             feedback = "Saved in this Mac’s Keychain."
         } catch { feedback = (error as? LocalizedError)?.errorDescription ?? "The login could not be saved." }
         logins = store.list()

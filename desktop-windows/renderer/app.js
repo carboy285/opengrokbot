@@ -1,5 +1,6 @@
 import { preview } from './seed.js';
 import { createVoice } from './voice.js';
+import { renderApiKeys } from './api-keys.js';
 
 const $ = selector => document.querySelector(selector);
 const node = (tag, className = '', text = '') => { const value = document.createElement(tag); value.className = className; value.textContent = text; return value; };
@@ -301,7 +302,7 @@ function unavailable(title, detail) { return append(node('div', 'unavailable'), 
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
   const layout = node('div', 'settings-layout'); const nav = node('nav', 'settings-nav'); const page = node('section', 'settings-page');
-  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['Vault','⚿'],['Voice','♫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
+  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Vault','⚿'],['Voice','♫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
   append(page, append(node('header','panel-head'), node('h1','',tab), button('×', () => dialog.close(), 'close-panel')));
   append(layout, nav, page); dialog.append(layout); if (!dialog.open) dialog.showModal();
   if (tab === 'General') {
@@ -318,6 +319,7 @@ function showSettings(tab = 'General') {
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
+  else if (tab === 'API Keys') renderApiKeys({ bridge, result, toast, page });
   else if (tab === 'Voice') voice.renderSettings(page);
   else if (tab === 'Backup') renderBackup(page);
 }

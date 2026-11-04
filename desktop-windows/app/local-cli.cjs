@@ -98,7 +98,7 @@ class EventParser {
   }
   part(id,text){if(!this.parts.has(id))this.order.push(id);this.parts.set(id,text);this.text=this.order.map(x=>this.parts.get(x)).join('\n\n');}
 }
-function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',timeout=600000}) {
+function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',timeout=600000,env={}}) {
   let child, cancelled=false, timedOut=false, cancelTimer;
   const cancel=(immediately=false)=>{cancelled=true;if(child&&child.exitCode===null){if(immediately){child.kill('SIGKILL');return;}if(!child.killed){child.kill('SIGINT');cancelTimer=setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},2000);cancelTimer.unref();}}};
   const done=(async()=>{
@@ -114,7 +114,7 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',t
       return await new Promise((resolve,reject)=>{
         const timer=setTimeout(()=>{timedOut=true;cancel();},timeout);timer.unref();
         const clean=()=>{clearTimeout(timer);clearTimeout(cancelTimer);};
-        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile,model),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
+        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile,model),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment,...env}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
         const decoder=new StringDecoder('utf8');
         const consume=line=>{for(const event of parser.parse(line)){if(event.type==='failed')protocolFailed=true;onEvent(event);}};
         child.stdout.on('data',data=>{

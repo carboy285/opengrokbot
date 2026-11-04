@@ -6,6 +6,8 @@ struct SecureLogin: Codable, Identifiable, Hashable, Sendable {
     var label: String
     var host: String
     var username: String
+    /// A 1Password item name. When set, the username and password are read from 1Password at sign-in time and none is stored here.
+    var onePassword: String? = nil
 }
 
 /// Saved logins that the app (never the Bot, never the AI provider) types into a page after the human approves.
@@ -50,6 +52,22 @@ struct SecureLoginStore: Sendable {
             try? store.delete(account: Self.account(entry.id))
             throw Failure.storage
         }
+        return entry
+    }
+
+    /// Saves a login that lives in 1Password: only the site and item name are kept here.
+    @discardableResult
+    func addOnePassword(label: String, url: String, item: String) throws -> SecureLogin {
+        let label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...60).contains(label.count) else { throw Failure.invalid("Give the login a short name (up to 60 characters).") }
+        guard let host = Self.host(from: url) else { throw Failure.invalid("Enter the website as an https:// address, for example https://example.com/login.") }
+        guard OnePassword.isValidItemName(item) else { throw Failure.invalid("Enter the exact name of the 1Password item.") }
+        var logins = list()
+        guard logins.count < Self.maxLogins else { throw Failure.full }
+        guard !logins.contains(where: { $0.label.caseInsensitiveCompare(label) == .orderedSame }) else { throw Failure.invalid("A login with this name already exists. Choose a different name.") }
+        let entry = SecureLogin(id: UUID(), label: label, host: host, username: "1Password", onePassword: item.trimmingCharacters(in: .whitespacesAndNewlines))
+        logins.append(entry)
+        do { try store.save(JSONEncoder().encode(logins), account: "index") } catch { throw Failure.storage }
         return entry
     }
 

@@ -7,6 +7,7 @@ struct MacSettingsView: View {
     @AppStorage("macAppearance") private var appearance = "dark"
     @AppStorage("spellChecking") private var spellChecking = true
     @AppStorage("profileName") private var profileName = "You"
+    @AppStorage("keepAwakeForRoutines") private var keepAwakeForRoutines = false
     @State private var reset = false
 
     var body: some View {
@@ -44,7 +45,7 @@ struct MacSettingsView: View {
                         case .apiKeys: MacAPIKeysView()
                         case .secureLogins: MacSecureLoginsView()
                         case .vault: MacVaultView()
-                        case .usage: unavailable(title: "AI usage belongs to your CLI account", detail: "OpenGrokBot has no subscription or inference fees of its own. Your chosen CLI provider may have usage limits or charges. No account usage percentage is guessed here.", icon: "chart.bar")
+                        case .usage: MacUsageView()
                         case .updates: updates
                         }
                     }.padding(.horizontal, 36).padding(.bottom, 34).frame(maxWidth: .infinity, alignment: .leading)
@@ -121,6 +122,13 @@ struct MacSettingsView: View {
             MacRemoteAccessView(remote: desktop.remote)
             Text("Bot browsers run locally, with a separate visible browser and cookie/login profile for each Bot. Open Bot details → Open local browser. No browser provider account is needed.").font(.callout).foregroundStyle(.secondary)
             Button("View another computer on this account") { desktop.panel = nil; desktop.showMirror = true }
+            section("Always on") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Keep this Mac awake while Bots have scheduled routines", isOn: $keepAwakeForRoutines).toggleStyle(.switch)
+                    Text("A Bot that is replying always keeps the Mac awake until it finishes. This extends that to scheduled routines and email or calendar triggers. It uses more battery, and closing a laptop lid still puts it to sleep.")
+                        .font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary)
+                }.padding(20)
+            }
             section("This Mac") {
                 VStack(spacing: 0) {
                     settingRow("Time zone") { Text(TimeZone.current.identifier).foregroundStyle(MacTheme.secondary) }
@@ -217,5 +225,67 @@ private struct MacAPIKeysView: View {
         do { try ProviderAPIKeys.remove(provider); feedback[provider] = "Removed. \(provider.name) will use its own sign-in again." }
         catch { feedback[provider] = "The Keychain could not remove this key. Unlock your Mac and try again." }
         load()
+    }
+}
+
+
+/// What the app has run: messages, estimated tokens and whether an API key or a sign-in was used. Estimates from text length, not billing data.
+private struct MacUsageView: View {
+    @ObservedObject private var ledger = UsageLedger.shared
+    @State private var days = 7
+    private var since: Date { days == 0 ? Calendar.current.startOfDay(for: Date()) : Date().addingTimeInterval(-Double(days) * 86_400) }
+
+    var body: some View {
+        let providers = UsageLedger.summarize(ledger.records, since: since, key: \.provider)
+        let bots = UsageLedger.summarize(ledger.records, since: since, key: \.botName)
+        let total = providers.reduce(0) { $0 + $1.messages }
+        VStack(alignment: .leading, spacing: 18) {
+            Picker("Period", selection: $days) { Text("Today").tag(0); Text("7 days").tag(7); Text("30 days").tag(30) }.pickerStyle(.segmented).frame(width: 300)
+            HStack(spacing: 14) {
+                stat("\(total)", "messages answered")
+                stat(format(providers.reduce(0) { $0 + $1.tokensIn }), "≈ tokens sent")
+                stat(format(providers.reduce(0) { $0 + $1.tokensOut }), "≈ tokens received")
+                stat("\(providers.reduce(0) { $0 + $1.apiMessages })", "used an API key")
+            }
+            table("By provider", providers)
+            table("By Bot", bots)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Token counts are estimated from text length on this Mac. They are not billing data. Messages that used a subscription sign-in count against that plan’s limits; messages that used an API key are billed per token by the provider.")
+                    .font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary)
+                HStack(spacing: 16) {
+                    Link("OpenAI usage ↗", destination: URL(string: "https://platform.openai.com/usage")!)
+                    Link("Anthropic usage ↗", destination: URL(string: "https://console.anthropic.com/settings/usage")!)
+                    Link("xAI console ↗", destination: URL(string: "https://console.x.ai")!)
+                    Spacer()
+                    Button("Clear history") { ledger.clear() }.disabled(ledger.records.isEmpty)
+                }.font(.system(size: 12))
+            }
+        }
+    }
+
+    private func format(_ value: Int) -> String { value >= 1_000_000 ? String(format: "%.1fM", Double(value) / 1_000_000) : value >= 1000 ? String(format: "%.1fk", Double(value) / 1000) : "\(value)" }
+
+    private func stat(_ value: String, _ caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value).font(.system(size: 24, weight: .medium))
+            Text(caption).font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func table(_ title: String, _ rows: [UsageRow]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.system(size: 14)).foregroundStyle(MacTheme.secondary).padding(.leading, 16)
+            VStack(spacing: 0) {
+                if rows.isEmpty { Text("Nothing yet in this period.").font(.system(size: 14)).foregroundStyle(MacTheme.secondary).padding(18).frame(maxWidth: .infinity, alignment: .leading) }
+                ForEach(rows) { row in
+                    HStack {
+                        Text(row.id).font(.system(size: 15)).lineLimit(1)
+                        Spacer()
+                        Text("\(row.messages) msg · ≈\(format(row.tokensIn + row.tokensOut)) tokens\(row.apiMessages > 0 ? " · \(row.apiMessages) via API key" : "")").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                    }.padding(.horizontal, 18).padding(.vertical, 13)
+                    if row.id != rows.last?.id { Divider() }
+                }
+            }.background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 16))
+        }
     }
 }

@@ -81,6 +81,125 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
         } onCancel: { Task { @MainActor [weak self] in self?.web.stopLoading(); self?.finish(.failure(CancellationError())) } }
     }
 
+    // MARK: Interaction (click, type, scroll, search)
+    private static let findClick = """
+    const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+    const label = el => String(el.innerText || el.value || el.getAttribute('aria-label') || el.title || '').trim().replace(/\\s+/g, ' ');
+    const nodes = [...document.querySelectorAll('a, button, input[type=button], input[type=submit], [role=button], [role=link], [role=tab], [role=menuitem], summary, label')].filter(visible);
+    const q = target.trim().toLowerCase();
+    let match = nodes.find(el => label(el).toLowerCase() === q) || nodes.find(el => label(el).toLowerCase().includes(q));
+    if (!match) { try { const bySelector = document.querySelector(target); if (bySelector && visible(bySelector)) match = bySelector; } catch (e) {} }
+    if (!match) return JSON.stringify({ ok: false, error: 'No visible link or button matched that text.', candidates: nodes.slice(0, 20).map(label).filter(Boolean) });
+    const form = match.closest('form');
+    const submits = !!form && ((match.tagName === 'BUTTON' && (!match.type || match.type === 'submit')) || match.type === 'submit');
+    if (mode === 'click') { match.scrollIntoView({ block: 'center' }); match.click(); }
+    return JSON.stringify({ ok: true, label: label(match).slice(0, 100), tag: match.tagName.toLowerCase(), submits: submits });
+    """
+
+    private static let findField = """
+    const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled && !el.readOnly; };
+    const fields = [...document.querySelectorAll('input, textarea, [contenteditable=true]')].filter(visible).filter(el => !['hidden', 'checkbox', 'radio', 'button', 'submit', 'file'].includes(el.type));
+    const hint = el => ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.autocomplete || '') + ' ' + (el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + ((el.labels && el.labels[0] && el.labels[0].innerText) || '')).toLowerCase();
+    const q = target.trim().toLowerCase();
+    let field = q ? fields.find(el => hint(el).includes(q)) : (fields.includes(document.activeElement) ? document.activeElement : fields[0]);
+    if (!field) return JSON.stringify({ ok: false, error: 'No visible text field matched.', candidates: fields.slice(0, 15).map(el => hint(el).trim().slice(0, 60)).filter(Boolean) });
+    const type = (field.type || 'text').toLowerCase();
+    const isSearch = type === 'search' || /search|query|(^|\\s)q(\\s|$)/.test(hint(field));
+    if (mode === 'type') {
+      field.scrollIntoView({ block: 'center' }); field.focus();
+      if (field.isContentEditable) { field.textContent = value; }
+      else { const proto = field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(field, value); }
+      field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true }));
+      if (submit) { const form = field.closest('form'); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })); if (form && form.requestSubmit) form.requestSubmit(); }
+    }
+    return JSON.stringify({ ok: true, type: type, hint: hint(field).trim().slice(0, 120), isSearch: isSearch });
+    """
+
+    private static let scrollScript = """
+    const step = Math.max(200, Math.round(window.innerHeight * 0.8));
+    if (direction === 'top') window.scrollTo(0, 0); else if (direction === 'bottom') window.scrollTo(0, document.documentElement.scrollHeight);
+    else window.scrollBy(0, direction === 'up' ? -step : step);
+    return JSON.stringify({ y: Math.round(window.scrollY), height: document.documentElement.scrollHeight });
+    """
+
+    private static let searchScript = """
+    const results = [...document.querySelectorAll('.result')].slice(0, 12).map(el => {
+      const link = el.querySelector('a.result__a'); if (!link) return null;
+      let url = link.href;
+      try { const u = new URL(link.href); const target = u.searchParams.get('uddg'); if (target) url = decodeURIComponent(target); } catch (e) {}
+      const snippet = el.querySelector('.result__snippet');
+      return { title: link.innerText.trim().slice(0, 140), url: url, snippet: snippet ? snippet.innerText.trim().slice(0, 240) : '' };
+    }).filter(Boolean).slice(0, 8);
+    return JSON.stringify({ results: results });
+    """
+
+    private func json(_ value: Any?) -> [String: Any] {
+        guard let text = value as? String, let data = text.data(using: .utf8) else { return [:] }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    }
+
+    /// Finds a link or button by its text (or a CSS selector) without clicking it, so risk can be judged first.
+    func inspectClick(_ target: String) async throws -> (label: String, tag: String, submits: Bool) {
+        guard reader == nil else { throw CloudError.message("This Bot’s browser is busy. Try again in a moment.") }
+        let found = json(try await web.callAsyncJavaScript(Self.findClick, arguments: ["target": target, "mode": "inspect"], in: nil, contentWorld: .page))
+        guard found["ok"] as? Bool == true else { throw CloudError.message(Self.notFound(found)) }
+        return (found["label"] as? String ?? target, found["tag"] as? String ?? "", found["submits"] as? Bool ?? false)
+    }
+
+    func performClick(_ target: String) async throws {
+        _ = try await web.callAsyncJavaScript(Self.findClick, arguments: ["target": target, "mode": "click"], in: nil, contentWorld: .page)
+    }
+
+    func inspectField(_ target: String, submit: Bool) async throws -> (type: String, hint: String, isSearch: Bool) {
+        guard reader == nil else { throw CloudError.message("This Bot’s browser is busy. Try again in a moment.") }
+        let found = json(try await web.callAsyncJavaScript(Self.findField, arguments: ["target": target, "mode": "inspect", "value": "", "submit": submit], in: nil, contentWorld: .page))
+        guard found["ok"] as? Bool == true else { throw CloudError.message(Self.notFound(found)) }
+        return (found["type"] as? String ?? "text", found["hint"] as? String ?? "", found["isSearch"] as? Bool ?? false)
+    }
+
+    func typeText(field target: String, text: String, submit: Bool) async throws {
+        _ = try await web.callAsyncJavaScript(Self.findField, arguments: ["target": target, "mode": "type", "value": text, "submit": submit], in: nil, contentWorld: .page)
+    }
+
+    func scroll(_ direction: String) async throws {
+        _ = try await web.callAsyncJavaScript(Self.scrollScript, arguments: ["direction": direction], in: nil, contentWorld: .page)
+    }
+
+    func goBackPage() { if web.canGoBack { web.goBack() } }
+
+    private static func notFound(_ found: [String: Any]) -> String {
+        let options = (found["candidates"] as? [String] ?? []).prefix(12).joined(separator: " · ")
+        return (found["error"] as? String ?? "Nothing matched.") + (options.isEmpty ? "" : " Visible options: " + options + ".")
+    }
+
+    /// The page as it looks now (text, links and a screenshot), after waiting for it to settle. Used after every interaction.
+    func snapshot(directory: URL, note: String? = nil) async -> String {
+        readDirectory = directory
+        try? await Task.sleep(for: .milliseconds(500))
+        await settle(requireReader: false)
+        guard let raw = try? await web.evaluateJavaScript(Self.readScript) as? String else { return "{\"loadError\":\"The page could not be read.\"}" }
+        var page = (raw.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
+        if let note { page["loadNote"] = note }
+        switch await captureScreenshot() {
+        case .success(let path): page["screenshot"] = path; page["screenshotNote"] = "A screenshot of the page as it looks now. Open this image file to see the result of your action."
+        case .failure(let error): page["screenshotError"] = (error as? CloudError)?.errorDescription ?? "The screenshot could not be captured."
+        }
+        let data = try? JSONSerialization.data(withJSONObject: page, options: [.withoutEscapingSlashes])
+        return data.flatMap { String(data: $0, encoding: .utf8) } ?? raw
+    }
+
+    /// Web search through the Bot's own browser (no key needed). Returns JSON with up to eight results.
+    func search(_ query: String) async throws -> String {
+        guard reader == nil else { throw CloudError.message("This Bot’s browser is busy. Try again in a moment.") }
+        var parts = URLComponents(string: "https://duckduckgo.com/html/")!
+        parts.queryItems = [URLQueryItem(name: "q", value: String(query.prefix(200)))]
+        guard let address = parts.string else { throw CloudError.message("That search could not be started.") }
+        try navigate(address)
+        try await waitUntilLoaded(timeout: 25)
+        try? await Task.sleep(for: .milliseconds(400))
+        return (try await web.callAsyncJavaScript(Self.searchScript, arguments: [:], in: nil, contentWorld: .page) as? String) ?? "{\"results\":[]}"
+    }
+
     // MARK: Secure login
     private static let fillScript = """
     const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled && !el.readOnly; };
@@ -144,9 +263,9 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
     }
     private static let readScript = "JSON.stringify({url:location.href,title:document.title,text:(document.body?.innerText||'').slice(0,16000),links:[...document.links].slice(0,25).map(a=>({text:a.innerText.slice(0,100),url:a.href}))})"
     /// Dynamic pages (fantasy draft rooms, dashboards) keep rendering after the load event: wait until loading stops and the text length is steady.
-    private func settle() async {
+    private func settle(requireReader: Bool = true) async {
         var previous: String?; var stable = 0; let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline, reader != nil {
+        while Date() < deadline, !requireReader || reader != nil {
             let state = try? await web.evaluateJavaScript("document.readyState+'|'+(document.body?.innerText||'').length") as? String
             let ready = !web.isLoading && (state?.hasPrefix("complete|") ?? false)
             stable = ready && state == previous ? stable + 1 : 0; previous = state

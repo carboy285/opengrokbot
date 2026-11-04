@@ -97,7 +97,7 @@ final class AppModel: ObservableObject {
               configuration.providers.count <= CLIProvider.allCases.count,
               Set(configuration.providers.map(\.provider)).count == configuration.providers.count,
               configuration.providers.allSatisfy({ $0.model.count <= 200 && !$0.model.contains(where: { $0.isNewline }) }) else { return false }
-        var selected = configuration; selected.replyMode = .one
+        var selected = configuration; if selected.providers.count < 2 { selected.replyMode = .one }
         return commit { $0.bots[index].aiConfiguration = selected }
     }
 
@@ -164,6 +164,18 @@ final class AppModel: ObservableObject {
         guard let bot = workspace.bots.firstIndex(where: { $0.id == botID }) else { return false }
         return commit { $0.bots[bot].schedules?.removeAll { $0.id == id } }
     }
+    /// Records something that happened on this Mac (new mail, an event about to start) that can start a routine.
+    func triggerEvent(_ text: String, source: String, for botID: UUID) {
+        _ = commit { var entry = Entry(botID: botID, kind: .activity, text: text); entry.provider = "trigger:" + source; $0.entries.append(entry) }
+    }
+
+    /// Finishes a reply with plain text and no tool actions (used when several models answer the same question).
+    func completeReply(_ replyID: UUID, text: String) {
+        _ = commit { value in
+            if let index = value.entries.firstIndex(where: { $0.id == replyID }) { value.entries[index].text = text; value.entries[index].state = .complete }
+        }
+    }
+
     func activity(_ text: String, for botID: UUID, detail: String? = nil) {
         _ = commit { var entry = Entry(botID: botID, kind: .activity, text: text); entry.detail = detail; $0.entries.append(entry) }
     }
@@ -184,7 +196,7 @@ final class AppModel: ObservableObject {
             for action in parsed.actions {
                 switch action.action {
                 case "browse_web", "open_vm", "vm_exec": break // Executed by the desktop after successful CLI completion.
-                case let name where name.hasPrefix("apple_") || name == "secure_login": break // Mac-only tools, executed by the Mac app after successful CLI completion.
+                case let name where name.hasPrefix("apple_") || name.hasPrefix("browser_") || ["secure_login", "search_web", "search_knowledge"].contains(name): break // Mac-only tools, executed by the Mac app after successful CLI completion.
                 case "schedule_task":
                     guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, !(value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).contains(where: { $0.name == action.name && $0.enabled }),
                           let task = BotSchedule.make(action), let index = value.bots.firstIndex(where: { $0.id == bot.id }), (value.bots[index].schedules ?? []).count < 100 else { note("Task not scheduled: use a unique name, a future ISO date, valid timezone and recurrence, or message_received trigger."); continue }

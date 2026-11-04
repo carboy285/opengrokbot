@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld('desktop', {
   voiceSettings:()=>ipcRenderer.invoke('voice:settings'),
   voiceSave:patch=>ipcRenderer.invoke('voice:save',patch),
   voiceKey:(provider,value)=>ipcRenderer.invoke('voice:key',provider,value),
+  cliKeysStatus:()=>ipcRenderer.invoke('cli-keys:status'),
+  cliKeysSet:(provider,value)=>ipcRenderer.invoke('cli-keys:set',provider,value),
   voiceTranscribe:wav=>ipcRenderer.invoke('voice:transcribe',wav),
   voiceSpeak:text=>ipcRenderer.invoke('voice:speak',text),
   vaultList: () => ipcRenderer.invoke('vault:list'),

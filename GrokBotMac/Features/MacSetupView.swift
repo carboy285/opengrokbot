@@ -101,6 +101,7 @@ struct MacSetupView: View {
                 if provider != .grok {
                     Text("If you use npm, install Node.js first, then run:").foregroundStyle(MacTheme.secondary)
                     command(provider.installCommand)
+                    if CLISignIn.canInstall(provider) { MacPillButton(title: "Install in Terminal") { try? CLISignIn.openInTerminal(provider.installCommand, title: provider.name) } }
                     Link("Get Node.js ↗", destination: URL(string: "https://nodejs.org/en/download")!)
                 }
             }
@@ -120,6 +121,8 @@ struct MacSetupView: View {
             Text("Open Terminal and run the command below. Follow the CLI’s browser or provider login, then return to this app.")
                 .font(.system(size: 17)).lineSpacing(5)
             command(provider.loginCommand)
+            MacPillButton(title: "Sign in in Terminal") { try? CLISignIn.openInTerminal(provider.loginCommand, title: provider.name) }.disabled(installation == nil)
+            Text(CLISignIn.credentialLabel(for: provider)).font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
             HStack {
                 MacPillButton(title: "Open Terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) }
                 MacPillButton(title: desktop.checkingLogin ? "Checking…" : (provider == .codex ? "Check sign-in" : "I’ve configured this CLI"), prominent: true) {

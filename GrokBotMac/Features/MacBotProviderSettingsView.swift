@@ -18,6 +18,10 @@ struct MacBotProviderSettingsView: View {
                     ForEach(configuration.providers) { choice in Text(choice.provider.name).tag(choice.provider) }
                 }.disabled(busy).accessibilityIdentifier("bot-active-provider").padding(.horizontal, 4).padding(.bottom, 4)
             }
+            if configuration.providers.count > 1 {
+                Toggle("Ask every enabled provider and compare answers", isOn: Binding(get: { configuration.replyMode == .all }, set: { on in update { $0.replyMode = on ? .all : .one } }))
+                    .toggleStyle(.checkbox).font(.system(size: 13)).disabled(busy).padding(.horizontal, 4).accessibilityIdentifier("bot-compare-toggle")
+            }
             ForEach(CLIProvider.allCases) { provider in
                 let installed = desktop.installedCLIs.first { $0.provider == provider }
                 let choice = configuration.providers.first { $0.provider == provider }
@@ -36,6 +40,7 @@ struct MacBotProviderSettingsView: View {
                             Button("Set up") { desktop.setupProvider = provider; desktop.panel = .setup }.buttonStyle(InspectorButtonStyle(compact: true))
                         }
                     }
+                    if choice != nil { Text(CLISignIn.credentialLabel(for: provider)).font(.system(size: 11)).foregroundStyle(MacTheme.secondary) }
                     if installed == nil { Text("Not installed on this Mac").font(.system(size: 11)).foregroundStyle(MacTheme.secondary) }
                     if let choice {
                         if !(desktop.modelCatalogs[provider] ?? []).isEmpty {
@@ -81,7 +86,7 @@ struct MacBotProviderSettingsView: View {
     }
     private func update(_ change: (inout BotAIConfiguration) -> Void) {
         guard !busy else { return }
-        var value = configuration; change(&value); value.replyMode = .one
+        var value = configuration; change(&value); if value.providers.count < 2 { value.replyMode = .one }
         _ = app.setAIConfiguration(value, for: bot)
     }
 }

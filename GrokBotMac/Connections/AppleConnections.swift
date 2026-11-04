@@ -172,6 +172,16 @@ enum AppleReaders {
         }.joined(separator: "\n")
     }
 
+    /// Timed events that begin within the next few minutes (used to trigger routines).
+    static func startingSoon(minutes: Int) -> [(id: String, text: String)] {
+        let store = EKEventStore()
+        let now = Date(), end = now.addingTimeInterval(Double(min(max(minutes, 1), 120)) * 60)
+        let time = DateFormatter(); time.dateFormat = "HH:mm"
+        return store.events(matching: store.predicateForEvents(withStart: now, end: end, calendars: nil)).filter { !$0.isAllDay }.map { event in
+            (id: (event.eventIdentifier ?? event.title ?? "") + "@" + String(Int(event.startDate.timeIntervalSince1970)), text: "\(event.title ?? "Untitled") at \(time.string(from: event.startDate))")
+        }
+    }
+
     static func addEvent(title: String, start: Date, end: Date?, notes: String?) throws -> String {
         let store = EKEventStore()
         guard let calendar = store.defaultCalendarForNewEvents else { throw AppleError.message("There is no default calendar to add the event to.") }

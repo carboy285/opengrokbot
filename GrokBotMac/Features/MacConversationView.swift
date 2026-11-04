@@ -67,6 +67,7 @@ struct MacConversationView: View {
             .help(desktop.showBotInspector ? "Close bot details" : "Open bot details")
             .padding(.top, 12)
         }
+        .overlay(alignment: .topTrailing) { MacModelMenu(bot: bot).padding(.top, 14).padding(.trailing, 18) }
         .background(MacTheme.canvas)
         .overlay { if voiceOn { VoiceModeView(conversation: voice, botName: bot.name, tint: tint, ink: ink) { stopVoice() }.transition(.opacity) } }
         .onChange(of: bot.id) { _, _ in stopVoice() }

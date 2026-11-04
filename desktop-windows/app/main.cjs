@@ -12,6 +12,7 @@ const composio=require('./composio.cjs');
 const teamwork=require('./teamwork.cjs');
 const attachments=require('./attachments.cjs');
 const voice=require('./voice.cjs');
+const providerKeys=require('./provider-keys.cjs');
 const backup=require('./backup.cjs');
 const { CloudHost } = require('./cloud-host.cjs');
 const updates = require('./updates.cjs');
@@ -79,6 +80,9 @@ function selectedCLI(){return installed.find(x=>x.id===settings?.selected);}
 function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete,health:settings.providerHealth||{}};}
 function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
 function notify(){revision=randomUUID();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
+async function cliKeyEnv(provider){
+ try{const keys=await loadJSON('cli-keys.encrypted.json',{});if(!keys[provider]||!safeStorage.isEncryptionAvailable())return {};return providerKeys.environmentFor(provider,safeStorage.decryptString(Buffer.from(keys[provider],'base64')));}catch{return {};}
+}
 function botDirectory(id){return file(path.join('Conversations',id));}
 function configuredProviders(bot){
  const fallback=selectedCLI();const config=bot.aiConfiguration||{providers:fallback?[{provider:fallback.provider,model:''}]:[],activeProvider:fallback?.provider,replyMode:'one'};
@@ -122,7 +126,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
    const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
-   const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,onEvent:event=>{
+   const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,env:await cliKeyEnv(installation.provider),onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
     if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notify();}
    }});
@@ -387,6 +391,18 @@ function configureIPC() {
     if (patch.voiceID !== undefined) { if (typeof patch.voiceID !== 'string' || !/^[A-Za-z0-9]{8,40}$/.test(patch.voiceID)) throw new PublicError('That ElevenLabs voice ID looks invalid.'); next.voiceID = patch.voiceID; }
     if (patch.talkOver !== undefined) next.talkOver = patch.talkOver === true;
     await atomicJSON('voice-settings.json', next);
+  });
+  handle('cli-keys:status', async () => { const keys = await loadJSON('cli-keys.encrypted.json', {}); return Object.fromEntries([...providerKeys.PROVIDERS].map(id => [id, !!keys[id]])); });
+  handle('cli-keys:set', async (provider, value) => {
+    if (!providerKeys.PROVIDERS.has(provider) || typeof value !== 'string' || value.length > 600) throw new PublicError('Choose a provider and paste a key.');
+    const keys = await loadJSON('cli-keys.encrypted.json', {});
+    if (value.trim() === '') delete keys[provider];
+    else {
+      const key = providerKeys.normalized(value);
+      if (!key) throw new PublicError('That does not look like an API key. Paste only the key, with no spaces or line breaks.');
+      requireVault(); keys[provider] = safeStorage.encryptString(key).toString('base64');
+    }
+    await atomicJSON('cli-keys.encrypted.json', keys);
   });
   handle('voice:key', async (provider, value) => {
     if (!(voice.PROVIDERS.has(provider) || voice.SPEAKERS.has(provider)) || typeof value !== 'string' || value.length > 500) throw new Error('Invalid key');

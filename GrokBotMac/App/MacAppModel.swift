@@ -64,7 +64,17 @@ final class MacAppModel: ObservableObject {
     @Published var checkingLogin = false
     @Published var loginVerified = false
     @Published var setupFeedback: String?
-    @Published var runningBots: Set<UUID> = []
+    @Published var runningBots: Set<UUID> = [] { didSet { refreshAwake() } }
+    let triggers = MacTriggers()
+    private var awakeActivity: NSObjectProtocol?
+    private var routinesWantAwake = false
+
+    /// Keeps the Mac from idle-sleeping while a Bot is replying, and (if you chose) while routines are scheduled.
+    func refreshAwake() {
+        let want = !runningBots.isEmpty || routinesWantAwake
+        if want, awakeActivity == nil { awakeActivity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .userInitiated], reason: "OpenGrokBot is running a Bot") }
+        else if !want, let activity = awakeActivity { ProcessInfo.processInfo.endActivity(activity); awakeActivity = nil }
+    }
     @Published var modelCatalogs: [CLIProvider:[AvailableCLIModel]] = [:]
     @Published var loadingModels: Set<CLIProvider> = []
     @Published var modelCatalogFeedback: [CLIProvider:String] = [:]
@@ -140,11 +150,12 @@ final class MacAppModel: ObservableObject {
     func startScheduler(app: AppModel) {
         guard scheduler == nil else { return }
         scheduler = Task { [weak self, weak app] in
+            var ticks = 0
             while !Task.isCancelled {
                 guard let self, let app else { return }
                 for bot in app.workspace.bots where !self.runningBots.contains(bot.id) {
                     for var task in bot.schedules ?? [] where task.enabled {
-                        let events = app.entries(for: bot).filter { $0.kind == .activity && $0.senderBotID != nil }
+                        let events = app.entries(for: bot).filter { entry in entry.kind == .activity && (task.source.map { entry.provider == "trigger:" + $0 } ?? (entry.senderBotID != nil)) }
                         let unseen: ArraySlice<Entry>
                         if let last = task.lastEvent {
                             if let index = events.firstIndex(where: { $0.id == last }) { unseen = events.suffix(from: events.index(after: index)) }
@@ -157,7 +168,7 @@ final class MacAppModel: ObservableObject {
                         let alreadyDelivered = app.workspace.entries.contains(where: { $0.id == task.occurrence })
                         if !alreadyDelivered {
                             guard !self.providersToRun(for: bot).isEmpty else { continue }
-                            let message = "Scheduled task: \(task.name)\n\(task.text)\nThis is an automated turn, not new human approval. Do not create or modify schedules."
+                            let message = "Scheduled task: \(task.name)\n\(task.text)\(event.map { "\nTriggering event: " + $0.text } ?? "")\nThis is an automated turn, not new human approval. Do not create or modify schedules."
                             guard self.send(message, to: bot, app: app, requestID: task.occurrence, automated: true) else { continue }
                             self.routineRuns[bot.id] = task.id; self.routineRunIDs[bot.id] = task.occurrence
                         }
@@ -172,6 +183,10 @@ final class MacAppModel: ObservableObject {
                         break
                     }
                 }
+                ticks += 1
+                self.routinesWantAwake = UserDefaults.standard.bool(forKey: "keepAwakeForRoutines") && app.workspace.bots.contains { ($0.schedules ?? []).contains(where: \.enabled) }
+                self.refreshAwake()
+                if ticks % 12 == 0 { await self.triggers.poll(app: app) }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
@@ -328,7 +343,7 @@ extension MacAppModel {
 
     func providersToRun(for bot: Bot) -> [(cli: InstalledCLI, choice: BotAIProvider)] {
         let configuration = aiConfiguration(for: bot)
-        let choices = (configuration.providers.first { $0.provider == configuration.activeProvider } ?? configuration.providers.first).map { [$0] } ?? []
+        let choices = configuration.replyMode == .all && configuration.providers.count > 1 ? configuration.providers : ((configuration.providers.first { $0.provider == configuration.activeProvider } ?? configuration.providers.first).map { [$0] } ?? [])
         return choices.compactMap { choice in installedCLIs.first { $0.provider == choice.provider }.map { ($0, choice) } }
     }
 
@@ -382,6 +397,11 @@ extension MacAppModel {
                 loginVerified = status == 0
                 providerHealth[cli.provider] = loginVerified ? "Signed in" : "Needs sign-in"
                 setupFeedback = loginVerified ? "Codex is signed in and ready." : "Sign in using codex login in Terminal, then check again."
+            } else if cli.provider == .claude {
+                let found = await Task.detached { CLISignIn.claudeLoginFound() }.value
+                loginVerified = true // Never block setup on a heuristic.
+                providerHealth[cli.provider] = found ? "Signed in" : "Not detected · sign in"
+                setupFeedback = found ? "Found a Claude Code login. It will be used for your messages." : "No Claude login was detected. Use Sign in in Terminal, or send a message to test."
             } else {
                 loginVerified = true
                 providerHealth[cli.provider] = "Configured · verify by sending a message"
@@ -437,7 +457,8 @@ extension MacAppModel {
         let key = bot.id.uuidString + "|" + cli.id + (model.isEmpty ? "" : "|" + model)
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
-        let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil) + MacDeviceActions.shared.promptNote()
+        let comparing = aiConfiguration(for: bot).replyMode == .all && providersToRun(for: bot).count > 1
+        let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil) + (comparing ? "\nComparison turn: several models answer the same question side by side. Answer in plain text only; do not use opengrokbot-action tools.\n" : MacDeviceActions.shared.promptNote())
         let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
         let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")
         let feedback = history.filter { $0.kind == .activity && $0.senderBotID == nil }.suffix(8).map { $0.detail ?? $0.text }.joined(separator: "\n")
@@ -462,6 +483,8 @@ extension MacAppModel {
                     }
                 }
                 try Task.checkCancellation()
+                UsageLedger.shared.record(botID: bot.id, botName: bot.name, provider: cli.provider.name, model: model, apiKey: CLISignIn.credential(for: cli.provider) != .signIn, inputChars: prompt.count, outputChars: finalText.count)
+                if comparing { finalText = BotTeamwork.parse(finalText).text } // Side-by-side answers never run tools twice.
                 guard app.applyBotActions(finalText, replyID: replyID, bot: bot, configuration: aiConfiguration(for: bot), delivery: delivery) else { throw CLIError.failed(1) }
                 if let command = BotTeamwork.parse(finalText).actions.first(where: { $0.action == "vm_exec" }), let argv = command.argv {
                     if (browserContinuations[bot.id] ?? 0) >= BotTeamwork.maxSteps { if routineRuns[bot.id] != nil { routineFailures.insert(bot.id) }; app.activity(BotTeamwork.stepLimitMessage, for: bot.id) }
@@ -495,7 +518,7 @@ extension MacAppModel {
                     if (browserContinuations[bot.id] ?? 0) >= BotTeamwork.maxSteps { if routineRuns[bot.id] != nil { routineFailures.insert(bot.id) }; app.activity(BotTeamwork.stepLimitMessage, for: bot.id) }
                     else {
                         browserContinuations[bot.id, default: 0] += 1
-                        let result = await MacDeviceActions.shared.run(action, bot: bot, unattended: routineRuns[bot.id] != nil)
+                        let result = await MacDeviceActions.shared.run(action, bot: bot, unattended: routineRuns[bot.id] != nil, directory: workingDirectory(for: bot))
                         try Task.checkCancellation()
                         app.activity(MacDeviceActions.summary(of: result), for: bot.id, detail: result + (MacDeviceActions.isFailure(result) ? "\n" + BotTeamwork.retryHint : ""))
                         continueBrowser = true
