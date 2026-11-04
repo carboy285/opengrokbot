@@ -36,7 +36,7 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
-**0.7.10** shows a short page summary in chat instead of the raw text, lets Bots work through up to 40 steps and retry another way after a failure, returns partial pages instead of timing out, adds Groq and NVIDIA NIM (self-hosted Magpie) speech, speeds up voice replies, and gives voice mode a new compact card on iPhone, Mac and Windows. Note: the NIM option needs your own NIM server; NVIDIA's hosted API uses gRPC and isn't supported.
+**0.7.9.1** shows a short page summary in chat instead of the raw text, lets Bots work through up to 40 steps and retry another way after a failure, returns partial pages instead of timing out, adds Groq and NVIDIA NIM (self-hosted Magpie) speech, speeds up voice replies, and gives voice mode a new compact card on iPhone, Mac and Windows. Note: the NIM option needs your own NIM server; NVIDIA's hosted API uses gRPC and isn't supported.
 
 **0.7.9** (Mac) redesigns **Connect Apps** with search, categories and many more apps; adds **Apple Connections** so Bots can look at Calendar, Reminders, Contacts, Mail, Notes and Messages once you turn each on (adding events or reminders needs your approval); and adds **Secure Logins**, where a Bot can sign in to a saved site after you approve with Touch ID or your Mac password, without ever seeing the password.
 
