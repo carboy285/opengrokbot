@@ -20,6 +20,7 @@ struct MacBotInspectorView: View {
     @State private var nameDraft = ""
     @State private var purposeDraft = ""
     @State private var memoryDraft = ""
+    @State private var sharedDraft = ""
     @State private var creatingRoutine = false
     @State private var routineName = ""
     @State private var routineInstruction = ""
@@ -129,12 +130,26 @@ struct MacBotInspectorView: View {
             }
             MacBotVMControls(bot: bot)
             routinesCard
-            if !(app.workspace.sharedMemory ?? []).isEmpty {
-                InspectorCard(title: "Shared memory") {
-                    ForEach(app.workspace.sharedMemory ?? [], id: \.self) { Text($0).font(.system(size: 13)).textSelection(.enabled) }
+            InspectorCard(title: "Shared memory", footer: "Every Bot can see these. Remove anything that is out of date.") {
+                ForEach(app.workspace.sharedMemory ?? [], id: \.self) { item in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(item).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { app.updateSharedMemory((app.workspace.sharedMemory ?? []).filter { $0 != item }) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MacTheme.secondary) }
+                            .buttonStyle(.plain).accessibilityLabel("Remove shared memory item")
+                    }
+                }
+                HStack {
+                    TextField("Add something every Bot should know", text: $sharedDraft).textFieldStyle(.roundedBorder).font(.system(size: 12)).onSubmit(addShared)
+                    Button("Add", action: addShared).buttonStyle(InspectorButtonStyle(compact: true)).disabled(sharedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+    }
+
+    private func addShared() {
+        let item = sharedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !item.isEmpty else { return }
+        if app.updateSharedMemory((app.workspace.sharedMemory ?? []) + [item]) { sharedDraft = "" }
     }
 
     private var memoryCard: some View {

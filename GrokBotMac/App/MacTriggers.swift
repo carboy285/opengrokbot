@@ -39,3 +39,16 @@ final class MacTriggers {
         }
     }
 }
+
+
+/// A Mac cannot be woken by an app without administrator rights, so the app builds the one command you can run yourself.
+enum WakeCommand {
+    /// `sudo pmset schedule wake …` for a few minutes before the next timed routine, or nil if none is coming.
+    static func next(for schedules: [BotSchedule], now: Date = Date(), leadMinutes: Int = 3) -> (date: Date, command: String)? {
+        let upcoming = schedules.filter(\.enabled).compactMap { $0.nextRun.flatMap(BotSchedule.date) }.filter { $0 > now.addingTimeInterval(Double(leadMinutes) * 60) }.min()
+        guard let routine = upcoming else { return nil }
+        let wake = routine.addingTimeInterval(-Double(leadMinutes) * 60)
+        let format = DateFormatter(); format.locale = Locale(identifier: "en_US_POSIX"); format.dateFormat = "MM/dd/yyyy HH:mm:ss"
+        return (wake, "sudo pmset schedule wake \"\(format.string(from: wake))\"")
+    }
+}

@@ -43,6 +43,10 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
     @Published var feedback = "Local browser · this Bot’s private profile"
     @Published var back = false
     @Published var forward = false
+    /// What the Bot is doing right now (shown in a bar with Pause). nil when idle.
+    @Published var working: String?
+    /// While paused the human has the browser: a Bot's next step waits here until Resume.
+    @Published var paused = false
     private var reader: CheckedContinuation<String,Error>?
     private var readerNavigation: WKNavigation?
     private var timeout: Task<Void,Never>?
@@ -163,6 +167,13 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
 
     func scroll(_ direction: String) async throws {
         _ = try await web.callAsyncJavaScript(Self.scrollScript, arguments: ["direction": direction], in: nil, contentWorld: .page)
+    }
+
+    /// Waits (up to ten minutes) while the human has paused the Bot, so a step never fights your clicks.
+    func waitIfPaused() async {
+        var waited = 0.0
+        while paused, waited < 600, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(300)); waited += 0.3 }
+        if waited >= 600 { paused = false }
     }
 
     func goBackPage() { if web.canGoBack { web.goBack() } }
@@ -348,6 +359,14 @@ private struct LocalBotBrowserSurface: View {
                 Button("Clear data") { session.clearData() }
             }.padding(10)
             Text(session.feedback).font(.caption).foregroundStyle(.secondary).padding(.bottom, 5)
+            if let working = session.working {
+                HStack(spacing: 10) {
+                    if session.paused { Image(systemName: "pause.circle.fill").foregroundStyle(.orange) } else { ProgressView().controlSize(.small) }
+                    Text(session.paused ? "Paused. You have control of this browser. Press Resume to let the Bot continue." : working).font(.caption)
+                    Spacer()
+                    Button(session.paused ? "Resume" : "Pause & take over") { session.paused.toggle() }.controlSize(.small)
+                }.padding(.horizontal, 12).padding(.vertical, 7).background(Color.orange.opacity(0.14))
+            }
             Divider(); BotWebSurface(web: session.web)
         }.frame(minWidth: 650, minHeight: 450)
     }

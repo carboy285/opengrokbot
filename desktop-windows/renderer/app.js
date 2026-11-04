@@ -1,6 +1,7 @@
 import { preview } from './seed.js';
 import { createVoice } from './voice.js';
 import { renderApiKeys } from './api-keys.js';
+import { renderSecureLogins } from './secure-logins.js';
 
 const $ = selector => document.querySelector(selector);
 const node = (tag, className = '', text = '') => { const value = document.createElement(tag); value.className = className; value.textContent = text; return value; };
@@ -167,6 +168,7 @@ function renderInspector(){
  const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
  if(inspectorTab==='Details'){
   append(body,node('h3','','Linux VM'),node('p','muted','Runs in VirtualBox on this PC.'),button('Set up or open Linux VM',()=>showBotVM(bot)));
+  append(body,node('h3','','Knowledge'),node('p','muted','Text, Markdown and CSV files this Bot can search instead of needing them attached to every message.'),button('Add knowledge files…',async()=>{try{const added=await result(bridge.knowledgeAdd(bot.id));if(added)toast(`Added ${added} file${added===1?'':'s'} to ${bot.name}’s Knowledge. Ask it to search them.`);}catch(error){toast(error.message);}}));
   append(body,node('h3','','Local browser'),node('p','muted','Its own browser profile, in a window on this PC.'),button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(error){toast(error.message);}}));
   append(body,node('h3','','Routines'),node('p','muted','Ask the Bot to run a task once, on a repeat, or when another Bot messages it. The app must be running; missed runs catch up once.'));
   for(const task of bot.schedules||[]){const history=node('details'),summary=node('summary','','Run history');history.append(summary);for(const run of task.history||[])history.append(node('p','muted',`${run.date} · ${run.status}`));if(task.history?.length)body.append(history);append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}${task.lastRun?' · Last run: '+task.lastRun+' · '+(task.lastResult||'outcome unavailable'):''}`),button('Cancel task',async()=>{await result(bridge.cancelTask(bot.id,task.id));}));}
@@ -302,7 +304,7 @@ function unavailable(title, detail) { return append(node('div', 'unavailable'), 
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
   const layout = node('div', 'settings-layout'); const nav = node('nav', 'settings-nav'); const page = node('section', 'settings-page');
-  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Vault','⚿'],['Voice','♫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
+  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Secure Logins','⚿'],['Vault','⚿'],['Voice','♫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
   append(page, append(node('header','panel-head'), node('h1','',tab), button('×', () => dialog.close(), 'close-panel')));
   append(layout, nav, page); dialog.append(layout); if (!dialog.open) dialog.showModal();
   if (tab === 'General') {
@@ -320,6 +322,7 @@ function showSettings(tab = 'General') {
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
   else if (tab === 'API Keys') renderApiKeys({ bridge, result, toast, page });
+  else if (tab === 'Secure Logins') renderSecureLogins({ bridge, result, toast, page });
   else if (tab === 'Voice') voice.renderSettings(page);
   else if (tab === 'Backup') renderBackup(page);
 }

@@ -28,6 +28,8 @@ async function captureView(web,directory){
   return {path:await attachments.savePageScreenshot(directory,jpeg)};
  }catch{return {error:'The screenshot could not be captured.'};}
 }
+/** A saved login may only be used on its own site or a subdomain of it, never on a look-alike. */
+function hostMatches(loginHost,pageHost){const login=String(loginHost||'').toLowerCase(),page=String(pageHost||'').toLowerCase();return !!login&&(page===login||page.endsWith('.'+login));}
 /** Shapes what the Bot receives. A failed load becomes a readable result (not a thrown error) so the Bot can try another way. */
 function finishPage(address,page,{loadError,note}={}){
  const result=page&&typeof page==='object'?{...page}:{url:address,title:'',text:'',links:[]};
@@ -35,6 +37,74 @@ function finishPage(address,page,{loadError,note}={}){
  if(note)result.loadNote=note;
  return result;
 }
+
+// Scripts that run inside the page. Each is a plain function serialized with its arguments, so nothing is spliced into code.
+function pageClick({ target, mode }) {
+  const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const label = el => String(el.innerText || el.value || el.getAttribute('aria-label') || el.title || '').trim().replace(/\s+/g, ' ');
+  const nodes = [...document.querySelectorAll('a, button, input[type=button], input[type=submit], [role=button], [role=link], [role=tab], [role=menuitem], summary, label')].filter(visible);
+  const q = target.trim().toLowerCase();
+  let match = nodes.find(el => label(el).toLowerCase() === q) || nodes.find(el => label(el).toLowerCase().includes(q));
+  if (!match) { try { const bySelector = document.querySelector(target); if (bySelector && visible(bySelector)) match = bySelector; } catch (e) {} }
+  if (!match) return { ok: false, error: 'No visible link or button matched that text.', candidates: nodes.slice(0, 20).map(label).filter(Boolean) };
+  const form = match.closest('form');
+  const submits = !!form && ((match.tagName === 'BUTTON' && (!match.type || match.type === 'submit')) || match.type === 'submit');
+  if (mode === 'click') { match.scrollIntoView({ block: 'center' }); match.click(); }
+  return { ok: true, label: label(match).slice(0, 100), tag: match.tagName.toLowerCase(), submits };
+}
+function pageField({ target, mode, value, submit }) {
+  const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled && !el.readOnly; };
+  const fields = [...document.querySelectorAll('input, textarea, [contenteditable=true]')].filter(visible).filter(el => !['hidden', 'checkbox', 'radio', 'button', 'submit', 'file'].includes(el.type));
+  const hint = el => ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.autocomplete || '') + ' ' + (el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + ((el.labels && el.labels[0] && el.labels[0].innerText) || '')).toLowerCase();
+  const q = target.trim().toLowerCase();
+  const field = q ? fields.find(el => hint(el).includes(q)) : (fields.includes(document.activeElement) ? document.activeElement : fields[0]);
+  if (!field) return { ok: false, error: 'No visible text field matched.', candidates: fields.slice(0, 15).map(el => hint(el).trim().slice(0, 60)).filter(Boolean) };
+  const type = (field.type || 'text').toLowerCase();
+  const isSearch = type === 'search' || /search|query|(^|\s)q(\s|$)/.test(hint(field));
+  if (mode === 'type') {
+    field.scrollIntoView({ block: 'center' }); field.focus();
+    if (field.isContentEditable) field.textContent = value;
+    else { const proto = field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(field, value); }
+    field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true }));
+    if (submit) { const form = field.closest('form'); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })); if (form && form.requestSubmit) form.requestSubmit(); }
+  }
+  return { ok: true, type, hint: hint(field).trim().slice(0, 120), isSearch };
+}
+function pageScroll({ direction }) {
+  const step = Math.max(200, Math.round(window.innerHeight * 0.8));
+  if (direction === 'top') window.scrollTo(0, 0); else if (direction === 'bottom') window.scrollTo(0, document.documentElement.scrollHeight);
+  else window.scrollBy(0, direction === 'up' ? -step : step);
+  return { y: Math.round(window.scrollY) };
+}
+function pageSearch() {
+  return [...document.querySelectorAll('.result')].slice(0, 12).map(el => {
+    const link = el.querySelector('a.result__a'); if (!link) return null;
+    let url = link.href;
+    try { const u = new URL(link.href); const target = u.searchParams.get('uddg'); if (target) url = decodeURIComponent(target); } catch (e) {}
+    const snippet = el.querySelector('.result__snippet');
+    return { title: link.innerText.trim().slice(0, 140), url, snippet: snippet ? snippet.innerText.trim().slice(0, 240) : '' };
+  }).filter(Boolean).slice(0, 8);
+}
+function pageFill({ username, password }) {
+  const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled && !el.readOnly; };
+  const setValue = (el, value) => { const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; el.focus(); setter.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
+  const all = [...document.querySelectorAll('input')].filter(visible);
+  const pw = all.find(el => el.type === 'password');
+  const inputs = pw && pw.form ? all.filter(el => el.form === pw.form) : all;
+  const hint = el => ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.autocomplete || '') + ' ' + (el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+  const userField = inputs.find(el => ['text', 'email', 'tel'].includes(el.type) && /user|email|login|account|name/.test(hint(el))) || inputs.find(el => ['text', 'email'].includes(el.type));
+  const submit = field => {
+    const form = field.closest('form'), scope = form || document;
+    const button = scope.querySelector('button[type=submit], input[type=submit]') || [...scope.querySelectorAll('button, [role=button]')].find(b => visible(b) && /sign in|log in|login|continue|next|submit/i.test(b.innerText || b.value || ''));
+    if (button) { button.click(); return true; }
+    if (form && form.requestSubmit) { form.requestSubmit(); return true; }
+    return false;
+  };
+  if (pw) { if (userField && !userField.value) setValue(userField, username); setValue(pw, password); return submit(pw) ? 'submitted' : 'filled'; }
+  if (userField) { setValue(userField, username); return submit(userField) ? 'username-submitted' : 'username-filled'; }
+  return 'no-form';
+}
+const inPage = (fn, args) => `(${fn.toString()})(${JSON.stringify(args)})`;
 class LocalBrowsers{
  constructor(getBot,getDirectory){this.getBot=getBot;this.getDirectory=getDirectory;this.entries=new Map();
   for(const name of ['ready','navigate','back','forward','reload','clear'])ipcMain.handle('bot-browser:'+name,async(event,value)=>{
@@ -94,8 +164,48 @@ class LocalBrowsers{
   }catch{throw new Error('The local browser could not finish reading the page. Its window stays open so you can inspect it or sign in, then retry.');}
   finally{entry.reading=false;}
  }
+ _entry(id){const bot=this.getBot(id);if(!bot)throw new Error('Choose a Bot.');const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is busy. Try again in a moment.');return {entry,bot,web:entry.view.webContents};}
+ async inspectClick(id,target){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageClick,{target,mode:'inspect'}));}
+ async click(id,target){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageClick,{target,mode:'click'}));}
+ async inspectField(id,target,submit){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageField,{target,mode:'inspect',value:'',submit:!!submit}));}
+ async type(id,target,value,submit){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageField,{target,mode:'type',value,submit:!!submit}));}
+ async scroll(id,direction){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageScroll,{direction}));}
+ async back(id){const {web}=this._entry(id);if(web.navigationHistory.canGoBack())web.navigationHistory.goBack();}
+ /** The page as it looks now (text, links, screenshot), after waiting for it to settle. Used after every interaction. */
+ async snapshot(id){
+  const {bot,web}=this._entry(id);await pause(500);await settle(web);
+  let page;try{page=JSON.parse(await web.executeJavaScript(expression));}catch{page=null;}
+  page=finishPage(web.getURL(),page,{});
+  const shot=this.getDirectory?await captureView(web,this.getDirectory(bot.id)):{error:'Screenshots are unavailable.'};
+  if(shot.path){page.screenshot=shot.path;page.screenshotNote='A screenshot of the page as it looks now. Open this image file to see the result of your action.';}else page.screenshotError=shot.error;
+  return JSON.stringify(page);
+ }
+ /** Web search through the Bot's own browser (no key needed). Up to eight results. */
+ async search(id,query){
+  const {web}=this._entry(id);
+  try{await web.loadURL('https://duckduckgo.com/html/?q='+encodeURIComponent(String(query).slice(0,200)));}catch(error){if(error?.code!=='ERR_ABORTED')throw new Error('The search page could not be loaded.');}
+  await settle(web,{limit:3000});
+  return web.executeJavaScript(inPage(pageSearch,{}));
+ }
+ /** Opens the page and types a saved login into it. Credentials go straight into the page from this process and are never returned. Only on loginHost (or a subdomain), re-checked after every redirect. */
+ async fillLogin(id,{url,loginHost,username,password}){
+  const {web}=this._entry(id);if(!allowed(url))throw new Error('Choose an HTTPS page.');
+  try{await web.loadURL(url);}catch(error){if(error?.code!=='ERR_ABORTED')throw new Error('The sign-in page could not be loaded.');}
+  await settle(web);let step='no-form';
+  for(let attempt=0;attempt<3;attempt++){
+   let host='';try{host=new URL(web.getURL()).hostname;}catch{}
+   if(!hostMatches(loginHost,host))throw new Error(`The page moved to ${host||'another site'}, which is not the site this login was saved for. Nothing was filled in.`);
+   step=await web.executeJavaScript(inPage(pageFill,{username,password}))||'no-form';
+   if(step!=='username-submitted'||attempt===2)break;
+   await pause(3000);await settle(web);
+  }
+  if(step==='submitted')return `Entered the saved username and password for ${loginHost} and submitted the form. Read the page to see whether sign-in worked; a verification code may still be needed.`;
+  if(step==='username-submitted')return `Entered the username for ${loginHost} and continued, but no password step appeared. Read the page to see where it stopped.`;
+  if(step==='filled'||step==='username-filled')return `Filled in the login fields for ${loginHost} but found no button to submit. Ask the user to press the sign-in button in the Bot browser.`;
+  return 'No login form was found on the page.';
+ }
  async preview(id){const bot=this.getBot(id),entry=bot&&this.entries.get(bot.id);if(!entry||entry.window.isDestroyed())return {title:'Browser not open',url:'',imageData:null};const image=await entry.view.webContents.capturePage();return {title:entry.view.webContents.getTitle(),url:entry.view.webContents.getURL(),imageData:image.resize({width:900}).toJPEG(60).toString('base64')};}
  close(id){this.entries.get(id)?.window.close();}
  closeAll(){for(const entry of [...this.entries.values()])entry.window.close();}
 }
-module.exports={LocalBrowsers,settle,captureView,finishPage};
+module.exports={LocalBrowsers,settle,captureView,finishPage,hostMatches};

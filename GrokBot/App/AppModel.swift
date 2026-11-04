@@ -44,6 +44,16 @@ final class AppModel: ObservableObject {
         }
         return commit { value in value.bots[index].name = cleaned; value.bots[index].purpose = purpose; value.bots[index].memory = memory }
     }
+    /// Replaces the memory every Bot shares (used to remove or add items).
+    @discardableResult
+    func updateSharedMemory(_ items: [String]) -> Bool {
+        let cleaned = items.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard cleaned.count <= 100, cleaned.allSatisfy({ $0.count <= 2000 }) else {
+            errorMessage = "Shared memory can hold at most 100 items of up to 2,000 characters each."
+            return false
+        }
+        return commit { $0.sharedMemory = cleaned }
+    }
     func enterPreview() {
         do { workspace = try store.load() ?? .fresh }
         catch {

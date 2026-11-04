@@ -127,6 +127,12 @@ struct MacSettingsView: View {
                     Toggle("Keep this Mac awake while Bots have scheduled routines", isOn: $keepAwakeForRoutines).toggleStyle(.switch)
                     Text("A Bot that is replying always keeps the Mac awake until it finishes. This extends that to scheduled routines and email or calendar triggers. It uses more battery, and closing a laptop lid still puts it to sleep.")
                         .font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary)
+                    if let wake = WakeCommand.next(for: app.workspace.bots.flatMap { $0.schedules ?? [] }) {
+                        Divider()
+                        Text("A sleeping Mac can’t be woken by an app. To wake it before your next routine (\(wake.date.formatted(date: .abbreviated, time: .shortened))), run this once in Terminal. It asks for your password:").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                        Text(wake.command).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                        MacPillButton(title: "Copy wake command") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(wake.command, forType: .string) }
+                    }
                 }.padding(20)
             }
             section("This Mac") {

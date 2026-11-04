@@ -496,5 +496,33 @@ final class MacBigUpdateTests: XCTestCase {
         let prompt = BotTeamwork.instructions(bot: bot, workspace: Workspace(), delegated: false)
         for needle in ["search_web", "browser_click", "browser_type", "search_knowledge", "ask the human to approve"] { XCTAssertTrue(prompt.contains(needle), needle) }
     }
+
+    // MARK: Pause, wake and shared memory
+    func testWakeCommandIsBuiltForTheNextTimedRoutineOnly() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func task(_ offset: Double?, enabled: Bool = true) -> BotSchedule {
+            var value = BotSchedule(name: "T", text: "x", nextRun: offset.map { ISO8601DateFormatter().string(from: now.addingTimeInterval($0)) }, recurrence: "none", timezone: "UTC")
+            value.enabled = enabled; return value
+        }
+        let result = WakeCommand.next(for: [task(7200), task(3600), task(60), task(900, enabled: false), task(nil)], now: now)
+        XCTAssertEqual(result?.date, now.addingTimeInterval(3600 - 180))
+        XCTAssertTrue(result?.command.hasPrefix("sudo pmset schedule wake \"") ?? false)
+        XCTAssertNil(WakeCommand.next(for: [task(60), task(nil), task(900, enabled: false)], now: now), "Too soon, event-based and disabled routines never need a wake")
+    }
+
+    func testBrowserSessionsStartUnpausedAndIdle() throws {
+        let session = LocalBotBrowserSession(bot: bot)
+        XCTAssertFalse(session.paused); XCTAssertNil(session.working)
+    }
+
+    func testSharedMemoryCanBeEditedWithinLimits() throws {
+        let folder = try temporaryFolder(); defer { try? FileManager.default.removeItem(at: folder) }
+        let app = AppModel(store: WorkspaceStore(url: folder.appendingPathComponent("preview.json"))); app.enterPreview()
+        XCTAssertTrue(app.updateSharedMemory(["  Prefer short answers  ", "", "Metric units"]))
+        XCTAssertEqual(app.workspace.sharedMemory, ["Prefer short answers", "Metric units"])
+        XCTAssertTrue(app.updateSharedMemory([]))
+        XCTAssertFalse(app.updateSharedMemory(Array(repeating: "x", count: 101)))
+        XCTAssertFalse(app.updateSharedMemory([String(repeating: "x", count: 2001)]))
+    }
 }
 #endif

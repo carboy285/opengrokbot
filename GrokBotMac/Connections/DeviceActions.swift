@@ -42,8 +42,8 @@ final class MacDeviceActions {
 
     /// What the chat shows. Private data read from this Mac stays out of the visible conversation; the Bot still receives it all.
     static func summary(of result: String) -> String {
-        let lines = result.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
-        if lines.count >= 2, ["Local browser result", "Web search results", "Knowledge search results"].contains(where: { lines[1].hasPrefix($0) }) { return String(lines[0].prefix(200)) }
+        let parts = result.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
+        if parts.count >= 2, ["Local browser result", "Web search results", "Knowledge search results"].contains(where: { parts[1].hasPrefix($0) }) { return String(parts[0].prefix(200)) }
         guard result.hasPrefix("Apple "), let range = result.range(of: " result \(privacy):\n") else { return String(result.prefix(300)) }
         let service = String(result[result.index(result.startIndex, offsetBy: 6)..<range.lowerBound])
         let lines = result[range.upperBound...].split(separator: "\n").filter { $0.hasPrefix("- ") || $0.contains(" | ") || $0.contains(": ") }.count
@@ -120,22 +120,21 @@ final class MacDeviceActions {
         }
         let session: LocalBotBrowserSession
         do { session = try LocalBotBrowsers.shared.open(bot) } catch { return "The browser could not be opened: " + ((error as? CloudError)?.errorDescription ?? error.localizedDescription) }
-        let idle = "Local browser · this Bot’s private profile"
-        defer { session.feedback = idle }
+        defer { session.working = nil }
         do {
             switch request.kind {
             case .click(let target):
-                session.feedback = "\(bot.name) is looking for “\(target)”…"
+                session.working = "\(bot.name) is looking for “\(target)”…"; await session.waitIfPaused()
                 let info = try await session.inspectClick(target)
                 if BrowserRisk.clickNeedsApproval(label: info.label, tag: info.tag, submitsForm: info.submits) {
                     guard !unattended else { return "Clicking “\(info.label)” needs the human to approve it, so it was skipped in this unattended run." }
                     guard await approval.approve(title: "Let \(bot.name) click “\(info.label)”?", detail: "Page: \(session.web.url?.host ?? "the current page")\n\nThis looks like something that sends, buys, posts or changes something. Approve only if you want it done.") else { return "The human declined to click “\(info.label)”." }
                 }
-                session.feedback = "\(bot.name) is clicking “\(info.label)”…"
+                session.working = "\(bot.name) is clicking “\(info.label)”…"; await session.waitIfPaused()
                 try await session.performClick(target)
                 return "Clicked “\(info.label)”.\n" + Self.browserLabel + (await session.snapshot(directory: directory))
             case .type(let field, let text, let submit):
-                session.feedback = "\(bot.name) is typing…"
+                session.working = "\(bot.name) is typing…"; await session.waitIfPaused()
                 let info = try await session.inspectField(field, submit: submit)
                 switch BrowserRisk.typeDecision(fieldType: info.type, hint: info.hint, isSearch: info.isSearch, submit: submit) {
                 case .refuse(let reason): return reason
@@ -147,9 +146,11 @@ final class MacDeviceActions {
                 try await session.typeText(field: field, text: text, submit: submit)
                 return "Typed into the \(info.hint.isEmpty ? "field" : "“\(info.hint)” field")\(submit ? " and submitted" : "").\n" + Self.browserLabel + (await session.snapshot(directory: directory))
             case .scroll(let direction):
+                session.working = "\(bot.name) is scrolling…"; await session.waitIfPaused()
                 try await session.scroll(direction)
                 return "Scrolled \(direction).\n" + Self.browserLabel + (await session.snapshot(directory: directory))
             case .back:
+                session.working = "\(bot.name) is going back…"; await session.waitIfPaused()
                 session.goBackPage()
                 return "Went back.\n" + Self.browserLabel + (await session.snapshot(directory: directory))
             }
@@ -160,8 +161,8 @@ final class MacDeviceActions {
         guard !query.isEmpty, query.count <= 200 else { return "search_web needs a query of up to 200 characters." }
         do {
             let session = try LocalBotBrowsers.shared.open(bot)
-            session.feedback = "\(bot.name) is searching the web…"
-            defer { session.feedback = "Local browser · this Bot’s private profile" }
+            session.working = "\(bot.name) is searching the web…"; await session.waitIfPaused()
+            defer { session.working = nil }
             let raw = try await session.search(query)
             let results = ((try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any])?["results"] as? [[String: Any]] ?? []
             guard !results.isEmpty else { return "The search returned no results for “\(query)”. Try different words, or browse a site directly." }
