@@ -184,6 +184,7 @@ final class AppModel: ObservableObject {
             for action in parsed.actions {
                 switch action.action {
                 case "browse_web", "open_vm", "vm_exec": break // Executed by the desktop after successful CLI completion.
+                case let name where name.hasPrefix("apple_") || name == "secure_login": break // Mac-only tools, executed by the Mac app after successful CLI completion.
                 case "schedule_task":
                     guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, !(value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).contains(where: { $0.name == action.name && $0.enabled }),
                           let task = BotSchedule.make(action), let index = value.bots.firstIndex(where: { $0.id == bot.id }), (value.bots[index].schedules ?? []).count < 100 else { note("Task not scheduled: use a unique name, a future ISO date, valid timezone and recurrence, or message_received trigger."); continue }

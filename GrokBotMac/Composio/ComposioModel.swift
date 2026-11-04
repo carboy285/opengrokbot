@@ -13,14 +13,17 @@ final class ComposioModel: ObservableObject {
     private var key: String?
     private var generation = 0
     var connectedCount: Int { toolkits.filter(\.connected).count }
-    static let choices: [(slug: String, name: String)] = [("github","GitHub"),("gmail","Gmail"),("googledrive","Google Drive"),("googlecalendar","Google Calendar"),("slack","Slack"),("notion","Notion"),("linear","Linear"),("figma","Figma")]
+    static let choices: [(slug: String, name: String)] = ComposioCatalog.apps.map { ($0.slug, $0.name) }
+    /// Apps the current Composio session was actually created with. `selected` may differ while the user is choosing.
+    @Published private(set) var applied: Set<String> = []
+    var hasPendingChanges: Bool { configured && !selected.isEmpty && selected != applied }
 
     init() {
         do {
             if let data = try store.read(account: "configuration") {
                 let value = try JSONDecoder().decode(Configuration.self, from: data)
                 guard ComposioClient.trustedURL(value.session.mcp.url) != nil else { throw ComposioError.invalidResponse }
-                key = value.key; session = value.session; selected = Set(value.toolkits); configured = true
+                key = value.key; session = value.session; selected = Set(value.toolkits); applied = Set(value.toolkits); configured = true
             }
         } catch { feedback = "Composio configuration could not be read from Keychain. Unlock your Mac and reopen Connect Apps." }
     }
@@ -32,21 +35,60 @@ final class ComposioModel: ObservableObject {
         guard !busy, !clean.isEmpty, clean.count < 4096, !clean.contains(where: { $0.isWhitespace || $0.isNewline }), !selected.isEmpty else { feedback = "Enter a project key and choose at least one tool."; return }
         busy = true; feedback = nil
         let requested = selected.sorted(), requestGeneration = generation
-        var userID = UserDefaults.standard.string(forKey: "composioUserID")
-        if userID == nil { userID = "opengrokbot-" + UUID().uuidString; UserDefaults.standard.set(userID, forKey: "composioUserID") }
-        let identity = userID!
+        let identity = installationUserID()
         Task {
             defer { busy = false }
             do {
-                let created = try await client(clean).create(userID: identity, toolkits: requested)
+                let created = try await createSession(key: clean, userID: identity, requested: requested)
                 guard generation == requestGeneration else { return }
-                do { try store.save(JSONEncoder().encode(Configuration(key: clean, session: created, toolkits: requested)), account: "configuration") }
+                do { try store.save(JSONEncoder().encode(Configuration(key: clean, session: created.session, toolkits: created.used)), account: "configuration") }
                 catch { throw ComposioError.storage }
-                key = clean; session = created; configured = true
-                toolkits = try await client(clean).toolkits(sessionID: created.session_id)
-                feedback = "Project connected. Authorize the apps you want below, then refresh after returning from your browser."
+                key = clean; session = created.session; configured = true; selected = Set(created.used); applied = Set(created.used)
+                toolkits = try await client(clean).toolkits(sessionID: created.session.session_id)
+                feedback = "Project connected. Authorize the apps you want below, then refresh after returning from your browser." + Self.skippedNote(created.skipped)
             } catch { feedback = Self.message(error) }
         }
+    }
+
+    /// Adds or changes apps for an already-connected project with the saved key. Existing authorizations stay.
+    func applySelection() {
+        guard !busy, configured, let key, !selected.isEmpty else { feedback = "Choose at least one app."; return }
+        busy = true; feedback = nil
+        let requested = selected.sorted(), requestGeneration = generation, identity = installationUserID()
+        Task {
+            defer { busy = false }
+            do {
+                let created = try await createSession(key: key, userID: identity, requested: requested)
+                guard generation == requestGeneration else { return }
+                do { try store.save(JSONEncoder().encode(Configuration(key: key, session: created.session, toolkits: created.used)), account: "configuration") }
+                catch { throw ComposioError.storage }
+                session = created.session; selected = Set(created.used); applied = Set(created.used)
+                toolkits = try await client(key).toolkits(sessionID: created.session.session_id)
+                feedback = "Apps updated. Authorize any new ones below." + Self.skippedNote(created.skipped)
+            } catch { feedback = Self.message(error) }
+        }
+    }
+
+    private func installationUserID() -> String {
+        if let existing = UserDefaults.standard.string(forKey: "composioUserID") { return existing }
+        let created = "opengrokbot-" + UUID().uuidString
+        UserDefaults.standard.set(created, forKey: "composioUserID")
+        return created
+    }
+
+    /// If Composio rejects the request (an app it does not recognize), retry once with only the known-good apps.
+    private func createSession(key: String, userID: String, requested: [String]) async throws -> (session: ComposioSession, used: [String], skipped: [String]) {
+        do { return (try await client(key).create(userID: userID, toolkits: requested), requested, []) }
+        catch ComposioError.status(let code) where (400...499).contains(code) && ![401, 403, 429].contains(code) {
+            guard let plan = ComposioCatalog.fallback(for: requested) else { throw ComposioError.status(code) }
+            return (try await client(key).create(userID: userID, toolkits: plan.use), plan.use, plan.skipped)
+        }
+    }
+
+    static func skippedNote(_ skipped: [String]) -> String {
+        guard !skipped.isEmpty else { return "" }
+        let names = skipped.map { ComposioCatalog.app($0)?.name ?? $0 }.joined(separator: ", ")
+        return " Composio did not accept: \(names). Those were skipped."
     }
     func refresh() {
         guard !busy, let key, let session else { return }
@@ -74,7 +116,7 @@ final class ComposioModel: ObservableObject {
     }
     func disconnect() {
         guard !busy else { return }
-        do { try store.delete(account: "configuration"); generation += 1; key = nil; session = nil; configured = false; toolkits = []; feedback = "Project removed from this Mac. To revoke connected accounts, use your Composio dashboard." }
+        do { try store.delete(account: "configuration"); generation += 1; key = nil; session = nil; configured = false; toolkits = []; applied = []; feedback = "Project removed from this Mac. To revoke connected accounts, use your Composio dashboard." }
         catch { feedback = Self.message(error) }
     }
     /// Only a session capability reaches the CLI, never the project-wide key.

@@ -42,6 +42,7 @@ struct MacSettingsView: View {
                         case .computer: computer
                         case .permissions: unavailable(title: "Your CLI keeps its permissions", detail: "Codex runs with read-only workspace access. Other CLIs keep their own configured permissions. This app does not add approval-bypass flags or auto-approve tools.", icon: "shield")
                         case .apiKeys: MacAPIKeysView()
+                        case .secureLogins: MacSecureLoginsView()
                         case .vault: MacVaultView()
                         case .usage: unavailable(title: "AI usage belongs to your CLI account", detail: "OpenGrokBot has no subscription or inference fees of its own. Your chosen CLI provider may have usage limits or charges. No account usage percentage is guessed here.", icon: "chart.bar")
                         case .updates: updates

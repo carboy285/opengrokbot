@@ -36,6 +36,8 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
+**0.7.9** (Mac) redesigns **Connect Apps** with search, categories and many more apps; adds **Apple Connections** so Bots can look at Calendar, Reminders, Contacts, Mail, Notes and Messages once you turn each on (adding events or reminders needs your approval); and adds **Secure Logins**, where a Bot can sign in to a saved site after you approve with Touch ID or your Mac password, without ever seeing the password.
+
 **0.7.8** lets Bots see a screenshot of the web pages they browse and adds optional per-provider API keys on Mac (Settings → API Keys).
 
 **0.7.3** hides the horizontal scrollbar under pinned Bots on Mac while preserving sideways scrolling. [Downloads](docs/DOWNLOADS.md).

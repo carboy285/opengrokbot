@@ -72,6 +72,59 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
             }
         } onCancel: { Task { @MainActor [weak self] in self?.web.stopLoading(); self?.finish(.failure(CancellationError())) } }
     }
+    // MARK: Secure login
+    private static let fillScript = """
+    const visible = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled && !el.readOnly; };
+    const setValue = (el, value) => { const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; el.focus(); setter.call(el, value); el.dispatchEvent(new Event('input', {bubbles: true})); el.dispatchEvent(new Event('change', {bubbles: true})); };
+    const all = [...document.querySelectorAll('input')].filter(visible);
+    const password = all.find(el => el.type === 'password');
+    const inputs = password && password.form ? all.filter(el => el.form === password.form) : all;
+    const hint = el => ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.autocomplete || '') + ' ' + (el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+    const userField = inputs.find(el => ['text', 'email', 'tel'].includes(el.type) && /user|email|login|account|name/.test(hint(el))) || inputs.find(el => ['text', 'email'].includes(el.type));
+    const submit = field => {
+      const form = field.closest('form');
+      const scope = form || document;
+      const button = scope.querySelector('button[type=submit], input[type=submit]') || [...scope.querySelectorAll('button, [role=button]')].find(b => visible(b) && /sign in|log in|login|continue|next|submit/i.test(b.innerText || b.value || ''));
+      if (button) { button.click(); return true; }
+      if (form && form.requestSubmit) { form.requestSubmit(); return true; }
+      return false;
+    };
+    if (password) { if (userField && !userField.value) setValue(userField, u); setValue(password, p); return submit(password) ? 'submitted' : 'filled'; }
+    if (userField) { setValue(userField, u); return submit(userField) ? 'username-submitted' : 'username-filled'; }
+    return 'no-form';
+    """
+
+    private func waitUntilLoaded(timeout: Double) async throws {
+        try await Task.sleep(for: .milliseconds(400))
+        let deadline = Date().addingTimeInterval(timeout)
+        while web.isLoading, Date() < deadline { try await Task.sleep(for: .milliseconds(250)) }
+    }
+
+    /// Opens the page and types a saved login into it. The credentials go straight into the page from this process: they are
+    /// never returned, logged, or added to a transcript. Fills only on `loginHost` (or a subdomain), re-checked after every redirect.
+    func fillLogin(url: String, loginHost: String, username: String, password: String) async throws -> String {
+        guard reader == nil else { throw CloudError.message("This Bot’s browser is reading a page. Try again in a moment.") }
+        try navigate(url)
+        try await waitUntilLoaded(timeout: 20)
+        var step = "no-form"
+        for attempt in 0..<3 {
+            guard let current = web.url?.host, SecureLoginStore.matches(loginHost: loginHost, pageHost: current) else {
+                throw CloudError.message("The page moved to \(web.url?.host ?? "another site"), which is not the site this login was saved for. Nothing was filled in.")
+            }
+            let value = try await web.callAsyncJavaScript(Self.fillScript, arguments: ["u": username, "p": password], in: nil, contentWorld: .page)
+            step = (value as? String) ?? "no-form"
+            guard step == "username-submitted", attempt < 2 else { break }
+            try await Task.sleep(for: .seconds(3))
+            try await waitUntilLoaded(timeout: 10)
+        }
+        switch step {
+        case "submitted": return "Entered the saved username and password for \(loginHost) and submitted the form. Read the page to see whether sign-in worked; a verification code may still be needed."
+        case "username-submitted": return "Entered the username for \(loginHost) and continued, but no password step appeared. Read the page to see where it stopped."
+        case "filled", "username-filled": return "Filled in the login fields for \(loginHost) but found no button to submit. Ask the user to press the sign-in button in the Bot browser."
+        default: return "No login form was found on the page."
+        }
+    }
+
     private func finish(_ result: Result<String,Error>) { timeout?.cancel(); timeout = nil; let pending = reader; reader = nil; readerNavigation = nil; pending?.resume(with: result) }
     private func update() { address = web.url?.absoluteString ?? address; back = web.canGoBack; forward = web.canGoForward }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

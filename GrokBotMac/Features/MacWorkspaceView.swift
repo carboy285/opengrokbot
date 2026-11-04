@@ -183,6 +183,7 @@ struct MacWorkspaceView: View {
         switch panel {
         case .settings: MacSettingsView()
         case .apps: MacConnectAppsView()
+        case .apple: MacAppleConnectionsView()
         case .newBot: MacNewBotView()
         case .integration: MacIntegrationView()
         case .setup: MacSetupView()

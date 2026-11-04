@@ -27,6 +27,8 @@ struct BotAction: Decodable, Sendable {
     var trigger: String?
     var contains: String?
     var id: String?
+    var days: Int?
+    var end: String?
 }
 
 /// Only these complete, bounded blocks are interpreted, after a successful CLI exit.
