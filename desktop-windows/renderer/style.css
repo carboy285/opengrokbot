@@ -57,22 +57,25 @@
 /* Voice mode */
 .composer-area .voice-button{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:50%;background:var(--bot-accent,#9355ff);color:var(--bot-ink,#fff);font-size:20px;cursor:pointer}
 .composer-area .voice-button:hover{filter:brightness(1.08)}
-/* Voice mode: a compact card that floats over the chat (matches the iPhone and Mac apps). */
+/* Voice mode: a compact card that floats over the chat and follows the app theme (matches the iPhone and Mac apps). Drag it by the handle. */
 .voice-overlay{position:fixed;top:56px;left:0;right:0;z-index:50;display:flex;justify-content:center;padding:0 16px;pointer-events:none}
-.voice-card{pointer-events:auto;width:min(440px,100%);display:grid;gap:14px;padding:16px;border-radius:28px;background:#fafafa;color:#222;border:1px solid rgba(0,0,0,.06);box-shadow:0 10px 26px rgba(0,0,0,.28)}
-.voice-top{display:flex;align-items:center;gap:14px}
-.voice-orb{flex:none;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;gap:5px;background:linear-gradient(#b078ff,#7855f8);transition:transform .12s ease-out;cursor:pointer}
-.voice-orb span{width:5px;height:15px;border-radius:3px;background:#fff}
+.voice-card{pointer-events:auto;width:min(440px,100%);display:grid;gap:12px;padding:16px;border-radius:26px;background:color-mix(in srgb,var(--panel,#1f1f1f) 86%,transparent);backdrop-filter:blur(22px) saturate(1.3);color:var(--text,#fff);border:1px solid color-mix(in srgb,var(--text,#fff) 12%,transparent);box-shadow:0 10px 28px rgba(0,0,0,.35);transition:border-color .25s}
+.voice-overlay[data-mode="listening"]:not([data-muted="true"]) .voice-card{border-color:color-mix(in srgb,var(--bot-accent,#9355ff) 55%,transparent)}
+.voice-grip{display:flex;justify-content:center;padding:2px 0;cursor:grab;touch-action:none}
+.voice-grip span{width:38px;height:4px;border-radius:2px;background:color-mix(in srgb,var(--text,#fff) 25%,transparent)}
+.voice-top{display:flex;align-items:center;gap:14px;cursor:grab;touch-action:none}
+.voice-orb{flex:none;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;gap:5px;background:linear-gradient(color-mix(in srgb,var(--bot-accent,#9355ff) 95%,#fff),color-mix(in srgb,var(--bot-accent,#9355ff) 62%,#000));transition:transform .12s ease-out;cursor:pointer}
+.voice-orb span{width:5px;height:15px;border-radius:3px;background:var(--bot-ink,#fff)}
 .voice-wave{flex:1;height:38px;display:flex;align-items:center;gap:3px;overflow:hidden}
-.voice-wave i{display:block;flex:none;width:3px;height:4px;border-radius:2px;background:rgba(110,79,242,.9)}
-.voice-overlay[data-muted="true"] .voice-wave i{background:rgba(0,0,0,.22)}
-.voice-line{min-height:18px;font-size:13px;line-height:1.35;color:rgba(0,0,0,.55);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.voice-wave i{display:block;flex:none;width:3px;height:4px;border-radius:2px;background:color-mix(in srgb,var(--bot-accent,#9355ff) 90%,transparent)}
+.voice-overlay[data-muted="true"] .voice-wave i{background:color-mix(in srgb,var(--text,#fff) 25%,transparent)}
+.voice-line{min-height:18px;font-size:13px;line-height:1.35;color:var(--muted,#a0a0a0);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .voice-line[hidden]{display:none}
 .voice-controls{display:flex;align-items:center;justify-content:space-between}
-.voice-controls button{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:rgba(0,0,0,.06);color:rgba(0,0,0,.74);cursor:pointer;transition:background .12s}
-.voice-controls button:hover{background:rgba(0,0,0,.1)}
-.voice-controls button[aria-pressed="true"]{background:rgba(0,0,0,.13)}
-.voice-controls .voice-end{background:#eb3838;color:#fff}
+.voice-controls button{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--text,#fff) 9%,transparent);color:color-mix(in srgb,var(--text,#fff) 88%,transparent);cursor:pointer;transition:background .12s}
+.voice-controls button:hover{background:color-mix(in srgb,var(--text,#fff) 16%,transparent)}
+.voice-controls button[aria-pressed="true"]{background:color-mix(in srgb,var(--text,#fff) 19%,transparent)}
+.voice-controls .voice-end{background:#eb3d3d;color:#fff}
 .voice-controls .voice-end:hover{background:#d92f2f}
 .voice-settings{display:grid;gap:14px}.voice-row{display:grid;grid-template-columns:200px 1fr;gap:12px;align-items:center}.voice-key{display:flex;gap:8px}.voice-key input,.voice-settings select,.voice-settings input[type=text],.voice-settings input:not([type]){flex:1;padding:9px 10px;border:1px solid var(--line,#333);border-radius:10px;background:var(--panel,#1f1f1f);color:var(--text,#fff)}
 @media (prefers-reduced-motion:reduce){.voice-orb{transition:none}}

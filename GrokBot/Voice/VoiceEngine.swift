@@ -8,7 +8,7 @@ import SwiftUI
 // Optional cloud engines (Groq / OpenAI / ElevenLabs) use keys stored in the Keychain.
 
 enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
-    case apple, groq, openAI, elevenLabs, nvidiaNIM
+    case apple, groq, openAI, elevenLabs, nvidiaNIM, nvidiaCloud, gemini
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -16,11 +16,13 @@ enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
         case .groq: "Groq"
         case .openAI: "OpenAI"
         case .elevenLabs: "ElevenLabs"
-        case .nvidiaNIM: "NVIDIA NIM (Magpie)"
+        case .nvidiaNIM: "NVIDIA NIM (self-hosted)"
+        case .nvidiaCloud: "NVIDIA Cloud (hosted Magpie)"
+        case .gemini: "Google AI Studio (Gemini)"
         }
     }
-    /// NVIDIA NIM here is speech output only.
-    var supportsTranscription: Bool { self != .nvidiaNIM }
+    /// The NVIDIA and Gemini options here are speech output only.
+    var supportsTranscription: Bool { self != .nvidiaNIM && self != .nvidiaCloud && self != .gemini }
     var supportsSpeech: Bool { true }
     var needsKey: Bool { self != .apple && self != .nvidiaNIM }
     /// A NIM you run yourself needs no key; a gateway in front of it may.
@@ -29,7 +31,7 @@ enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
     var maxSpeechCharacters: Int? {
         switch self {
         case .groq: 190
-        case .nvidiaNIM: 400
+        case .nvidiaNIM, .nvidiaCloud: 400
         default: nil
         }
     }
@@ -68,6 +70,52 @@ enum VoiceSettings {
         parts.path = (parts.path.hasSuffix("/") ? String(parts.path.dropLast()) : parts.path) + "/v1/audio/synthesize"
         return parts.url
     }
+    // Google AI Studio (Gemini speech)
+    static let geminiVoices = ["Kore", "Puck", "Zephyr", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Callirrhoe", "Enceladus"]
+    static var geminiModel: String {
+        get { UserDefaults.standard.string(forKey: "voiceGeminiModel") ?? "gemini-2.5-flash-preview-tts" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceGeminiModel") }
+    }
+    static var geminiVoice: String {
+        get { UserDefaults.standard.string(forKey: "voiceGeminiVoice").flatMap { geminiVoices.contains($0) ? $0 : nil } ?? "Kore" }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceGeminiVoice") }
+    }
+    static var geminiBaseURL: String {
+        get { UserDefaults.standard.string(forKey: "voiceGeminiBaseURL") ?? "https://generativelanguage.googleapis.com" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceGeminiBaseURL") }
+    }
+    /// The generateContent address for a model, or nil unless the base is a plain https address and the model name is a simple identifier.
+    static func geminiURL(base: String, model: String) -> URL? {
+        let name = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name.range(of: "^[A-Za-z0-9._-]{1,80}$", options: .regularExpression) != nil,
+              var parts = URLComponents(string: base.trimmingCharacters(in: .whitespacesAndNewlines)), parts.scheme?.lowercased() == "https",
+              let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else { return nil }
+        parts.path = (parts.path.hasSuffix("/") ? String(parts.path.dropLast()) : parts.path) + "/v1beta/models/\(name):generateContent"
+        return parts.url
+    }
+
+    // NVIDIA Cloud (hosted Magpie over gRPC)
+    static var nvidiaCloudServer: String {
+        get { UserDefaults.standard.string(forKey: "voiceNVCServer") ?? "grpc.nvcf.nvidia.com:443" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceNVCServer") }
+    }
+    static var nvidiaCloudFunctionID: String {
+        get { UserDefaults.standard.string(forKey: "voiceNVCFunction") ?? "877104f7-e885-42b9-8de8-f6e4c6303969" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceNVCFunction") }
+    }
+    static var nvidiaCloudVoice: String {
+        get { UserDefaults.standard.string(forKey: "voiceNVCVoice") ?? "Magpie-Multilingual.EN-US.Aria" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceNVCVoice") }
+    }
+    /// The gRPC method address for a server such as "grpc.nvcf.nvidia.com:443" (an https:// prefix is accepted), or nil if it is not a plain host and port.
+    static func nvidiaCloudURL(_ server: String) -> URL? {
+        var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.lowercased().hasPrefix("https://") { text = String(text.dropFirst(8)) }
+        if text.hasSuffix("/") { text = String(text.dropLast()) }
+        guard text.range(of: "^[A-Za-z0-9.-]{1,200}(:[0-9]{1,5})?$", options: .regularExpression) != nil, text.contains(".") else { return nil }
+        return URL(string: "https://\(text)/riva.tts.RivaSpeechSynthesis/Synthesize")
+    }
+    static func isValidFunctionID(_ id: String) -> Bool { id.trimmingCharacters(in: .whitespacesAndNewlines).range(of: "^[A-Za-z0-9-]{8,64}$", options: .regularExpression) != nil }
     static var elevenLabsVoiceID: String {
         get { UserDefaults.standard.string(forKey: "voiceElevenLabsVoiceID") ?? "21m00Tcm4TlvDq8ikWAM" }
         set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "voiceElevenLabsVoiceID") }
@@ -558,6 +606,19 @@ final class VoiceSession: ObservableObject {
 }
 
 enum VoiceWAV {
+    /// Wraps raw 16-bit mono little-endian PCM (as returned by Gemini and NVIDIA speech) in a WAV header so it can be played.
+    static func wrap(pcm: Data, sampleRate: Int) -> Data {
+        var data = Data()
+        func put32(_ v: UInt32) { var x = v.littleEndian; data.append(Data(bytes: &x, count: 4)) }
+        func put16(_ v: UInt16) { var x = v.littleEndian; data.append(Data(bytes: &x, count: 2)) }
+        data.append(contentsOf: Array("RIFF".utf8)); put32(UInt32(36 + pcm.count))
+        data.append(contentsOf: Array("WAVEfmt ".utf8)); put32(16); put16(1); put16(1)
+        put32(UInt32(sampleRate)); put32(UInt32(sampleRate * 2)); put16(2); put16(16)
+        data.append(contentsOf: Array("data".utf8)); put32(UInt32(pcm.count))
+        data.append(pcm)
+        return data
+    }
+
     /// 16-bit mono PCM at 16 kHz, which every transcription provider accepts.
     static func encode(_ samples: [Float], sampleRate: Double) -> Data {
         let target = 16_000.0

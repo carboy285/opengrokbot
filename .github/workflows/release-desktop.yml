@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.8.0/ --output=artifacts/OpenGrokBot-0.8.0-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.8.1/ --output=artifacts/OpenGrokBot-0.8.1-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,7 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.8.0: the big update. Bots can search the web and click, type and scroll in their own browser (anything that sends, buys, posts or submits asks for your approval first); sign in with a saved login or a 1Password item without ever seeing the password; search a Knowledge folder of your PDFs and notes; and start routines when an email arrives or an event is about to begin. The Mac can stay awake while Bots work. Sign in to ChatGPT, Claude and other CLIs from Terminal buttons, switch or compare models from the chat header, and see usage on a real Usage screen. Windows gains API keys. Includes everything from 0.7.9.1. This is a development release.
+          0.8.1: a better voice mode. The voice card now follows the app theme and the Bot’s color, can be dragged anywhere on the Mac and Windows apps (it remembers its spot), and floats right under the agent’s name on iPhone instead of opening a separate page. Voice settings add Google AI Studio (Gemini speech) and NVIDIA Cloud (hosted Magpie, with API key, function ID and server address). Fixes the in-app update check for four-part versions. Includes everything from 0.8.0. This is a development release.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -137,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.0" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.1" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.8.0 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.0 · Browser actions, knowledge & triggers' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.8.1 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.1 · Better voice, Gemini & NVIDIA Cloud' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

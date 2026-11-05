@@ -377,8 +377,8 @@
 				"INFOPLIST_FILE" = "GrokBot/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "19";
-				"MARKETING_VERSION" = "0.8.0";
+				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "0.8.1";
 				"TARGETED_DEVICE_FAMILY" = "1";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -400,8 +400,8 @@
 				"INFOPLIST_FILE" = "GrokBot/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "19";
-				"MARKETING_VERSION" = "0.8.0";
+				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "0.8.1";
 				"TARGETED_DEVICE_FAMILY" = "1";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -786,8 +786,8 @@
 				"PRODUCT_MODULE_NAME" = "GrokBotMac";
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
-				"CURRENT_PROJECT_VERSION" = "19";
-				"MARKETING_VERSION" = "0.8.0";
+				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "0.8.1";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
@@ -813,8 +813,8 @@
 				"PRODUCT_MODULE_NAME" = "GrokBotMac";
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
-				"CURRENT_PROJECT_VERSION" = "19";
-				"MARKETING_VERSION" = "0.8.0";
+				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "0.8.1";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";

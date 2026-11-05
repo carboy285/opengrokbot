@@ -94,9 +94,14 @@ struct ConversationView: View {
                 photoItems = []
             }
         }
-        .fullScreenCover(isPresented: $voiceOn, onDismiss: { voice.stop() }) {
-            VoiceModeView(conversation: voice, botName: bot.name, tint: composerTint, ink: composerInk) { voice.stop(); voiceOn = false }
+        .overlay(alignment: .top) {
+            if voiceOn {
+                VoiceModeView(conversation: voice, botName: bot.name, tint: composerTint, ink: composerInk) { voice.stop(); voiceOn = false }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: voiceOn)
+        .onDisappear { if voiceOn { voice.stop(); voiceOn = false } }
         .simultaneousGesture(DragGesture(minimumDistance: 24, coordinateSpace: .global).onEnded { value in
             if value.startLocation.x < 28, value.translation.width > 80, abs(value.translation.height) < 70 { dismiss() }
         })

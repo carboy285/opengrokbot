@@ -89,5 +89,7 @@ test('splitText keeps every word and respects the limit', async () => {
   assert.deepEqual(splitText('   ', 190), []);
   assert.equal(maxSpeechLength('groq'), 190);
   assert.equal(maxSpeechLength('nvidiaNIM'), 400);
+  assert.equal(maxSpeechLength('nvidiaCloud'), 400);
+  assert.equal(maxSpeechLength('gemini'), Infinity);
   assert.equal(maxSpeechLength('openAI'), Infinity);
 });

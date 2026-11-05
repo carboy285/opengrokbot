@@ -38,7 +38,7 @@ export function nextChunk(text, offset, final, eager = false) {
 }
 
 /** Longest text one speech request should carry for a provider; longer replies are split at natural pauses. */
-export function maxSpeechLength(provider) { return provider === 'groq' ? 190 : provider === 'nvidiaNIM' ? 400 : Infinity; }
+export function maxSpeechLength(provider) { return provider === 'groq' ? 190 : provider === 'nvidiaNIM' || provider === 'nvidiaCloud' ? 400 : Infinity; }
 
 /** Splits text into pieces of at most `max` characters, preferring sentence ends, then commas, then spaces. Mirrors VoiceText.split in Swift. */
 export function splitText(text, max) {

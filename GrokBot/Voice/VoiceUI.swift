@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Hands-free voice mode: a compact card that floats over the chat, with an orb, a live waveform and four round controls
-/// (voice settings, captions, mute, end). Shared by the iPhone and Mac apps.
+/// (voice settings, captions, mute, end). It follows the app's theme and the Bot's color. On the Mac it can be dragged anywhere
+/// (grab the top of the card) and remembers where you left it; on iPhone it sits just under the agent's name.
 struct VoiceModeView: View {
     @ObservedObject var conversation: VoiceConversation
     let botName: String
@@ -11,12 +12,14 @@ struct VoiceModeView: View {
     @State private var showSettings = false
     @State private var showCaptions = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if os(macOS)
+    @AppStorage("voiceCardX") private var savedX = 0.0
+    @AppStorage("voiceCardY") private var savedY = 0.0
+    @State private var drag = CGSize.zero
+    #endif
 
     private var session: VoiceSession { conversation.session }
-    private static let violet = Color(red: 0.69, green: 0.47, blue: 1.0)
-    private static let purple = Color(red: 0.47, green: 0.33, blue: 0.97)
-    private static let paper = Color(white: 0.98)
-    private static let danger = Color(red: 0.92, green: 0.22, blue: 0.22)
+    private static let danger = Color(red: 0.92, green: 0.24, blue: 0.24)
 
     private var status: String {
         if session.muted { return "Muted" }
@@ -31,27 +34,39 @@ struct VoiceModeView: View {
         if let message = session.message { return message }
         return session.partial.isEmpty ? status : session.partial
     }
+    private var border: Color { session.state == .listening && !session.muted ? tint.opacity(0.55) : Color.primary.opacity(0.12) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            card.padding(.top, 10).padding(.horizontal, 16).frame(maxWidth: 440)
-            Spacer(minLength: 0)
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                card(in: proxy.size)
+                    #if os(macOS)
+                    .offset(cardOffset(in: proxy.size))
+                    #endif
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $showSettings) { VoiceSettingsView() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Voice mode with \(botName)")
     }
 
-    private var card: some View {
-        VStack(spacing: 14) {
+    private func card(in size: CGSize) -> some View {
+        VStack(spacing: 12) {
+            #if os(macOS)
+            grip.gesture(dragGesture(in: size))
+            #endif
             HStack(spacing: 14) {
                 orb
-                VoiceWaveform(state: session.state, level: session.level, muted: session.muted, reduceMotion: reduceMotion).frame(height: 38)
+                VoiceWaveform(state: session.state, level: session.level, muted: session.muted, reduceMotion: reduceMotion, color: tint).frame(height: 38)
             }
+            #if os(macOS)
+            .gesture(dragGesture(in: size))
+            #endif
             if showCaptions {
                 Text(caption).font(.system(size: 13)).lineLimit(2).multilineTextAlignment(.leading)
-                    .foregroundStyle(session.message == nil ? Color.black.opacity(0.55) : Color.orange)
+                    .foregroundStyle(session.message == nil ? Color.secondary : Color.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel(session.partial.isEmpty ? status : "You said: " + session.partial)
             }
@@ -66,18 +81,21 @@ struct VoiceModeView: View {
             }
         }
         .padding(16)
-        .background(Self.paper, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color.black.opacity(0.06), lineWidth: 1))
-        .shadow(color: .black.opacity(0.22), radius: 24, y: 10)
+        .frame(maxWidth: 440)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.28), radius: 22, y: 10)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: border)
+        .padding(.top, 8).padding(.horizontal, 16)
     }
 
     private var orb: some View {
         Button { if session.state == .speaking { session.interrupt() } } label: {
             ZStack {
-                Circle().fill(LinearGradient(colors: [Self.violet, Self.purple], startPoint: .top, endPoint: .bottom)).frame(width: 46, height: 46)
+                Circle().fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.6)], startPoint: .top, endPoint: .bottom)).frame(width: 46, height: 46)
                 HStack(spacing: 5) {
-                    Capsule().fill(.white).frame(width: 5, height: 15)
-                    Capsule().fill(.white).frame(width: 5, height: 15)
+                    Capsule().fill(ink).frame(width: 5, height: 15)
+                    Capsule().fill(ink).frame(width: 5, height: 15)
                 }
             }
             .scaleEffect(reduceMotion ? 1 : 1 + CGFloat(min(session.level, 1)) * 0.12)
@@ -91,14 +109,37 @@ struct VoiceModeView: View {
     private func control(_ symbol: String, label: String, highlighted: Bool = false, danger: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 16, weight: .medium))
-                .foregroundStyle(danger ? Color.white : Color.black.opacity(0.74))
+                .foregroundStyle(danger ? Color.white : Color.primary.opacity(0.85))
                 .frame(width: 46, height: 46)
-                .background(danger ? Self.danger : Color.black.opacity(highlighted ? 0.13 : 0.06), in: Circle())
+                .background(danger ? Self.danger : Color.primary.opacity(highlighted ? 0.18 : 0.08), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
     }
+
+    #if os(macOS)
+    /// A handle at the top of the card. Dragging it (or the orb and waveform row) moves the whole card.
+    private var grip: some View {
+        Capsule().fill(Color.primary.opacity(0.25)).frame(width: 38, height: 4)
+            .frame(maxWidth: .infinity, minHeight: 12).contentShape(Rectangle())
+            .accessibilityLabel("Drag to move the voice card").accessibilityAddTraits(.isButton)
+    }
+    private func clamped(_ x: Double, _ y: Double, in size: CGSize) -> CGSize {
+        let width = min(440, size.width - 32)
+        let maxX = max(0, (size.width - width) / 2 - 8)
+        return CGSize(width: min(max(x, -maxX), maxX), height: min(max(y, 0), max(0, size.height - 200)))
+    }
+    private func cardOffset(in size: CGSize) -> CGSize { clamped(savedX + drag.width, savedY + drag.height, in: size) }
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .global)
+            .onChanged { drag = $0.translation }
+            .onEnded { value in
+                let end = clamped(savedX + value.translation.width, savedY + value.translation.height, in: size)
+                savedX = end.width; savedY = end.height; drag = .zero
+            }
+    }
+    #endif
 }
 
 /// Bars that move with your voice while listening, ripple while the Bot speaks, and breathe while it thinks.
@@ -107,6 +148,7 @@ struct VoiceWaveform: View {
     let level: Float
     let muted: Bool
     let reduceMotion: Bool
+    var color: Color = Color(red: 0.43, green: 0.31, blue: 0.95)
     private static let bars = 32
 
     var body: some View {
@@ -114,7 +156,7 @@ struct VoiceWaveform: View {
             let time = context.date.timeIntervalSinceReferenceDate
             HStack(spacing: 3) {
                 ForEach(0..<Self.bars, id: \.self) { index in
-                    Capsule().fill(color).frame(width: 3, height: height(index, time))
+                    Capsule().fill(barColor).frame(width: 3, height: height(index, time))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,7 +165,7 @@ struct VoiceWaveform: View {
         .accessibilityHidden(true)
     }
 
-    private var color: Color { muted ? Color.black.opacity(0.22) : Color(red: 0.43, green: 0.31, blue: 0.95).opacity(state == .idle ? 0.35 : 0.9) }
+    private var barColor: Color { muted ? Color.secondary.opacity(0.4) : color.opacity(state == .idle ? 0.35 : 0.9) }
 
     private func height(_ index: Int, _ time: Double) -> CGFloat {
         let low: CGFloat = 4, high: CGFloat = 36
@@ -148,6 +190,12 @@ struct VoiceSettingsView: View {
     @State private var groqVoice = VoiceSettings.groqVoice
     @State private var nimURL = VoiceSettings.nimBaseURL
     @State private var nimVoice = VoiceSettings.nimVoice
+    @State private var geminiModel = VoiceSettings.geminiModel
+    @State private var geminiVoice = VoiceSettings.geminiVoice
+    @State private var geminiBase = VoiceSettings.geminiBaseURL
+    @State private var cloudServer = VoiceSettings.nvidiaCloudServer
+    @State private var cloudFunction = VoiceSettings.nvidiaCloudFunctionID
+    @State private var cloudVoice = VoiceSettings.nvidiaCloudVoice
     @State private var keys: [VoiceProvider: String] = Dictionary(uniqueKeysWithValues: VoiceProvider.allCases.map { ($0, VoiceKeys.get($0)) })
 
     var body: some View {
@@ -169,6 +217,20 @@ struct VoiceSettingsView: View {
                     Picker("Groq voice", selection: $groqVoice) { ForEach(VoiceSettings.groqVoices, id: \.self) { Text($0.capitalized).tag($0) } }
                 }
                 Section {
+                    TextField("Model, for example gemini-2.5-flash-preview-tts", text: $geminiModel).autocorrectionDisabledCompat()
+                    Picker("Voice", selection: $geminiVoice) { ForEach(VoiceSettings.geminiVoices, id: \.self) { Text($0).tag($0) } }
+                    TextField("Base URL", text: $geminiBase).autocorrectionDisabledCompat()
+                } header: { Text("Google AI Studio speaking (Gemini)") } footer: {
+                    Text("Get a key at aistudio.google.com and paste it above under Google AI Studio key. Choose Google AI Studio (Gemini) under Speaking. Google changes its speech model names often: if speech fails, check the current speech model name in AI Studio.")
+                }
+                Section {
+                    TextField("Server, for example grpc.nvcf.nvidia.com:443", text: $cloudServer).autocorrectionDisabledCompat()
+                    TextField("Function (model) ID", text: $cloudFunction).autocorrectionDisabledCompat()
+                    TextField("Voice", text: $cloudVoice).autocorrectionDisabledCompat()
+                } header: { Text("NVIDIA Cloud speaking (hosted Magpie)") } footer: {
+                    Text("Paste your NVIDIA API key (starts with nvapi-) above under NVIDIA Cloud key. The function ID comes from the model’s page on build.nvidia.com (the default is Magpie TTS Multilingual). This uses NVIDIA’s gRPC speech service and has not been tested against it, so if it fails the app falls back to the built-in voice and shows why.")
+                }
+                Section {
                     TextField("Address, for example http://localhost:9000", text: $nimURL).autocorrectionDisabledCompat()
                     TextField("Voice", text: $nimVoice).autocorrectionDisabledCompat()
                     SecureField("Key (only if your server needs one)", text: Binding(get: { keys[.nvidiaNIM] ?? "" }, set: { keys[.nvidiaNIM] = $0; VoiceKeys.set($0, for: .nvidiaNIM) }))
@@ -181,7 +243,7 @@ struct VoiceSettingsView: View {
             .navigationTitle("Voice settings")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { save(); dismiss() } } }
         }
-        .frame(minWidth: 380, minHeight: 520)
+        .frame(minWidth: 380, minHeight: 640)
         .onDisappear { save() }
     }
 
@@ -189,6 +251,8 @@ struct VoiceSettingsView: View {
         VoiceSettings.transcriber = transcriber; VoiceSettings.speaker = speaker
         VoiceSettings.allowTalkOver = talkOver; VoiceSettings.elevenLabsVoiceID = voiceID
         VoiceSettings.groqVoice = groqVoice; VoiceSettings.nimBaseURL = nimURL; VoiceSettings.nimVoice = nimVoice
+        VoiceSettings.geminiModel = geminiModel; VoiceSettings.geminiVoice = geminiVoice; VoiceSettings.geminiBaseURL = geminiBase
+        VoiceSettings.nvidiaCloudServer = cloudServer; VoiceSettings.nvidiaCloudFunctionID = cloudFunction; VoiceSettings.nvidiaCloudVoice = cloudVoice
     }
 }
 

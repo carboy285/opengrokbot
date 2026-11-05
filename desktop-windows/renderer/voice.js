@@ -46,7 +46,8 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     const mic = control('voice-mic', ICONS.mic, 'Mute microphone'); mic.setAttribute('aria-pressed', 'false');
     const end = control('voice-end', ICONS.close, 'End voice mode');
     controls.append(gear, chat, mic, end);
-    card.append(top, line, controls); overlay.append(card);
+    const grip = el('div', 'voice-grip'); grip.setAttribute('aria-label', 'Drag to move the voice card'); grip.append(el('span'));
+    card.append(grip, top, line, controls); overlay.append(card);
     document.body.append(overlay); end.focus();
     let statusText = 'Listening…', captionText = '', noteText = '', level = 0, frame = 0;
     const renderLine = () => { line.textContent = noteText || captionText || (state.muted ? 'Muted' : statusText); };
@@ -167,6 +168,20 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
       });
     }
 
+    // Drag the card by its handle or the orb and waveform row; it remembers where you left it.
+    let pos = { x: 0, y: 0 }, dragStart = null;
+    try { const saved = JSON.parse(localStorage.getItem('voiceCardPos') || 'null'); if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) pos = saved; } catch {}
+    const place = () => {
+      const maxX = Math.max(0, (window.innerWidth - card.offsetWidth) / 2 - 8);
+      pos = { x: Math.min(Math.max(pos.x, -maxX), maxX), y: Math.min(Math.max(pos.y, 0), Math.max(0, window.innerHeight - 56 - card.offsetHeight - 8)) };
+      card.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+    };
+    for (const handle of [grip, top]) {
+      handle.addEventListener('pointerdown', event => { if (event.target.closest('button')) return; dragStart = { x: event.clientX - pos.x, y: event.clientY - pos.y }; handle.setPointerCapture(event.pointerId); event.preventDefault(); });
+      handle.addEventListener('pointermove', event => { if (!dragStart) return; pos = { x: event.clientX - dragStart.x, y: event.clientY - dragStart.y }; place(); });
+      for (const name of ['pointerup', 'pointercancel']) handle.addEventListener(name, () => { if (!dragStart) return; dragStart = null; try { localStorage.setItem('voiceCardPos', JSON.stringify(pos)); } catch {} });
+    }
+    window.addEventListener('resize', place); place();
     orb.addEventListener('click', () => { if (state.mode === 'speaking') { queue = []; state.cancelSpeech?.(); resume(); } });
     end.addEventListener('click', stop);
     gear.addEventListener('click', () => { stop(); openSettings?.(); });
@@ -198,7 +213,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
 
     function stop() {
       if (!session) return;
-      session = null; state.alive = false; queue = []; state.cancelSpeech?.(); cancelAnimationFrame(frame);
+      session = null; state.alive = false; queue = []; state.cancelSpeech?.(); cancelAnimationFrame(frame); window.removeEventListener('resize', place);
       window.speechSynthesis.cancel();
       processor.disconnect(); source.disconnect(); stream.getTracks().forEach(track => track.stop()); audio.close().catch(() => {});
       overlay.remove();
@@ -220,11 +235,11 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     form.append(
       el('p', 'muted', 'Listening needs a cloud key because Windows has no offline recognizer here; Groq has a free tier. Speaking is free using Windows voices. Audio and reply text go only to the provider you choose. Keys are encrypted on this PC.'),
       row('Listening', select([['groq', 'Groq (Whisper)'], ['openAI', 'OpenAI (Whisper)'], ['elevenLabs', 'ElevenLabs (Scribe)']], settings.transcriber, value => save({ transcriber: value }))),
-      row('Speaking', select([['system', 'Windows voice (free)'], ['groq', 'Groq (Orpheus)'], ['elevenLabs', 'ElevenLabs'], ['openAI', 'OpenAI'], ['nvidiaNIM', 'NVIDIA NIM (Magpie, self-hosted)']], settings.speaker, value => save({ speaker: value }))),
+      row('Speaking', select([['system', 'Windows voice (free)'], ['groq', 'Groq (Orpheus)'], ['elevenLabs', 'ElevenLabs'], ['openAI', 'OpenAI'], ['gemini', 'Google AI Studio (Gemini)'], ['nvidiaCloud', 'NVIDIA Cloud (hosted Magpie)'], ['nvidiaNIM', 'NVIDIA NIM (Magpie, self-hosted)']], settings.speaker, value => save({ speaker: value }))),
     );
     const talk = el('input'); talk.type = 'checkbox'; talk.checked = settings.talkOver; talk.addEventListener('change', () => save({ talkOver: talk.checked }));
     form.append(row('Allow talking over replies', talk));
-    for (const [id, title] of [['groq', 'Groq'], ['openAI', 'OpenAI'], ['elevenLabs', 'ElevenLabs'], ['nvidiaNIM', 'NVIDIA NIM (only if your server needs one)']]) {
+    for (const [id, title] of [['groq', 'Groq'], ['openAI', 'OpenAI'], ['elevenLabs', 'ElevenLabs'], ['gemini', 'Google AI Studio'], ['nvidiaCloud', 'NVIDIA Cloud (nvapi- key)'], ['nvidiaNIM', 'NVIDIA NIM (only if your server needs one)']]) {
       const input = el('input'); input.type = 'password'; input.autocomplete = 'off'; input.placeholder = settings.keys[id] ? 'Saved — paste a new key to replace' : 'Paste API key';
       const keep = el('button', '', 'Save key'); keep.type = 'button';
       keep.addEventListener('click', async () => { try { await result(bridge.voiceKey(id, input.value.trim())); input.value = ''; input.placeholder = 'Saved — paste a new key to replace'; toast(`${title} key saved.`); } catch (error) { toast(error.message); } });
@@ -237,6 +252,16 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     form.append(row('Groq voice', select(['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'].map(name => [name, name[0].toUpperCase() + name.slice(1)]), settings.groqVoice || 'autumn', value => save({ groqVoice: value }))));
     const nimURL = el('input'); nimURL.value = settings.nimURL || 'http://localhost:9000'; nimURL.addEventListener('change', () => save({ nimURL: nimURL.value.trim() }));
     const nimVoice = el('input'); nimVoice.value = settings.nimVoice || 'Magpie-Multilingual.EN-US.Aria'; nimVoice.addEventListener('change', () => save({ nimVoice: nimVoice.value.trim() }));
+    const text = (value, fallback, key) => { const input = el('input'); input.value = value || fallback; input.addEventListener('change', () => save({ [key]: input.value.trim() })); return input; };
+    form.append(
+      row('Gemini model', text(settings.geminiModel, 'gemini-2.5-flash-preview-tts', 'geminiModel')),
+      row('Gemini voice', select(['Kore', 'Puck', 'Zephyr', 'Charon', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Callirrhoe', 'Enceladus'].map(name => [name, name]), settings.geminiVoice || 'Kore', value => save({ geminiVoice: value }))),
+      row('Gemini base URL', text(settings.geminiBase, 'https://generativelanguage.googleapis.com', 'geminiBase')),
+      el('p', 'muted', 'Google AI Studio speaking uses a key from aistudio.google.com. Google changes its speech model names often: if speech fails, check the current speech model name in AI Studio.'),
+      row('NVIDIA Cloud server', text(settings.nvcServer, 'grpc.nvcf.nvidia.com:443', 'nvcServer')),
+      row('NVIDIA Cloud function (model) ID', text(settings.nvcFunction, '877104f7-e885-42b9-8de8-f6e4c6303969', 'nvcFunction')),
+      row('NVIDIA Cloud voice', text(settings.nvcVoice, 'Magpie-Multilingual.EN-US.Aria', 'nvcVoice')),
+      el('p', 'muted', 'NVIDIA Cloud speaking uses your NVIDIA API key (starts with nvapi-) and the function ID from the model’s page on build.nvidia.com. It uses NVIDIA’s gRPC speech service and has not been tested against it; if it fails the Windows voice is used and the reason is shown.'));
     form.append(row('NVIDIA NIM address', nimURL), row('NVIDIA NIM voice', nimVoice),
       el('p', 'muted', 'NVIDIA NIM speaks with a Magpie TTS NIM you run yourself (a Docker container on an NVIDIA GPU, usually at port 9000). NVIDIA’s hosted cloud endpoint uses gRPC and is not supported here. Groq and ElevenLabs voices are usually the quickest to start speaking.'));
     page.append(form);

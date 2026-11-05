@@ -550,4 +550,69 @@ final class MacBigUpdateTests: XCTestCase {
         XCTAssertEqual(DesktopUpdates.numbers("v0.7.9.1"), [0, 7, 9, 1]); XCTAssertEqual(DesktopUpdates.numbers("0.8.0"), [0, 8, 0, 0])
     }
 }
+
+final class MacVoiceProvidersTests: XCTestCase {
+    func testGeminiAndNVIDIACloudSpeakButCannotListenAndNeedKeys() {
+        for provider in [VoiceProvider.gemini, .nvidiaCloud] {
+            XCTAssertTrue(VoiceProvider.speakers.contains(provider), provider.title)
+            XCTAssertFalse(VoiceProvider.transcribers.contains(provider), provider.title)
+            XCTAssertTrue(provider.needsKey, provider.title)
+            XCTAssertFalse(provider.keyIsOptional, provider.title)
+        }
+        XCTAssertEqual(VoiceProvider.nvidiaCloud.maxSpeechCharacters, 400)
+        XCTAssertNil(VoiceProvider.gemini.maxSpeechCharacters)
+    }
+
+    func testGeminiAddressAndModelAreValidated() {
+        let base = "https://generativelanguage.googleapis.com"
+        XCTAssertEqual(VoiceSettings.geminiURL(base: base, model: "gemini-2.5-flash-preview-tts")?.absoluteString, base + "/v1beta/models/gemini-2.5-flash-preview-tts:generateContent")
+        XCTAssertEqual(VoiceSettings.geminiURL(base: base + "/", model: " gemini-3.1-flash-tts-preview ")?.absoluteString, base + "/v1beta/models/gemini-3.1-flash-tts-preview:generateContent")
+        for bad in [("http://generativelanguage.googleapis.com", "m"), (base, "../x"), (base, ""), (base, "two words"), ("", "m"), ("https://user:pw@host.example", "m"), (base + "?key=1", "m")] {
+            XCTAssertNil(VoiceSettings.geminiURL(base: bad.0, model: bad.1), "\(bad)")
+        }
+    }
+
+    func testNVIDIACloudServerAndFunctionIDAreValidated() {
+        XCTAssertEqual(VoiceSettings.nvidiaCloudURL("grpc.nvcf.nvidia.com:443")?.absoluteString, "https://grpc.nvcf.nvidia.com:443/riva.tts.RivaSpeechSynthesis/Synthesize")
+        XCTAssertEqual(VoiceSettings.nvidiaCloudURL(" https://grpc.nvcf.nvidia.com/ ")?.absoluteString, "https://grpc.nvcf.nvidia.com/riva.tts.RivaSpeechSynthesis/Synthesize")
+        for bad in ["", "localhost", "evil.example/path", "a b.example", "ftp://x.example", "http://x.example"] { XCTAssertNil(VoiceSettings.nvidiaCloudURL(bad), bad) }
+        XCTAssertTrue(VoiceSettings.isValidFunctionID("877104f7-e885-42b9-8de8-f6e4c6303969"))
+        for bad in ["", "short", "bad id!", "../../x"] { XCTAssertFalse(VoiceSettings.isValidFunctionID(bad), bad) }
+    }
+
+    func testRivaRequestsAreBuiltAndAudioIsReadBackFromGRPCFrames() throws {
+        let request = RivaTTS.synthesizeRequest(text: "hi", language: "en-US", sampleRate: 22_050, voice: "V")
+        XCTAssertEqual([UInt8](request), [0x0A, 0x02, 0x68, 0x69, 0x12, 0x05, 0x65, 0x6E, 0x2D, 0x55, 0x53, 0x18, 0x01, 0x20, 0xA2, 0xAC, 0x01, 0x2A, 0x01, 0x56])
+        let framed = RivaTTS.frame(request)
+        XCTAssertEqual([UInt8](framed.prefix(5)), [0, 0, 0, 0, UInt8(request.count)])
+        XCTAssertEqual(RivaTTS.unframe(framed), request)
+        XCTAssertNil(RivaTTS.unframe(Data([1, 0, 0, 0, 1, 9])), "Compressed frames are not supported")
+        XCTAssertNil(RivaTTS.unframe(Data([0, 0, 0, 0, 9, 1])), "Truncated frames are rejected")
+        let response = Data([0x10, 0x05, 0x0A, 0x04, 1, 2, 3, 4])
+        XCTAssertEqual(RivaTTS.audio(fromResponse: response), Data([1, 2, 3, 4]), "Unknown fields are skipped")
+        XCTAssertNil(RivaTTS.audio(fromResponse: Data([0x0A, 0x09, 1])))
+        let wav = try VoiceCloud.decodeNVIDIACloud(RivaTTS.frame(response))
+        XCTAssertEqual(Array(wav.prefix(4)), Array("RIFF".utf8)); XCTAssertEqual(wav.count, 48)
+        XCTAssertEqual(Array(wav[24..<28]), [0x22, 0x56, 0, 0])
+        XCTAssertThrowsError(try VoiceCloud.decodeNVIDIACloud(Data()))
+        XCTAssertEqual(RivaTTS.varint(300), [0xAC, 0x02])
+    }
+
+    func testGeminiAudioIsWrappedAsWAVAtTheRateItReports() throws {
+        func reply(_ mime: String, _ data: String = "AQIDBA==") -> Data {
+            Data(#"{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"\#(mime)","data":"\#(data)"}}]}}]}"#.utf8)
+        }
+        let wav = try VoiceCloud.decodeGemini(reply("audio/L16;codec=pcm;rate=24000"))
+        XCTAssertEqual(Array(wav.prefix(4)), Array("RIFF".utf8)); XCTAssertEqual(wav.count, 48)
+        XCTAssertEqual(Array(wav[24..<28]), [0xC0, 0x5D, 0, 0]); XCTAssertEqual(Array(wav[44...]), [1, 2, 3, 4])
+        XCTAssertEqual(Array(try VoiceCloud.decodeGemini(reply("audio/L16;rate=16000"))[24..<28]), [0x80, 0x3E, 0, 0])
+        XCTAssertEqual(Array(try VoiceCloud.decodeGemini(reply("audio/pcm"))[24..<28]), [0xC0, 0x5D, 0, 0], "No rate means 24 kHz")
+        XCTAssertThrowsError(try VoiceCloud.decodeGemini(Data("not json".utf8)))
+        XCTAssertThrowsError(try VoiceCloud.decodeGemini(Data(#"{"candidates":[]}"#.utf8)))
+        XCTAssertThrowsError(try VoiceCloud.decodeGemini(reply("audio/pcm", "")))
+        let packed = VoiceWAV.wrap(pcm: Data([9, 9]), sampleRate: 8000)
+        XCTAssertEqual(packed.count, 46); XCTAssertEqual(Array(packed[40..<44]), [2, 0, 0, 0])
+    }
+}
+
 #endif

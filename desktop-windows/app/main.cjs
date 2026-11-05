@@ -379,11 +379,11 @@ function configureIPC() {
     const values = await loadJSON('vault.json', []);
     return values.map(({ id, title }) => ({ id, title }));
   });
-  const voiceDefaults = { transcriber: 'groq', speaker: 'system', voiceID: '21m00Tcm4TlvDq8ikWAM', talkOver: true, groqVoice: 'autumn', nimURL: 'http://localhost:9000', nimVoice: 'Magpie-Multilingual.EN-US.Aria' };
+  const voiceDefaults = { transcriber: 'groq', speaker: 'system', voiceID: '21m00Tcm4TlvDq8ikWAM', talkOver: true, groqVoice: 'autumn', nimURL: 'http://localhost:9000', nimVoice: 'Magpie-Multilingual.EN-US.Aria', geminiModel: 'gemini-2.5-flash-preview-tts', geminiVoice: 'Kore', geminiBase: 'https://generativelanguage.googleapis.com', nvcServer: 'grpc.nvcf.nvidia.com:443', nvcFunction: '877104f7-e885-42b9-8de8-f6e4c6303969', nvcVoice: 'Magpie-Multilingual.EN-US.Aria' };
   const voiceKey = async provider => { const keys = await loadJSON('voice-keys.encrypted.json', {}); if (!keys[provider]) return ''; requireVault(); return safeStorage.decryptString(Buffer.from(keys[provider], 'base64')); };
   const voiceSettings = async () => {
     const saved = await loadJSON('voice-settings.json', {}), keys = await loadJSON('voice-keys.encrypted.json', {});
-    return { ...voiceDefaults, ...saved, keys: { groq: !!keys.groq, openAI: !!keys.openAI, elevenLabs: !!keys.elevenLabs, nvidiaNIM: !!keys.nvidiaNIM } };
+    return { ...voiceDefaults, ...saved, keys: { groq: !!keys.groq, openAI: !!keys.openAI, elevenLabs: !!keys.elevenLabs, nvidiaNIM: !!keys.nvidiaNIM, nvidiaCloud: !!keys.nvidiaCloud, gemini: !!keys.gemini } };
   };
   handle('voice:settings', voiceSettings);
   handle('voice:save', async patch => {
@@ -393,6 +393,12 @@ function configureIPC() {
     if (patch.speaker !== undefined) { if (!['system', ...voice.SPEAKERS].includes(patch.speaker)) throw new Error('Invalid provider'); next.speaker = patch.speaker; }
     if (patch.groqVoice !== undefined) { if (!voice.GROQ_VOICES.includes(patch.groqVoice)) throw new Error('Invalid voice'); next.groqVoice = patch.groqVoice; }
     if (patch.nimURL !== undefined) { if (!voice.nimURL(patch.nimURL)) throw new PublicError('That NVIDIA NIM address looks invalid. Use something like http://localhost:9000.'); next.nimURL = String(patch.nimURL).trim(); }
+    if (patch.geminiModel !== undefined) { if (!voice.geminiURL('https://generativelanguage.googleapis.com', patch.geminiModel)) throw new PublicError('That Google AI Studio model name looks invalid.'); next.geminiModel = String(patch.geminiModel).trim(); }
+    if (patch.geminiVoice !== undefined) { if (!voice.GEMINI_VOICES.includes(patch.geminiVoice)) throw new Error('Invalid voice'); next.geminiVoice = patch.geminiVoice; }
+    if (patch.geminiBase !== undefined) { if (!voice.geminiURL(patch.geminiBase, 'm')) throw new PublicError('That Google AI Studio base URL looks invalid. It must start with https://.'); next.geminiBase = String(patch.geminiBase).trim(); }
+    if (patch.nvcServer !== undefined) { if (!voice.nvidiaCloudTarget(patch.nvcServer)) throw new PublicError('That NVIDIA Cloud server address looks invalid. Use something like grpc.nvcf.nvidia.com:443.'); next.nvcServer = String(patch.nvcServer).trim(); }
+    if (patch.nvcFunction !== undefined) { if (!voice.isFunctionID(patch.nvcFunction)) throw new PublicError('That NVIDIA Cloud function (model) ID looks invalid.'); next.nvcFunction = String(patch.nvcFunction).trim(); }
+    if (patch.nvcVoice !== undefined) { if (typeof patch.nvcVoice !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(patch.nvcVoice)) throw new PublicError('That NVIDIA Cloud voice name looks invalid.'); next.nvcVoice = patch.nvcVoice; }
     if (patch.nimVoice !== undefined) { if (typeof patch.nimVoice !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(patch.nimVoice)) throw new PublicError('That NVIDIA NIM voice name looks invalid.'); next.nimVoice = patch.nimVoice; }
     if (patch.voiceID !== undefined) { if (typeof patch.voiceID !== 'string' || !/^[A-Za-z0-9]{8,40}$/.test(patch.voiceID)) throw new PublicError('That ElevenLabs voice ID looks invalid.'); next.voiceID = patch.voiceID; }
     if (patch.talkOver !== undefined) next.talkOver = patch.talkOver === true;
@@ -439,7 +445,7 @@ function configureIPC() {
   handle('voice:speak', async text => {
     const settings = await voiceSettings();
     if (settings.speaker === 'system') throw new PublicError('Using the Windows voice.');
-    try { return (await voice.synthesize({ provider: settings.speaker, key: await voiceKey(settings.speaker), text, voiceID: settings.voiceID, groqVoice: settings.groqVoice, nimBase: settings.nimURL, nimVoice: settings.nimVoice })).toString('base64'); } catch (error) { voiceFailure(error); }
+    try { return (await voice.synthesize({ provider: settings.speaker, key: await voiceKey(settings.speaker), text, voiceID: settings.voiceID, groqVoice: settings.groqVoice, nimBase: settings.nimURL, nimVoice: settings.nimVoice, geminiModel: settings.geminiModel, geminiVoice: settings.geminiVoice, geminiBase: settings.geminiBase, nvcServer: settings.nvcServer, nvcFunction: settings.nvcFunction, nvcVoice: settings.nvcVoice })).toString('base64'); } catch (error) { voiceFailure(error); }
   });
   handle('vault:save', async (title, value) => {
     requireVault();
