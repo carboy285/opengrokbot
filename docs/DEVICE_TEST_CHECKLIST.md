@@ -36,3 +36,14 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Contacts: add a contact, then add a phone number to it.
 - Mail: send an email to yourself (prompt appears), draft one, reply to a message, mark read/flag, trash.
 - Messages: send a text to yourself by name and by number (prompt appears; macOS asks for Automation access to Messages the first time).
+
+## Next-version features (Mac / iPhone / Windows)
+- Phone notifications: Settings → Computer → Phone notifications. Subscribe to the topic in the ntfy app, press Send a test, then background the app and let a Bot finish a reply.
+- Phone approvals: ask a Bot to send an email to yourself. The Mac sheet and the iPhone alert should both appear; answer on the phone and confirm the Mac sheet closes. Sign-ins (Touch ID) must stay Mac-only.
+- Ask a Bot shortcut: run "Ask OpenGrokBot" from Siri/Shortcuts on iPhone and Mac with and without a Bot name.
+- Menu-bar Ask a Bot window: send a request, confirm the Bot replies in the main window.
+- Mail search: `days`, `scope: all`, unread only, attachment names.
+- Memory: say "remember I prefer window seats", then "forget the window seats"; check Settings → Shared memory and Bot details.
+- Templates and sharing: create a Bot from a template chip; Share this Bot… then Import a shared Bot… on another Mac.
+- Knowledge: add a PDF and a screenshot, ask the Bot to read both (read_knowledge). Windows: PDF only (no photo text recognition).
+- Windows: add a 1Password login (needs the `op` CLI).
