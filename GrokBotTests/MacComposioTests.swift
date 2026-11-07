@@ -646,6 +646,13 @@ final class MacAppleWritesTests: XCTestCase {
         XCTAssertEqual(AppleText.match(titles, "  "), [])
     }
 
+    func testHashtagsAreCleanedAndNotDuplicated() {
+        XCTAssertEqual(AppleText.hashtags(["errands", "#Home Stuff", "  ", "a/b"]), "#errands #Home-Stuff #a-b")
+        XCTAssertEqual(AppleText.addingHashtags(["errands", "work"], to: "call first\n#errands"), "call first\n#errands\n#work")
+        XCTAssertEqual(AppleText.addingHashtags(["x"], to: nil), "#x")
+        XCTAssertEqual(AppleText.addingHashtags(["x"], to: "#x"), "#x")
+    }
+
     func testAddressesAndNames() {
         XCTAssertEqual(AppleText.address("jane@example.com"), "jane@example.com")
         XCTAssertEqual(AppleText.address("+1 (555) 123-4567"), "+15551234567")
@@ -667,7 +674,7 @@ final class MacAppleWritesTests: XCTestCase {
     }
 
     func testNewToolsAreRoutedAndParsed() {
-        for name in ["apple_edit_event", "apple_delete_event", "apple_edit_reminder", "apple_complete_reminder", "apple_delete_reminder", "apple_add_contact", "apple_edit_contact", "apple_add_note", "apple_edit_note", "apple_delete_note", "apple_send_email", "apple_draft_email", "apple_reply_email", "apple_mail_update", "apple_send_message"] {
+        for name in ["apple_edit_event", "apple_delete_event", "apple_edit_reminder", "apple_complete_reminder", "apple_delete_reminder", "apple_reminder_lists", "apple_add_contact", "apple_edit_contact", "apple_add_note", "apple_edit_note", "apple_delete_note", "apple_send_email", "apple_draft_email", "apple_reply_email", "apple_mail_update", "apple_send_message"] {
             XCTAssertTrue(MacDeviceActions.actionNames.contains(name), name)
         }
         let parsed = BotTeamwork.parse("```opengrokbot-action\n{\"action\":\"apple_edit_event\",\"name\":\"Dentist\",\"on\":\"2026-11-12\",\"newName\":\"Dentist (moved)\",\"change\":\"x\",\"subject\":\"s\",\"phone\":\"1\",\"email\":\"e\"}\n```").actions

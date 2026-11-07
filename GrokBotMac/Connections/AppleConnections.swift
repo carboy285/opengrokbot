@@ -230,11 +230,12 @@ enum AppleReaders {
         return lines.isEmpty ? "No open reminders." : lines.joined(separator: "\n")
     }
 
-    static func addReminder(title: String, due: Date?) throws -> String {
+    static func addReminder(title: String, due: Date?, listName: String? = nil, tags: [String] = []) throws -> String {
         let store = EKEventStore()
-        guard let list = store.defaultCalendarForNewReminders() else { throw AppleError.message("There is no default Reminders list to add to.") }
+        let list = try reminderList(named: listName, in: store)
         let reminder = EKReminder(eventStore: store)
         reminder.title = title; reminder.calendar = list
+        if !tags.isEmpty { reminder.notes = AppleText.hashtags(tags) }
         if let due { reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due) }
         try store.save(reminder, commit: true)
         return "Added reminder “\(title)” to \(list.title)."

@@ -52,9 +52,32 @@ extension AppleReaders {
     }
 
     // MARK: Reminders
+    /// The Reminders list with this name (created if it does not exist yet), or the default list when no name is given.
+    static func reminderList(named name: String?, in store: EKEventStore) throws -> EKCalendar {
+        let wanted = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if wanted.isEmpty {
+            guard let list = store.defaultCalendarForNewReminders() else { throw AppleError.message("There is no default Reminders list to add to.") }
+            return list
+        }
+        let lists = store.calendars(for: .reminder)
+        if let found = lists.first(where: { $0.title.caseInsensitiveCompare(wanted) == .orderedSame }) { return found }
+        guard wanted.count <= 100, let source = store.defaultCalendarForNewReminders()?.source ?? store.sources.first(where: { $0.sourceType == .local }) else {
+            throw AppleError.message("The Reminders list “\(wanted)” does not exist and could not be created.")
+        }
+        let list = EKCalendar(for: .reminder, eventStore: store)
+        list.title = wanted; list.source = source
+        try store.saveCalendar(list, commit: true)
+        return list
+    }
+
+    static func reminderLists() -> String {
+        let names = EKEventStore().calendars(for: .reminder).map(\.title).sorted()
+        return names.isEmpty ? "No Reminders lists." : names.map { "- " + $0 }.joined(separator: "\n")
+    }
+
     enum ReminderChange: Sendable {
         case complete, delete
-        case edit(newName: String?, due: Date?, clearDue: Bool, notes: String?)
+        case edit(newName: String?, due: Date?, clearDue: Bool, notes: String?, listName: String?, tags: [String])
     }
 
     private static func reminderWork(_ body: @escaping @Sendable (EKEventStore, [EKReminder]) -> String) async -> String {
@@ -85,11 +108,13 @@ extension AppleReaders {
                 case .delete:
                     try store.remove(reminder, commit: true)
                     return "Deleted reminder “\(title)”."
-                case .edit(let newName, let due, let clearDue, let notes):
+                case .edit(let newName, let due, let clearDue, let notes, let listName, let tags):
                     if let newName, !newName.isEmpty { reminder.title = String(newName.prefix(300)) }
                     if clearDue { reminder.dueDateComponents = nil }
                     else if let due { reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due) }
                     if let notes { reminder.notes = String(notes.prefix(1000)) }
+                    if !tags.isEmpty { reminder.notes = AppleText.addingHashtags(tags, to: reminder.notes) }
+                    if let listName, !listName.isEmpty { reminder.calendar = try reminderList(named: listName, in: store) }
                     try store.save(reminder, commit: true)
                     return "Updated reminder “\(reminder.title ?? title)”."
                 }
@@ -325,6 +350,21 @@ extension AppleReaders {
 private final class ReminderStoreBox: @unchecked Sendable { let store = EKEventStore() }
 
 extension AppleText {
+    /// Reminders has no public tag API, so tags are kept as #hashtags in the reminder's notes.
+    static func hashtags(_ tags: [String]) -> String {
+        tags.compactMap { tag -> String? in
+            let clean = tag.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "#")).split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }).joined(separator: "-")
+            return clean.isEmpty ? nil : "#" + String(clean.prefix(40))
+        }.prefix(10).joined(separator: " ")
+    }
+
+    static func addingHashtags(_ tags: [String], to notes: String?) -> String {
+        let existing = notes ?? ""
+        let fresh = hashtags(tags).split(separator: " ").map(String.init).filter { !existing.localizedCaseInsensitiveContains($0) }
+        guard !fresh.isEmpty else { return existing }
+        return existing.isEmpty ? fresh.joined(separator: " ") : existing + "\n" + fresh.joined(separator: " ")
+    }
+
     /// Indexes of titles that equal the wanted text (ignoring case), or, when none do, that contain it.
     static func match(_ titles: [String], _ wanted: String) -> [Int] {
         let wanted = wanted.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

@@ -37,6 +37,8 @@ struct BotAction: Decodable, Sendable {
     var email: String?
     var subject: String?
     var change: String?
+    var list: String?
+    var tags: [String]?
 }
 
 /// What the chat shows for a page the Bot's browser read: the tab heading and the site, never the page text.
