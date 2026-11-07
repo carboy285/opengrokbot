@@ -15,6 +15,7 @@ const voice=require('./voice.cjs');
 const providerKeys=require('./provider-keys.cjs');
 const deviceActions=require('./device-actions.cjs');
 const botPackages=require('./bot-package.cjs');
+const settingsBundles=require('./settings-bundle.cjs');
 const backup=require('./backup.cjs');
 const { CloudHost } = require('./cloud-host.cjs');
 const updates = require('./updates.cjs');
@@ -200,6 +201,7 @@ const cloud = new CloudHost({
  applyPins:async rows=>{let changed=false;for(const row of rows){const bot=state.bots.find(bot=>bot.id.toLowerCase()===row.bot_id.toLowerCase());if(bot&&(bot.isPinned??!!bot.isMain)!==row.is_pinned){bot.isPinned=row.is_pinned;changed=true;}}if(changed){await atomicJSON('preview-workspace.json',state);notify();}},
  snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
  browser:async id=>{try{return await localBrowsers.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},vm:async id=>{try{return await localVMs.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},
+ bundle:async()=>{try{await ensureState();if(!settings.shareKeys)throw new Error(settingsBundles.SHARING_OFF);return await exportBundle();}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  botPackage:async id=>{try{await ensureState();const bot=state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase());if(!bot)throw new Error('Unknown Bot');const folder=path.join(botDirectory(bot.id),'Knowledge');let files=[];try{for(const entry of (await readdir(folder,{withFileTypes:true})).slice(0,100)){if(!entry.isFile()||entry.name.startsWith('.'))continue;const full=path.join(folder,entry.name);if((await stat(full)).size<=8000000)files.push({name:entry.name,data:await readFile(full)});}}catch(error){if(error.code!=='ENOENT')throw error;}return botPackages.build({state,botID:bot.id,sourceName:require('node:os').hostname(),files});}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
  changed:status=>{mirror.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
@@ -225,9 +227,47 @@ async function mirrorAction(operation){await ensureState();try{return await oper
 async function cloudAction(operation){await ensureState();try{return await operation();}catch(error){throw new PublicError(error.message);}}
 function remoteSnapshot(){const {sessions,version,...workspace}=state;return {protocolVersion:1,hostName:require('node:os').hostname(),revision,workspace:{...workspace,schemaVersion:2,bots:workspace.bots.map(x=>({...x,symbol:x.symbol||'sparkles'})),entries:workspace.entries.map(({detail,...x})=>({...x,date:(x.date||'2001-01-01T00:00:00Z').replace(/\.\d+Z$/,'Z')}))},running:[...active.keys()],providers:installed.map(x=>({provider:x.provider,version:x.version})),defaultProvider:selectedCLI()?.provider};}
 async function remoteFiles(id){if(!state.bots.some(x=>x.id.toLowerCase()===String(id).toLowerCase()))throw new Error('Unknown Bot');let values;try{values=await readdir(botDirectory(state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase()).id),{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}return values.filter(x=>!x.name.startsWith('.')&&x.isFile()).slice(0,500).map(x=>({name:x.name}));}
+/** This computer's keys and connector settings, for copying to another computer on the account (only while sharing is on). */
+async function exportBundle(){
+ requireVault();
+ const bundle={format:settingsBundles.FORMAT,version:1,sourceName:require('node:os').hostname(),cliKeys:{},voiceKeys:{}};
+ const cli=await loadJSON('cli-keys.encrypted.json',{});
+ for(const [provider,value] of Object.entries(cli))if(providerKeys.PROVIDERS.has(provider)&&value)try{bundle.cliKeys[provider]=safeStorage.decryptString(Buffer.from(value,'base64'));}catch{}
+ const voiceKeys=await loadJSON('voice-keys.encrypted.json',{});
+ for(const [provider,value] of Object.entries(voiceKeys))if(value)try{bundle.voiceKeys[provider]=safeStorage.decryptString(Buffer.from(value,'base64'));}catch{}
+ if(composioConfiguration)bundle.composio={key:composioConfiguration.key,userID:settings.composioUserID,toolkits:composioConfiguration.toolkits};
+ return settingsBundles.sanitize(bundle);
+}
+/** Saves keys and sets up connectors from another computer's bundle. */
+async function applyBundle(raw){
+ let bundle;try{bundle=settingsBundles.sanitize(raw);}catch(error){throw new PublicError(error.message);}
+ if(settingsBundles.isEmpty(bundle))throw new PublicError('Nothing to copy: no keys or connectors were saved on '+bundle.sourceName+'.');
+ requireVault();
+ if(Object.keys(bundle.cliKeys).length){const keys=await loadJSON('cli-keys.encrypted.json',{});for(const [provider,value] of Object.entries(bundle.cliKeys))keys[provider]=safeStorage.encryptString(value).toString('base64');await atomicJSON('cli-keys.encrypted.json',keys);}
+ if(Object.keys(bundle.voiceKeys).length){const keys=await loadJSON('voice-keys.encrypted.json',{});for(const [provider,value] of Object.entries(bundle.voiceKeys))keys[provider]=safeStorage.encryptString(value).toString('base64');await atomicJSON('voice-keys.encrypted.json',keys);}
+ if(bundle.composio){
+  if(active.size||pendingBots.size)throw new PublicError('Stop responses on this computer before copying connectors to it.');
+  if(composioBusy)throw new PublicError('Composio setup is already running on this computer.');
+  composioBusy=true;
+  try{
+   settings.composioUserID=bundle.composio.userID;await saveSettings();
+   const session=await composio.create(bundle.composio.key,settings.composioUserID,bundle.composio.toolkits);
+   const config={key:bundle.composio.key,session,toolkits:bundle.composio.toolkits};
+   await atomicJSON('composio.encrypted.json',{encrypted:safeStorage.encryptString(JSON.stringify(config)).toString('base64')});
+   composioConfiguration=config;connectedTools=[];
+   connectedTools=await composio.toolkits(config.key,session.session_id);
+  }catch(error){throw new PublicError('Keys were saved, but connectors could not be set up here: '+String(error.message).slice(0,160));}finally{composioBusy=false;}
+ }
+}
 async function remoteCommand(command){
  if(state.entries.some(x=>x.id.toLowerCase()===command.requestID.toLowerCase()))return;
  const bot=state.bots.find(x=>x.id.toLowerCase()===String(command.botID).toLowerCase());
+ if(command.action==='import_settings'){
+  if(!settings?.shareKeys)throw new PublicError(settingsBundles.SHARING_OFF);
+  if(typeof command.package!=='string'||command.package.length>400000)throw new PublicError('No settings were sent.');
+  let raw;try{raw=JSON.parse(Buffer.from(command.package,'base64').toString('utf8'));}catch{throw new PublicError('That settings bundle could not be read.');}
+  await applyBundle(raw);notify();return;
+ }
  if(command.action==='import_bot'){
   if(typeof command.package!=='string'||command.package.length>4000000)throw new PublicError('No Bot was sent.');
   let pkg;try{pkg=JSON.parse(Buffer.from(command.package,'base64').toString('utf8'));}catch{throw new PublicError('That Bot package could not be read.');}
@@ -423,6 +463,8 @@ function configureIPC() {
     if (patch.talkOver !== undefined) next.talkOver = patch.talkOver === true;
     await atomicJSON('voice-settings.json', next);
   });
+  handle('sharing:get', async () => { await ensureState(); return !!settings.shareKeys; });
+  handle('sharing:set', async value => { await ensureState(); settings.shareKeys = value === true; await saveSettings(); return settings.shareKeys; });
   handle('logins:list', () => loginStore.list());
   handle('logins:add', async value => { if (!value || typeof value !== 'object') throw new Error('Invalid login'); try { await loginStore.add(value); } catch (error) { throw new PublicError(error.message); } });
   handle('logins:addOnePassword', async value => { if (!value || typeof value !== 'object') throw new Error('Invalid login'); try { await loginStore.addOnePassword(value); } catch (error) { throw new PublicError(error.message); } });

@@ -10,7 +10,7 @@ struct RecoverableDraft: Codable {
 }
 
 enum MacPanel: String, Identifiable {
-    case settings, apps, newBot, integration, setup, apple
+    case settings, apps, newBot, integration, setup, apple, computers
     var id: String { rawValue }
 }
 
@@ -210,7 +210,7 @@ final class MacAppModel: ObservableObject {
     @Published var copyNotice: String?
     private var copyGateway: MacGateway?
 
-    private func ensureCopyGateway() -> MacGateway {
+    func ensureCopyGateway() -> MacGateway {
         if let copyGateway { return copyGateway }
         let made = MacGateway(source: remote.account)
         copyGateway = made
@@ -227,22 +227,72 @@ final class MacAppModel: ObservableObject {
     /// Computers a Bot on screen can be copied to: the others, minus the one being viewed.
     func copyTargets() -> [CloudDevice] { computers().filter { $0.name != gateway?.hostName } }
 
-    /// Copies a Bot (its job, provider, memory, history, paused routines and small Knowledge files) to another computer, or to this Mac.
-    /// `bot` and `shown` belong to whatever is on screen: this Mac's workspace, or the other computer's while viewing it.
+    /// The Bot to preselect when the Computers screen opens from a Bot's menu.
+    @Published var copyingBot: UUID?
+    @Published var copying = false
+
+    /// Copies one Bot to another computer, or (from a viewed computer) to this Mac. Returns a sentence about what happened.
+    private func copyOneBot(_ bot: Bot, shown: AppModel, to host: CloudDevice?) async throws -> String {
+        if let gateway {
+            let data = try await gateway.package(bot)
+            if let host { try await gateway.deliver(data, to: host); return "Copied “\(bot.name)” to \(host.name)." }
+            guard let localApp else { throw CloudError.message("This Mac’s workspace is not ready.") }
+            return try importBotPackage(data, into: localApp)
+        }
+        guard let host else { throw CloudError.message("Choose another computer.") }
+        guard let data = packageForCopy(bot, app: shown) else { throw CloudError.message("The Bot could not be packaged.") }
+        try await ensureCopyGateway().deliver(data, to: host)
+        return "Copied “\(bot.name)” to \(host.name)."
+    }
+
     func copyBot(_ bot: Bot, shown: AppModel, to host: CloudDevice?) {
+        guard !copying else { return }
+        copying = true
         Task { @MainActor in
-            do {
-                if let gateway {
-                    let data = try await gateway.package(bot)
-                    if let host { try await gateway.deliver(data, to: host); copyNotice = "Copied “\(bot.name)” to \(host.name). Open it there to see it." }
-                    else if let localApp { copyNotice = try importBotPackage(data, into: localApp) }
-                } else if let host {
-                    guard let data = packageForCopy(bot, app: shown) else { throw CloudError.message("The Bot could not be packaged.") }
-                    let sender = ensureCopyGateway()
-                    try await sender.deliver(data, to: host)
-                    copyNotice = "Copied “\(bot.name)” to \(host.name). Open it there to see it."
+            defer { copying = false }
+            do { copyNotice = try await copyOneBot(bot, shown: shown, to: host) }
+            catch { copyNotice = "The Bot could not be copied: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }
+        }
+    }
+
+    /// The one-button copy: all Bots, and/or AI provider and voice keys, and/or connectors, from the computer on screen to another one.
+    /// Keys and connectors need "Share keys and connectors" switched on at both ends.
+    func copyEverything(shown: AppModel, to host: CloudDevice?, bots: Bool, keys: Bool, connectors: Bool) {
+        guard !copying, bots || keys || connectors else { return }
+        copying = true
+        Task { @MainActor in
+            defer { copying = false }
+            var lines: [String] = []
+            if bots {
+                let individual = shown.workspace.bots.filter { $0.memberIDs == nil }
+                var done = 0, failed: [String] = []
+                for bot in individual {
+                    do { _ = try await copyOneBot(bot, shown: shown, to: host); done += 1 }
+                    catch { failed.append("“\(bot.name)”: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)) }
                 }
-            } catch { copyNotice = "The Bot could not be copied: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }
+                lines.append("Bots: \(done) of \(individual.count) copied." + (failed.isEmpty ? "" : " Problems: " + failed.prefix(3).joined(separator: "; ")))
+            }
+            if keys || connectors {
+                do {
+                    var bundle: SettingsBundle
+                    if let gateway { bundle = try SettingsBundle.decode(try await gateway.settingsBundle()) }
+                    else {
+                        guard SettingsBundle.sharingAllowed else { throw CloudError.message(SettingsBundle.sharingOffMessage) }
+                        bundle = makeSettingsBundle()
+                    }
+                    if !keys { bundle.cliKeys = [:]; bundle.voiceKeys = [:] }
+                    if !connectors { bundle.composio = nil }
+                    if bundle.isEmpty { lines.append("Keys and connectors: none were saved on the computer you are copying from.") }
+                    else if let host {
+                        try await ensureCopyGateway().deliverSettings(try bundle.encoded(), to: host)
+                        lines.append("Keys and connectors: sent \(bundle.summary) to \(host.name).")
+                    } else {
+                        guard SettingsBundle.sharingAllowed else { throw CloudError.message(SettingsBundle.sharingOffMessage) }
+                        lines.append(await applySettingsBundle(bundle))
+                    }
+                } catch { lines.append("Keys and connectors: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)) }
+            }
+            copyNotice = lines.joined(separator: "\n")
         }
     }
 

@@ -69,6 +69,31 @@ final class ComposioModel: ObservableObject {
         }
     }
 
+    /// The saved project key and the apps it was set up with, for copying to another computer.
+    func exportConfiguration() -> (key: String, toolkits: [String])? {
+        guard configured, let key else { return nil }
+        return (key, applied.sorted())
+    }
+
+    /// Sets up this Mac with a project key and user ID copied from another computer, so both share the same authorized apps.
+    /// Returns a short phrase describing the result.
+    func adopt(projectKey: String, userID: String, toolkits: [String]) async -> String {
+        guard !busy else { return "connectors were not changed (setup is already running here)" }
+        UserDefaults.standard.set(userID, forKey: "composioUserID")
+        busy = true; feedback = nil
+        defer { busy = false }
+        let requestGeneration = generation
+        do {
+            let created = try await createSession(key: projectKey, userID: userID, requested: toolkits.sorted())
+            guard generation == requestGeneration else { return "connectors were not changed" }
+            do { try store.save(JSONEncoder().encode(Configuration(key: projectKey, session: created.session, toolkits: created.used)), account: "configuration") }
+            catch { throw ComposioError.storage }
+            key = projectKey; session = created.session; configured = true; selected = Set(created.used); applied = Set(created.used)
+            self.toolkits = try await client(projectKey).toolkits(sessionID: created.session.session_id)
+            return "connectors (\(created.used.count) apps)"
+        } catch { return "connectors could not be set up (\(Self.message(error)))" }
+    }
+
     private func installationUserID() -> String {
         if let existing = UserDefaults.standard.string(forKey: "composioUserID") { return existing }
         let created = "opengrokbot-" + UUID().uuidString

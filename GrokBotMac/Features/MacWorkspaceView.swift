@@ -56,7 +56,7 @@ struct MacWorkspaceView: View {
             .background(MacTheme.canvas)
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
-        .alert("Copy Bot", isPresented: Binding(get: { desktop.copyNotice != nil }, set: { if !$0 { desktop.copyNotice = nil } })) {
+        .alert("Copy Bot", isPresented: Binding(get: { desktop.copyNotice != nil && desktop.panel != .computers }, set: { if !$0 { desktop.copyNotice = nil } })) {
             Button("OK") { desktop.copyNotice = nil }
         } message: { Text(desktop.copyNotice ?? "") }
         .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
@@ -167,31 +167,17 @@ struct MacWorkspaceView: View {
         }.background(MacTheme.sidebar)
     }
 
-    /// Switch between this computer and any other computer on the account. The other computer appears in this same window.
+    /// Opens the Computers screen. It is a plain button (not a menu that rebuilds while the app refreshes in the background).
     private var computerMenu: some View {
-        Menu {
-            Button { desktop.openComputer(nil, app: desktop.localApp ?? app) } label: { Label("This computer", systemImage: desktop.gateway == nil ? "checkmark" : "desktopcomputer") }
-            Divider()
-            if !desktop.remote.account.signedIn {
-                Button("Sign in to view another computer…") { desktop.openSettings(.computer) }
-            } else {
-                let others = desktop.computers()
-                if others.isEmpty { Text("No other computers found yet. Open OpenGrokBot on them and turn on phone access.") }
-                ForEach(others) { host in
-                    Button { desktop.openComputer(host, app: desktop.localApp ?? app) } label: {
-                        Label(host.name + (host.online ? "" : " · offline"), systemImage: desktop.gateway?.hostName == host.name ? "checkmark" : "server.rack")
-                    }
-                }
-            }
-        } label: {
+        Button { desktop.copyingBot = nil; desktop.copyNotice = nil; desktop.panel = .computers } label: {
             HStack(spacing: 6) {
                 Image(systemName: desktop.gateway == nil ? "desktopcomputer" : "server.rack")
                 Text(desktop.gateway?.hostName ?? "This computer").lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
             }
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .help("Switch to another computer on your account. Its Bots appear here exactly like this Mac’s.")
+        .buttonStyle(.plain)
+        .help("Computers on your account: look at one here, or copy Bots, keys and connectors between them.")
     }
 
     @ViewBuilder
@@ -210,12 +196,7 @@ struct MacWorkspaceView: View {
             }
         }
         if bot.memberIDs == nil {
-            Menu("Copy to another computer") {
-                if desktop.gateway != nil { Button("This computer") { desktop.copyBot(bot, shown: app, to: nil) } }
-                let targets = desktop.copyTargets()
-                ForEach(targets) { host in Button(host.name + (host.online ? "" : " · offline")) { desktop.copyBot(bot, shown: app, to: host) } }
-                if targets.isEmpty && desktop.gateway == nil { Text("No other computers found yet.") }
-            }
+            Button("Copy to another computer…") { desktop.copyingBot = bot.id; desktop.copyNotice = nil; desktop.panel = .computers }
         }
     }
 
@@ -230,6 +211,7 @@ struct MacWorkspaceView: View {
         case .settings: MacSettingsView()
         case .apps: MacConnectAppsView()
         case .apple: MacAppleConnectionsView()
+        case .computers: MacComputersView()
         case .newBot: MacNewBotView()
         case .integration: MacIntegrationView()
         case .setup: MacSetupView()

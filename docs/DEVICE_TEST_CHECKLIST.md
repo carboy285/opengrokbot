@@ -53,3 +53,10 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Switch back to "This computer" and confirm this Mac's own Bots and chats are untouched.
 - Right-click a Bot → Copy to another computer: Mac → Windows, Windows (viewing) → Mac via "This computer", and viewing Windows → another computer. Check the copy has the history, memory, Knowledge files, paused routines and a note saying where it came from, and that the Bot answers on the new computer (it starts a fresh AI session).
 - Windows host with the clock set a few minutes wrong: Settings → Computer should say the clock is off (rather than the viewer timing out).
+
+## 0.8.4: Computers screen and copy everything
+- Mac: the "This computer" button (top of the sidebar) opens the Computers screen. Right-click a Bot → "Copy to another computer…" opens the same screen with that Bot picked. Confirm nothing flickers.
+- Look at another computer from the screen and switch back.
+- Copy just one Bot; copy everything with only Bots ticked.
+- Turn on "Share keys and connectors" on both computers (Mac: Computers screen; Windows: Settings → Computer). Copy everything with keys and connectors ticked in both directions. Check the AI provider keys appear (Settings → API keys), voice keys work, and Connect Apps shows the same project and apps.
+- With sharing off on either side, the copy should say to turn it on, and send nothing.

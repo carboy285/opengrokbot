@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld('desktop', {
   voiceSave:patch=>ipcRenderer.invoke('voice:save',patch),
   voiceKey:(provider,value)=>ipcRenderer.invoke('voice:key',provider,value),
   loginsList:()=>ipcRenderer.invoke('logins:list'),
+  sharingGet:()=>ipcRenderer.invoke('sharing:get'),
+  sharingSet:value=>ipcRenderer.invoke('sharing:set',value),
   loginsAdd:value=>ipcRenderer.invoke('logins:add',value),
   loginsAddOnePassword:value=>ipcRenderer.invoke('logins:addOnePassword',value),
   loginsRemove:id=>ipcRenderer.invoke('logins:remove',id),

@@ -241,6 +241,11 @@ final class MacRemoteHost: ObservableObject {
                 guard let data = desktop.packageForCopy(bot, app: app) else { return .error(500, "The Bot could not be packaged.") }
                 return RemoteHostResponse(status: 200, body: data)
             }
+            if request.method == "GET", parts.path == "/v1/bundle" {
+                guard SettingsBundle.sharingAllowed else { return .error(409, "“Share keys and connectors” is off on this computer. Turn it on in the Computers screen, then try again.") }
+                guard let data = try? desktop.makeSettingsBundle().encoded() else { return .error(500, "The settings could not be packaged.") }
+                return RemoteHostResponse(status: 200, body: data)
+            }
             if request.method == "GET", parts.path == "/v1/models", let provider = query("provider").flatMap(CLIProvider.init(rawValue:)), let cli = desktop.installedCLIs.first(where: { $0.provider == provider }) {
                 let models = await Task.detached { CLIModelCatalog.models(for: cli) }.value
                 return try .json(models)
@@ -277,6 +282,11 @@ final class MacRemoteHost: ObservableObject {
                 guard desktop.send(message, to: bot, app: app, requestID: command.requestID) else { return .error(409, "The Bot is busy or needs provider setup. Check the desktop workspace.") }
             case "approval_response":
                 guard let text = command.text, let id = UUID(uuidString: text), MacApproval.shared.respondFromPhone(id: id, approved: command.name == "approve") else { return .error(409, "That request is no longer waiting.") }
+            case "import_settings":
+                guard SettingsBundle.sharingAllowed else { return .error(409, "“Share keys and connectors” is off on this computer. Turn it on in the Computers screen, then try again.") }
+                guard let data = command.package, let bundle = try? SettingsBundle.decode(data) else { return .error(400, "That settings bundle could not be read.") }
+                let result = await desktop.applySettingsBundle(bundle)
+                if result.contains("could not") { return .error(409, result) }
             case "import_bot":
                 guard let data = command.package else { return .error(400, "No Bot was sent.") }
                 do { _ = try desktop.importBotPackage(data, into: app) } catch { return .error(409, (error as? LocalizedError)?.errorDescription ?? "The Bot could not be copied.") }

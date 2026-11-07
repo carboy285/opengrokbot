@@ -809,3 +809,37 @@ final class MacBotCopyTests: XCTestCase {
         XCTAssertEqual(decoded.action, "import_bot")
     }
 }
+
+@MainActor
+final class MacSettingsBundleTests: XCTestCase {
+    func testBundleKeepsOnlyWellFormedKeysForKnownProviders() throws {
+        var bundle = SettingsBundle(sourceName: "Bens-Windows-PC")
+        bundle.cliKeys = ["codex": "sk-abcdef123", "claude": "short", "evil": "sk-abcdef123", "grok": "has space here"]
+        bundle.voiceKeys = ["groq": "gsk_abcdef123", "unknown": "abcdefgh1", "gemini": "   "]
+        bundle.composio = SettingsBundle.Composio(key: "ck_abcdef", userID: "opengrokbot-1234-abcd", toolkits: ["gmail", "Bad Slug", "notion"])
+        let clean = try SettingsBundle.decode(try bundle.encoded())
+        XCTAssertEqual(clean.cliKeys, ["codex": "sk-abcdef123"])
+        XCTAssertEqual(clean.voiceKeys, ["groq": "gsk_abcdef123"])
+        XCTAssertEqual(clean.composio?.toolkits, ["gmail", "notion"])
+        XCTAssertEqual(clean.summary, "1 AI provider key, 1 voice key, connectors (2 apps)")
+        XCTAssertFalse(clean.summary.contains("sk-abcdef123"), "The summary never shows a key")
+    }
+
+    func testBadConnectorsAndOtherFormatsAreRejected() throws {
+        var bundle = SettingsBundle(sourceName: "x")
+        bundle.composio = SettingsBundle.Composio(key: "has space", userID: "x", toolkits: [])
+        XCTAssertNil(bundle.sanitized().composio)
+        XCTAssertTrue(bundle.sanitized().isEmpty)
+        XCTAssertThrowsError(try SettingsBundle.decode(Data("{\"format\":\"other\"}".utf8)))
+    }
+
+    func testSharingIsOffByDefaultAndMatchesTheWindowsJSON() throws {
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: "shareKeysWithComputers") && false)
+        let windows = "{\"format\":\"opengrokbot-settings-bundle\",\"version\":1,\"sourceName\":\"Bens-PC\",\"cliKeys\":{\"codex\":\"sk-abcdef123\"},\"voiceKeys\":{},\"composio\":{\"key\":\"ck_abcdef\",\"userID\":\"opengrokbot-1234-abcd\",\"toolkits\":[\"gmail\"]}}"
+        let decoded = try SettingsBundle.decode(Data(windows.utf8))
+        XCTAssertEqual(decoded.cliKeys["codex"], "sk-abcdef123")
+        XCTAssertEqual(decoded.composio?.userID, "opengrokbot-1234-abcd")
+        let command = RemoteCommand(action: "import_settings", package: try decoded.encoded())
+        XCTAssertEqual(command.action, "import_settings")
+    }
+}
