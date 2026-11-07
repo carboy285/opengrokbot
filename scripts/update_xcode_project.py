@@ -71,7 +71,7 @@ reference(ios_entitlements, 'text.plist.entitlements')
 add_to_group(uid('appgroup'), [uid(ios_entitlements)])
 for configuration in ('Debug','Release'):
     objects[uid('app'+configuration)]['buildSettings']['CODE_SIGN_ENTITLEMENTS'] = ios_entitlements
-    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.8.1'
+    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.8.2'
     objects[uid('app'+configuration)]['buildSettings']['CURRENT_PROJECT_VERSION'] = '15'
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))
@@ -91,7 +91,7 @@ add_to_group(uid('products'),[app_product,test_product])
 mac_group=add('mac-group',isa='PBXGroup',children=[uid(p) for p in mac_sources]+[uid('GrokBotMac/Resources/'+p) for p in ['Info.plist','GrokBotMac.entitlements','AppIcon.icns']],name='GrokBotMac',sourceTree='<group>')
 add_to_group(uid('main'),[mac_group])
 base={'SDKROOT':'macosx','MACOSX_DEPLOYMENT_TARGET':'14.0','SUPPORTED_PLATFORMS':'macosx','SWIFT_VERSION':'6.0','CODE_SIGN_STYLE':'Automatic','SWIFT_STRICT_CONCURRENCY':'complete','COMBINE_HIDPI_IMAGES':'YES'}
-app_configs=configs('mac-app',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac','PRODUCT_NAME':'OpenGrokBot','PRODUCT_MODULE_NAME':'GrokBotMac','INFOPLIST_FILE':'GrokBotMac/Resources/Info.plist','GENERATE_INFOPLIST_FILE':'NO','CURRENT_PROJECT_VERSION':'20','MARKETING_VERSION':'0.8.1','CODE_SIGN_ENTITLEMENTS':'GrokBotMac/Resources/GrokBotMac.entitlements','ENABLE_HARDENED_RUNTIME':'YES','ENABLE_APP_SANDBOX':'NO','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks']})
+app_configs=configs('mac-app',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac','PRODUCT_NAME':'OpenGrokBot','PRODUCT_MODULE_NAME':'GrokBotMac','INFOPLIST_FILE':'GrokBotMac/Resources/Info.plist','GENERATE_INFOPLIST_FILE':'NO','CURRENT_PROJECT_VERSION':'21','MARKETING_VERSION':'0.8.1','CODE_SIGN_ENTITLEMENTS':'GrokBotMac/Resources/GrokBotMac.entitlements','ENABLE_HARDENED_RUNTIME':'YES','ENABLE_APP_SANDBOX':'NO','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks']})
 test_configs=configs('mac-test',base|{'PRODUCT_BUNDLE_IDENTIFIER':'org.opengrokbot.mac.tests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_HOST':'$(BUILT_PRODUCTS_DIR)/OpenGrokBot.app/Contents/MacOS/OpenGrokBot','BUNDLE_LOADER':'$(TEST_HOST)','LD_RUNPATH_SEARCH_PATHS':['$(inherited)','@executable_path/../Frameworks','@loader_path/../Frameworks']})
 proxy=add('mac-proxy',isa='PBXContainerItemProxy',containerPortal=project['rootObject'],proxyType='1',remoteGlobalIDString=mac_id,remoteInfo='GrokBotMac')
 dep=add('mac-dependency',isa='PBXTargetDependency',target=mac_id,targetProxy=proxy)

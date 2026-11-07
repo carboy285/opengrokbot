@@ -36,6 +36,8 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
+**0.8.2** lets Bots read, write, change and delete in Calendar, Reminders (lists and #tags), Contacts and Notes, and send, reply to and manage Mail and Messages on Mac; adds phone approvals and ntfy notifications, Ask a Bot from Siri/Shortcuts and the menu bar, wider mail search, forgetting memory, Bot templates and sharing, reading whole Knowledge files and photos, and Windows PDF knowledge and 1Password logins. Real-device behavior is unverified; see [the checklist](docs/DEVICE_TEST_CHECKLIST.md).
+
 **0.8.1** gives voice mode a themed card that can be dragged on desktop and floats under the agent's name on iPhone, and adds Google AI Studio (Gemini) and NVIDIA Cloud speech. NVIDIA Cloud uses NVIDIA's gRPC speech service and has not been tested against it.
 
 **0.8.0** is the big update: Bots can search the web and click, type and scroll in their own browser (consequential actions ask for approval), sign in through secure logins or 1Password without seeing passwords, search a per-Bot Knowledge folder, and start routines from new email or an upcoming calendar event; the Mac can stay awake while Bots work; there are Terminal sign-in buttons, a chat-header model menu with compare, a real Usage screen, and Windows API keys. See [the device checklist](docs/DEVICE_TEST_CHECKLIST.md).
