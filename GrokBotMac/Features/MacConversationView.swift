@@ -52,7 +52,10 @@ struct MacConversationView: View {
             composer
         }
         .overlay(alignment: .top) {
-            Button { desktop.showBotInspector.toggle() } label: {
+            Button {
+                if desktop.gateway != nil { desktop.sendFeedback[bot.id] = "Bot details aren’t available while viewing another computer yet. Provider and model are in the header menu, and its settings are under “You”."; return }
+                desktop.showBotInspector.toggle()
+            } label: {
                 HStack(spacing: 11) {
                     MacBotAvatar(color: bot.color, size: 27, appearance: bot.appearance)
                     Text(bot.name).font(.system(size: 18, weight: .medium)).lineLimit(1)

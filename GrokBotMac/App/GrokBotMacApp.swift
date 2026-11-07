@@ -59,6 +59,9 @@ struct GrokBotMacApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Bot…") { desktop.panel = .newBot }.keyboardShortcut("n")
             }
+            CommandGroup(after: .sidebar) {
+                Button("Computers…") { desktop.copyingBot = nil; desktop.copyNotice = nil; desktop.panel = .computers }.keyboardShortcut("k", modifiers: [.command, .option])
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { desktop.openSettings() }.keyboardShortcut(",")
             }

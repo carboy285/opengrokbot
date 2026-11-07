@@ -42,7 +42,12 @@ final class MacGateway: ObservableObject {
     func stop(_ id: UUID) { run(RemoteCommand(action: "stop", botID: id)) }
     func retry(_ id: UUID) { run(RemoteCommand(action: "retry", botID: id)) }
     func touch(_ id: UUID) { run(RemoteCommand(action: "touch_bot", botID: id)) }
-    func delete(_ id: UUID) { run(RemoteCommand(action: "delete_bot", botID: id)) }
+    /// Deletes a Bot on the other computer and drops it from the list on screen right away.
+    func delete(_ id: UUID) {
+        Task {
+            if await remote.command(RemoteCommand(action: "delete_bot", botID: id)), let bot = model.workspace.bots.first(where: { $0.id == id }) { model.removeBot(bot) }
+        }
+    }
     func setPinned(_ bot: Bot, _ pinned: Bool) { remote.setPinned(pinned, bot: bot) }
     func isPinned(_ bot: Bot) -> Bool { remote.isPinned(bot) }
     func create(name: String, purpose: String, color: String) async -> Bool { await remote.command(RemoteCommand(action: "create_bot", name: name, purpose: purpose, color: color)) }
@@ -52,6 +57,15 @@ final class MacGateway: ObservableObject {
     }
     func configure(_ configuration: BotAIConfiguration, for bot: Bot) { run(RemoteCommand(action: "configure_bot", botID: bot.id, configuration: configuration)) }
     var providers: [RemoteProvider] { remote.providers }
+    var defaultProvider: CLIProvider? { remote.defaultProvider }
+    var hasSnapshot: Bool { remote.hasSnapshot }
+    func models(_ provider: CLIProvider) async -> [AvailableCLIModel] { await remote.models(provider) }
+    func useProvider(_ provider: CLIProvider, model: String, for bot: Bot) {
+        let configuration = BotAIConfiguration(providers: [BotAIProvider(provider: provider, model: model)], activeProvider: provider, replyMode: .one)
+        run(RemoteCommand(action: "configure_bot", botID: bot.id, configuration: configuration))
+    }
+    func hostSettings() async throws -> RemoteHostSettings { try await remote.hostSettings() }
+    func setAPIKey(_ key: String, for provider: CLIProvider) async throws { try await remote.setAPIKey(key, for: provider) }
 
     /// The Bot as a package, from the computer being viewed.
     func package(_ bot: Bot) async throws -> Data { try await remote.botPackage(bot) }

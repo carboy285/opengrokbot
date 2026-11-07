@@ -201,6 +201,7 @@ const cloud = new CloudHost({
  applyPins:async rows=>{let changed=false;for(const row of rows){const bot=state.bots.find(bot=>bot.id.toLowerCase()===row.bot_id.toLowerCase());if(bot&&(bot.isPinned??!!bot.isMain)!==row.is_pinned){bot.isPinned=row.is_pinned;changed=true;}}if(changed){await atomicJSON('preview-workspace.json',state);notify();}},
  snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
  browser:async id=>{try{return await localBrowsers.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},vm:async id=>{try{return await localVMs.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},
+ hostSettings:async()=>{try{return await hostSettings();}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  bundle:async()=>{try{await ensureState();if(!settings.shareKeys)throw new Error(settingsBundles.SHARING_OFF);return await exportBundle();}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  botPackage:async id=>{try{await ensureState();const bot=state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase());if(!bot)throw new Error('Unknown Bot');const folder=path.join(botDirectory(bot.id),'Knowledge');let files=[];try{for(const entry of (await readdir(folder,{withFileTypes:true})).slice(0,100)){if(!entry.isFile()||entry.name.startsWith('.'))continue;const full=path.join(folder,entry.name);if((await stat(full)).size<=8000000)files.push({name:entry.name,data:await readFile(full)});}}catch(error){if(error.code!=='ENOENT')throw error;}return botPackages.build({state,botID:bot.id,sourceName:require('node:os').hostname(),files});}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
@@ -227,6 +228,15 @@ async function mirrorAction(operation){await ensureState();try{return await oper
 async function cloudAction(operation){await ensureState();try{return await operation();}catch(error){throw new PublicError(error.message);}}
 function remoteSnapshot(){const {sessions,version,...workspace}=state;return {protocolVersion:1,hostName:require('node:os').hostname(),revision,workspace:{...workspace,schemaVersion:2,bots:workspace.bots.map(x=>({...x,symbol:x.symbol||'sparkles'})),entries:workspace.entries.map(({detail,...x})=>({...x,date:(x.date||'2001-01-01T00:00:00Z').replace(/\.\d+Z$/,'Z')}))},running:[...active.keys()],providers:installed.map(x=>({provider:x.provider,version:x.version})),defaultProvider:selectedCLI()?.provider};}
 async function remoteFiles(id){if(!state.bots.some(x=>x.id.toLowerCase()===String(id).toLowerCase()))throw new Error('Unknown Bot');let values;try{values=await readdir(botDirectory(state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase()).id),{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}return values.filter(x=>!x.name.startsWith('.')&&x.isFile()).slice(0,500).map(x=>({name:x.name}));}
+/** This computer's own settings as another computer shows them (never the keys, only whether each is set). */
+async function hostSettings(){
+ await ensureState();
+ const cli=await loadJSON('cli-keys.encrypted.json',{}),voiceK=await loadJSON('voice-keys.encrypted.json',{});
+ const defaultProvider=selectedCLI()?.provider;
+ return {hostName:require('node:os').hostname(),platform:'windows',appVersion:app.getVersion(),providers:installed.map(x=>({provider:x.provider,version:x.version})),...(defaultProvider?{defaultProvider}:{}),
+  apiKeys:Object.fromEntries([...providerKeys.PROVIDERS].map(p=>[p,!!cli[p]])),voiceKeys:Object.fromEntries([...settingsBundles.VOICE_PROVIDERS].map(p=>[p,!!voiceK[p]])),
+  connectors:{configured:!!composioConfiguration,toolkits:composioConfiguration?.toolkits||[]},sharing:!!settings.shareKeys};
+}
 /** This computer's keys and connector settings, for copying to another computer on the account (only while sharing is on). */
 async function exportBundle(){
  requireVault();
@@ -262,6 +272,13 @@ async function applyBundle(raw){
 async function remoteCommand(command){
  if(state.entries.some(x=>x.id.toLowerCase()===command.requestID.toLowerCase()))return;
  const bot=state.bots.find(x=>x.id.toLowerCase()===String(command.botID).toLowerCase());
+ if(command.action==='set_api_key'){
+  if(!settings?.shareKeys)throw new PublicError('Turn on “Share keys and connectors” on this computer first (Settings → Computer).');
+  if(!providerKeys.PROVIDERS.has(command.name))throw new PublicError('Choose a provider that uses an API key.');
+  requireVault();const keys=await loadJSON('cli-keys.encrypted.json',{});const text=String(command.text??'').trim();
+  if(!text)delete keys[command.name];else{const key=providerKeys.normalized(text);if(!key)throw new PublicError('That key does not look right (no spaces, 8 to 512 characters).');keys[command.name]=safeStorage.encryptString(key).toString('base64');}
+  await atomicJSON('cli-keys.encrypted.json',keys);return;
+ }
  if(command.action==='import_settings'){
   if(!settings?.shareKeys)throw new PublicError(settingsBundles.SHARING_OFF);
   if(typeof command.package!=='string'||command.package.length>400000)throw new PublicError('No settings were sent.');

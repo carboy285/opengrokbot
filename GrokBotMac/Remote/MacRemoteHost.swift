@@ -241,6 +241,19 @@ final class MacRemoteHost: ObservableObject {
                 guard let data = desktop.packageForCopy(bot, app: app) else { return .error(500, "The Bot could not be packaged.") }
                 return RemoteHostResponse(status: 200, body: data)
             }
+            if request.method == "GET", parts.path == "/v1/host-settings" {
+                var keys: [String: Bool] = [:]
+                for provider in CLIProvider.allCases where ProviderAPIKeys.info(for: provider) != nil { keys[provider.rawValue] = ProviderAPIKeys.get(provider) != nil }
+                var voice: [String: Bool] = [:]
+                for provider in VoiceProvider.allCases where provider != .apple { voice[provider.rawValue] = !VoiceKeys.get(provider).isEmpty }
+                let settings = RemoteHostSettings(
+                    hostName: Host.current().localizedName ?? "Mac", platform: "mac", appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+                    providers: desktop.installedCLIs.map { RemoteProvider(provider: $0.provider, version: $0.version) }, defaultProvider: desktop.selectedCLI?.provider,
+                    apiKeys: keys, voiceKeys: voice,
+                    connectors: RemoteHostSettings.Connectors(configured: desktop.composio.configured, toolkits: desktop.composio.exportConfiguration()?.toolkits ?? []),
+                    sharing: SettingsBundle.sharingAllowed)
+                return try .json(settings)
+            }
             if request.method == "GET", parts.path == "/v1/bundle" {
                 guard SettingsBundle.sharingAllowed else { return .error(409, "“Share keys and connectors” is off on this computer. Turn it on in the Computers screen, then try again.") }
                 guard let data = try? desktop.makeSettingsBundle().encoded() else { return .error(500, "The settings could not be packaged.") }
@@ -282,6 +295,12 @@ final class MacRemoteHost: ObservableObject {
                 guard desktop.send(message, to: bot, app: app, requestID: command.requestID) else { return .error(409, "The Bot is busy or needs provider setup. Check the desktop workspace.") }
             case "approval_response":
                 guard let text = command.text, let id = UUID(uuidString: text), MacApproval.shared.respondFromPhone(id: id, approved: command.name == "approve") else { return .error(409, "That request is no longer waiting.") }
+            case "set_api_key":
+                guard SettingsBundle.sharingAllowed else { return .error(409, "Turn on “Share keys and connectors” on this computer first (Computers screen).") }
+                guard let name = command.name, let provider = CLIProvider(rawValue: name), ProviderAPIKeys.info(for: provider) != nil else { return .error(400, "Choose a provider that uses an API key.") }
+                let key = (command.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if key.isEmpty { try? ProviderAPIKeys.remove(provider) }
+                else if (try? ProviderAPIKeys.save(key, for: provider)) != true { return .error(400, "That key does not look right (no spaces, 8 to 512 characters).") }
             case "import_settings":
                 guard SettingsBundle.sharingAllowed else { return .error(409, "“Share keys and connectors” is off on this computer. Turn it on in the Computers screen, then try again.") }
                 guard let data = command.package, let bundle = try? SettingsBundle.decode(data) else { return .error(400, "That settings bundle could not be read.") }

@@ -60,3 +60,9 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Copy just one Bot; copy everything with only Bots ticked.
 - Turn on "Share keys and connectors" on both computers (Mac: Computers screen; Windows: Settings → Computer). Copy everything with keys and connectors ticked in both directions. Check the AI provider keys appear (Settings → API keys), voice keys work, and Connect Apps shows the same project and apps.
 - With sharing off on either side, the copy should say to turn it on, and send nothing.
+
+## 0.8.5: remote settings and audit fixes
+- View the Windows PC, press "You": it should say "Settings for <PC>" with its version, AI CLIs, API key status, voice keys and connectors. With "Share keys and connectors" on at the PC, save and remove a test key there and confirm the status changes; with it off the buttons are disabled.
+- "Connect apps" and the status line at the bottom of the sidebar open the same screen while viewing the PC; "Open this Mac's settings" reaches this Mac's own.
+- Header model menu on the PC lists every installed provider with models; picking one changes the Bot on the PC; a new Bot shows the PC's default provider before its first reply.
+- Delete a Bot on the PC: the row disappears at once. Switching shows "Connecting to…". Search clears when you switch. "Copy everything" opens with only Bots ticked.

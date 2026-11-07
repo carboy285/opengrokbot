@@ -10,7 +10,7 @@ struct RecoverableDraft: Codable {
 }
 
 enum MacPanel: String, Identifiable {
-    case settings, apps, newBot, integration, setup, apple, computers
+    case settings, apps, newBot, integration, setup, apple, computers, remoteSettings
     var id: String { rawValue }
 }
 
@@ -231,18 +231,24 @@ final class MacAppModel: ObservableObject {
     @Published var copyingBot: UUID?
     @Published var copying = false
 
+    /// The same wording whichever way a Bot was copied.
+    private static func copySummary(_ name: String, _ destination: String, _ data: Data) -> String {
+        guard let package = try? BotPackage.decode(data) else { return "Copied “\(name)” to \(destination)." }
+        return "Copied “\(name)” to \(destination) with \(package.entries.count) messages, \(package.bot.memory?.count ?? 0) memory items and \(package.knowledge.count) Knowledge files. Routines were copied paused."
+    }
+
     /// Copies one Bot to another computer, or (from a viewed computer) to this Mac. Returns a sentence about what happened.
     private func copyOneBot(_ bot: Bot, shown: AppModel, to host: CloudDevice?) async throws -> String {
         if let gateway {
             let data = try await gateway.package(bot)
-            if let host { try await gateway.deliver(data, to: host); return "Copied “\(bot.name)” to \(host.name)." }
+            if let host { try await gateway.deliver(data, to: host); return Self.copySummary(bot.name, host.name, data) }
             guard let localApp else { throw CloudError.message("This Mac’s workspace is not ready.") }
             return try importBotPackage(data, into: localApp)
         }
         guard let host else { throw CloudError.message("Choose another computer.") }
         guard let data = packageForCopy(bot, app: shown) else { throw CloudError.message("The Bot could not be packaged.") }
         try await ensureCopyGateway().deliver(data, to: host)
-        return "Copied “\(bot.name)” to \(host.name)."
+        return Self.copySummary(bot.name, host.name, data)
     }
 
     func copyBot(_ bot: Bot, shown: AppModel, to host: CloudDevice?) {
@@ -299,6 +305,7 @@ final class MacAppModel: ObservableObject {
     /// Shows another computer in the main window. Pass nil to come back to this Mac.
     func openComputer(_ host: CloudDevice?, app: AppModel) {
         gatewayRunning = nil
+        localApp?.search = ""; gateway?.model.search = ""; showSearch = false
         if let host {
             let next = gateway ?? MacGateway(source: remote.account)
             gateway = next; next.select(host)
@@ -323,7 +330,10 @@ final class MacAppModel: ObservableObject {
     func selected(in app: AppModel) -> Bot? {
         app.workspace.bots.first { $0.id == selectedID } ?? app.workspace.bots.first
     }
-    func openSettings(_ tab: SettingsTab = .general) { settingsTab = tab; panel = .settings }
+    /// Settings of whatever computer is on screen: this Mac's, or (while viewing another computer) that computer's.
+    func openSettings(_ tab: SettingsTab = .general) {
+        if gateway != nil { panel = .remoteSettings } else { settingsTab = tab; panel = .settings }
+    }
 
     func exportConversation(_ bot: Bot, app: AppModel) {
         let panel = NSSavePanel()

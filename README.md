@@ -36,6 +36,8 @@ The phone controls the same Bots, chats, memories, active models and running tas
 
 ![Native Mac account setup](docs/screenshots/macos-account-setup.png)
 
+**0.8.5** makes the remote view closer to the real thing: “You” and “Connect apps” show the viewed computer’s own settings (CLIs, API keys you can set, connectors), the model menu lists that computer’s providers and models, and the issues found in the 0.8.4 audit are fixed. Bot details, attachments, usage and updates for the other computer are not remote yet.
+
 **0.8.4** replaces the flickering Copy menu with a Computers screen and adds one button to copy everything (Bots, AI and voice API keys, connectors) from the computer on screen to another; keys and connectors need “Share keys and connectors” switched on at both ends. Real-device behavior is unverified.
 
 **0.8.3** lets the Mac show any other computer on your account exactly like its own app (switcher at the top of the sidebar), and copy a Bot with its provider, memory, history, paused routines and small Knowledge files between computers (Mac and Windows both). A Windows PC whose clock is wrong now reports it. Real-device behavior is unverified.

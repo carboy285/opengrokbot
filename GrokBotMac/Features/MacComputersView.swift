@@ -10,8 +10,8 @@ struct MacComputersView: View {
     @State private var destination: String = ""          // "mac" or a host ID
     @State private var oneBot: UUID?
     @State private var copyBots = true
-    @State private var copyKeys = true
-    @State private var copyConnectors = true
+    @State private var copyKeys = false
+    @State private var copyConnectors = false
 
     private var shownName: String { desktop.gateway?.hostName ?? "This computer" }
     /// Where the computer on screen can be copied to: this Mac when viewing another computer, and every other computer except the one on screen.
@@ -42,6 +42,9 @@ struct MacComputersView: View {
                             card { Text("No other computers found yet. Open OpenGrokBot on them, sign in with this account and turn on phone access.").font(.system(size: 14)).foregroundStyle(MacTheme.secondary) }
                         } else {
                             destinationSection
+                            if let notice = desktop.copyNotice {
+                                card { Text("Result").font(.system(size: 14, weight: .medium)); Text(notice).font(.system(size: 13)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                            }
                             everythingSection
                             oneBotSection
                         }
@@ -106,7 +109,6 @@ struct MacComputersView: View {
                 }.disabled(desktop.copying || (!copyBots && !copyKeys && !copyConnectors))
                 if desktop.copying { ProgressView().controlSize(.small) }
             }
-            if let notice = desktop.copyNotice { Text(notice).font(.system(size: 13)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
         }
     }
 

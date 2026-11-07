@@ -16,6 +16,20 @@ struct RemoteProvider: Codable, Equatable, Sendable, Identifiable {
     var version: String
     var id: String { provider.rawValue }
 }
+/// A computer's own settings as another computer shows them. Keys are never included, only whether each one is set.
+struct RemoteHostSettings: Codable, Sendable, Equatable {
+    struct Connectors: Codable, Sendable, Equatable { var configured: Bool; var toolkits: [String] }
+    var hostName: String
+    var platform: String
+    var appVersion: String
+    var providers: [RemoteProvider]
+    var defaultProvider: CLIProvider?
+    var apiKeys: [String: Bool]
+    var voiceKeys: [String: Bool]
+    var connectors: Connectors
+    var sharing: Bool
+}
+
 /// A Bot request waiting for a yes or no on the Mac that the approved phone can answer too.
 struct RemoteApproval: Codable, Sendable, Equatable, Identifiable {
     var id: UUID

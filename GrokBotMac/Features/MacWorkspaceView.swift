@@ -56,9 +56,6 @@ struct MacWorkspaceView: View {
             .background(MacTheme.canvas)
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
-        .alert("Copy Bot", isPresented: Binding(get: { desktop.copyNotice != nil && desktop.panel != .computers }, set: { if !$0 { desktop.copyNotice = nil } })) {
-            Button("OK") { desktop.copyNotice = nil }
-        } message: { Text(desktop.copyNotice ?? "") }
         .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
         .onChange(of: desktop.showSearch) { _, visible in searchFocused = visible }
         .foregroundStyle(.primary.opacity(0.9))
@@ -110,7 +107,7 @@ struct MacWorkspaceView: View {
                                     MacBotAvatar(color: bot.color, size: 64, starred: true, appearance: bot.appearance)
                                     Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
                                 }.padding(14).frame(maxWidth: .infinity).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
-                            }.buttonStyle(.plain).contextMenu { organizationActions(bot) }.draggable(bot.id.uuidString)
+                            }.buttonStyle(.plain).contextMenu { botMenu(bot) }.draggable(bot.id.uuidString)
                                 .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
                         }
                     }.padding(.horizontal, 18).padding(.vertical, 20)
@@ -131,11 +128,7 @@ struct MacWorkspaceView: View {
                         .buttonStyle(.plain)
                         .draggable(bot.id.uuidString)
                         .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
-                        .contextMenu {
-                            organizationActions(bot)
-                            Button("Export Conversation…") { desktop.exportConversation(bot, app: app) }
-                            if bot.isMain != true { Button("Delete Bot…", role: .destructive) { deleting = bot } }
-                        }
+                        .contextMenu { botMenu(bot) }
                     }
                     if !app.search.isEmpty && app.visibleBots.isEmpty {
                         Text("No Bots match “\(app.search)”.").foregroundStyle(MacTheme.secondary).padding(20)
@@ -143,7 +136,7 @@ struct MacWorkspaceView: View {
                 }.padding(.horizontal, 8)
             }
             Spacer(minLength: 10)
-            Button { desktop.panel = .setup } label: {
+            Button { desktop.panel = desktop.gateway == nil ? .setup : .remoteSettings } label: {
                 HStack(spacing: 6) {
                     Circle().fill(desktop.canChat ? Color.green : Color.orange.opacity(0.8)).frame(width: 5, height: 5)
                     Text(desktop.statusText).font(.system(size: 11))
@@ -153,7 +146,7 @@ struct MacWorkspaceView: View {
                 Button { desktop.openSettings() } label: {
                     Text(desktop.updates.available ? "↓" : "You").font(.system(size: 15)).frame(width: 42, height: 42).glassChrome(in: Circle())
                 }.buttonStyle(.plain).help("Settings")
-                Button { desktop.panel = .apps } label: {
+                Button { desktop.panel = desktop.gateway == nil ? .apps : .remoteSettings } label: {
                     HStack(spacing: 9) {
                         Text("Connect apps").font(.system(size: 16, weight: .medium))
                         HStack(spacing: -4) {
@@ -178,6 +171,14 @@ struct MacWorkspaceView: View {
         }
         .buttonStyle(.plain)
         .help("Computers on your account: look at one here, or copy Bots, keys and connectors between them.")
+    }
+
+    /// The same right-click menu for pinned cards and list rows.
+    @ViewBuilder
+    private func botMenu(_ bot: Bot) -> some View {
+        organizationActions(bot)
+        Button("Export Conversation…") { desktop.exportConversation(bot, app: app) }
+        if bot.isMain != true { Button("Delete Bot…", role: .destructive) { deleting = bot } }
     }
 
     @ViewBuilder
@@ -212,6 +213,7 @@ struct MacWorkspaceView: View {
         case .apps: MacConnectAppsView()
         case .apple: MacAppleConnectionsView()
         case .computers: MacComputersView()
+        case .remoteSettings: MacRemoteSettingsView()
         case .newBot: MacNewBotView()
         case .integration: MacIntegrationView()
         case .setup: MacSetupView()
@@ -219,11 +221,18 @@ struct MacWorkspaceView: View {
     }
 
     private var emptyWorkspace: some View {
-        VStack(spacing: 22) {
+        if let gateway = desktop.gateway, !gateway.hasSnapshot {
+            return AnyView(VStack(spacing: 16) {
+                ProgressView()
+                Text("Connecting to \(gateway.hostName)…").font(.system(size: 22, weight: .medium))
+                Text("Its Bots will appear here as soon as it answers. Make sure it is awake with OpenGrokBot open and phone access on.").foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
+            })
+        }
+        return AnyView(VStack(spacing: 22) {
             MacBotAvatar(size: 92)
             Text("A place for your Bots").font(.system(size: 28, weight: .medium))
             Text("Create a Bot to start a separate AI conversation.").foregroundStyle(MacTheme.secondary)
             MacPillButton(title: "Create Bot", prominent: true) { desktop.panel = .newBot }
-        }
+        })
     }
 }

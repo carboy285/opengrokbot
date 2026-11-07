@@ -279,6 +279,17 @@ final class RemoteController: ObservableObject {
         guard let peer = host ?? connection else { throw CloudError.message("Choose a hosting computer first.") }
         _ = try await client.fetch(peer, target: "/v1/command", command: RemoteCommand(action: "import_bot", package: data))
     }
+    /// The connected computer's own settings (providers, which keys are set, connectors, versions).
+    func hostSettings() async throws -> RemoteHostSettings {
+        guard let peer = connection else { throw CloudError.message("Choose a hosting computer first.") }
+        let response = try await client.fetch(peer, target: "/v1/host-settings")
+        return try CloudCoding.decoder().decode(RemoteHostSettings.self, from: response.body)
+    }
+    /// Saves (or, with an empty key, removes) an AI provider API key on the connected computer.
+    func setAPIKey(_ key: String, for provider: CLIProvider) async throws {
+        guard let peer = connection else { throw CloudError.message("Choose a hosting computer first.") }
+        _ = try await client.fetch(peer, target: "/v1/command", command: RemoteCommand(action: "set_api_key", text: key, name: provider.rawValue))
+    }
     /// Keys and connector settings from the connected computer (it must have sharing switched on).
     func settingsBundle() async throws -> Data {
         guard let peer = connection else { throw CloudError.message("Choose a hosting computer first.") }

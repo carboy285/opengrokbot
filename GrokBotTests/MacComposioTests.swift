@@ -843,3 +843,27 @@ final class MacSettingsBundleTests: XCTestCase {
         XCTAssertEqual(command.action, "import_settings")
     }
 }
+
+@MainActor
+final class MacRemoteSettingsTests: XCTestCase {
+    func testHostSettingsDecodeFromWhatTheWindowsAppSends() throws {
+        let json = "{\"hostName\":\"Bens-Windows-PC\",\"platform\":\"windows\",\"appVersion\":\"0.8.5\",\"providers\":[{\"provider\":\"claude\",\"version\":\"2.0\"},{\"provider\":\"grok\",\"version\":\"1.1\"}],\"defaultProvider\":\"claude\",\"apiKeys\":{\"codex\":false,\"claude\":true},\"voiceKeys\":{\"groq\":true},\"connectors\":{\"configured\":true,\"toolkits\":[\"gmail\"]},\"sharing\":false}"
+        let settings = try CloudCoding.decoder().decode(RemoteHostSettings.self, from: Data(json.utf8))
+        XCTAssertEqual(settings.platform, "windows")
+        XCTAssertEqual(settings.providers.map(\.provider), [.claude, .grok])
+        XCTAssertEqual(settings.defaultProvider, .claude)
+        XCTAssertEqual(settings.apiKeys["claude"], true)
+        XCTAssertEqual(settings.connectors.toolkits, ["gmail"])
+        XCTAssertFalse(settings.sharing)
+        let noDefault = json.replacingOccurrences(of: "\"defaultProvider\":\"claude\",", with: "")
+        XCTAssertNil(try CloudCoding.decoder().decode(RemoteHostSettings.self, from: Data(noDefault.utf8)).defaultProvider)
+    }
+
+    func testKeyCommandCarriesProviderAndKeyButSettingsNeverCarryKeys() throws {
+        let command = RemoteCommand(action: "set_api_key", text: "sk-abcdef123", name: "claude")
+        XCTAssertEqual(command.name, "claude")
+        let settings = RemoteHostSettings(hostName: "x", platform: "mac", appVersion: "1", providers: [], defaultProvider: nil, apiKeys: ["claude": true], voiceKeys: [:], connectors: .init(configured: false, toolkits: []), sharing: true)
+        let text = String(decoding: try CloudCoding.encoder().encode(settings), as: UTF8.self)
+        XCTAssertFalse(text.contains("sk-"), "Settings report only whether a key is set")
+    }
+}

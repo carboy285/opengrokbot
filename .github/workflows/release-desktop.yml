@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.8.4/ --output=artifacts/OpenGrokBot-0.8.4-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.8.5/ --output=artifacts/OpenGrokBot-0.8.5-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,7 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.8.4: fixes the flickering Copy menu by replacing it with a proper Computers screen (the button at the top of the sidebar, or right-click a Bot → Copy to another computer). From there you can look at any computer on your account, copy one Bot, or press one button to copy everything from the computer on screen to another: all Bots with their history, memory and Knowledge files, your AI provider and voice API keys, and your connectors (Composio project and apps). Keys and connectors only move while “Share keys and connectors” is turned on at both computers (it is off by default; Settings → Computer on Windows, the Computers screen on Mac). Secure logins and passwords are never copied. Works Mac to Windows, Windows to Mac, and between Windows PCs. Not yet tried on real devices.
+          0.8.5: closer to a true remote. While you are viewing another computer, “You” and “Connect apps” now open THAT computer’s settings: its version, the AI CLIs installed there, which API keys are set (and you can save or remove a key on it), voice keys, connectors, and sharing state. The header model menu lists that computer’s providers and their models, and shows the default provider before a Bot has replied. Fixes from the 0.8.4 audit: “Copy everything” no longer ticks keys and connectors by default, copy results show once and read the same in both directions, deleted Bots leave the list immediately, switching shows “Connecting to…” instead of a Create Bot screen, search clears when you switch, pinned Bots have the full right-click menu, and Bot details explains itself instead of doing nothing. Not done yet: Bot details and file attachments while viewing another computer, usage and updates for the other computer, and the Windows and iPhone viewing screens. Not yet tried on real devices; update both computers to 0.8.5.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -137,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.4" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.5" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.8.4 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.4 · Computers screen and copy everything' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.8.5 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.5 · Closer to a true remote' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
