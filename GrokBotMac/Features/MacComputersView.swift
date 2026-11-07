@@ -9,7 +9,9 @@ struct MacComputersView: View {
     @State private var hosts: [CloudDevice] = []
     @State private var destination: String = ""          // "mac" or a host ID
     @State private var oneBot: UUID?
-    @State private var copyBots = true, copyKeys = true, copyConnectors = true
+    @State private var copyBots = true
+    @State private var copyKeys = true
+    @State private var copyConnectors = true
 
     private var shownName: String { desktop.gateway?.hostName ?? "This computer" }
     /// Where the computer on screen can be copied to: this Mac when viewing another computer, and every other computer except the one on screen.

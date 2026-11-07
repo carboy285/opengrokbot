@@ -340,7 +340,7 @@ async function renderRemoteAccess(page){
   const diagnostics={state:status.phase,enabled:status.enabled,lastHeartbeat:status.lastHeartbeat||null,lastPhoneRequest:status.lastRequest||null,approvedPhones:status.phones.filter(x=>x.approved).length};append(body,node('p','muted','Keep this computer awake with OpenGrokBot running. Closing the window keeps phone access running in the system tray.'),button('Copy connection diagnostics',()=>navigator.clipboard.writeText(JSON.stringify(diagnostics,null,2))));
  };if(!bridge.cloudStatus){body.append(node('p','','Open the installed Windows app to connect your iPhone.'));return;}await draw();const timer=setInterval(()=>{if(!body.isConnected){clearInterval(timer);return;}if(!body.querySelector('input'))draw();},4000);
 }
-async /** Keys and connectors can be copied to and from this computer only while this switch is on (off until you turn it on). */
+/** Keys and connectors can be copied to and from this computer only while this switch is on (off until you turn it on). */
 async function renderSharing(page){
  if(!bridge.sharingGet)return;
  const wrap=node('div','voice-settings');const row=node('label','voice-row');const box=document.createElement('input');box.type='checkbox';
@@ -350,7 +350,7 @@ async function renderSharing(page){
  wrap.append(row,node('p','muted','Off by default. Turn it on here and on the other computer before its “Copy everything” button can send or take your AI provider keys, voice keys and connectors. They only travel inside your encrypted account link. Secure logins are never copied.'));
  page.append(wrap);
 }
-function renderUpdates(page){
+async function renderUpdates(page){
  const body=append(node('section','settings-card'),node('h2','','App updates'),node('p','muted','Updates come from the official project releases and are checked for size and integrity. Restart closes the app, installs the update and reopens it. Your workspace is kept.'));page.append(body);
  const check=button('Check for updates',async()=>{check.disabled=true;try{const update=await result(bridge.checkUpdates());body.append(node('p','',update.available?`${update.version} is available${update.prerelease?' (development release)':''}.`:`You’re using ${update.current}. No newer release is published.`));if(update.available){if(update.installer&&bridge.downloadUpdate){const action=button('Download update',async()=>{action.disabled=true;if(action.dataset.ready!=='true'){action.textContent='Downloading…';try{await result(bridge.downloadUpdate());action.dataset.ready='true';action.textContent='Restart and install';body.append(node('p','muted','Downloaded and verified. Restart closes the app, installs the update and reopens it. Your workspace is kept.'));}catch(error){toast(error.message);action.textContent='Download update';}action.disabled=false;return;}action.textContent='Restarting…';try{await result(bridge.installUpdate());}catch(error){toast(error.message);action.textContent='Restart and install';action.disabled=false;}},'pill primary');body.append(action);}body.append(button('Open download page',()=>bridge.openUpdate(update.url)));}}catch(error){toast(error.message);}finally{check.disabled=false;}});body.append(check);
 }
