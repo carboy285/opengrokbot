@@ -19,6 +19,7 @@ struct GrokBotMacApp: App {
                 .onAppear {
                     if !app.previewEnabled { app.enterPreview() }
                     desktop.remote.attach(app: app, desktop: desktop)
+                    MacIntentHub.shared.attach(app: app, desktop: desktop)
                     desktop.selectFirst(in: app)
                     desktop.startScheduler(app: app)
                     desktop.refreshCLIs()

@@ -44,8 +44,34 @@ struct StartVoiceIntent: AppIntent {
     }
 }
 
+/// "Ask a Bot": sends a request to one of your Bots by name (blank means your main Bot) and opens the chat.
+/// Works from Siri, the Shortcuts app, the Action Button, and the share sheet in Shortcuts.
+struct AskBotIntent: AppIntent {
+    static var title: LocalizedStringResource { "Ask a Bot" }
+    static var description: IntentDescription { IntentDescription("Sends a request to one of your OpenGrokBot Bots and opens the chat.") }
+    static var openAppWhenRun: Bool { true }
+
+    @Parameter(title: "Request") var request: String
+    @Parameter(title: "Bot name", description: "Leave blank for your main Bot.") var botName: String?
+
+    static var parameterSummary: some ParameterSummary { Summary("Ask \(\.$botName) \(\.$request)") }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let text = String(request.trimmingCharacters(in: .whitespacesAndNewlines).prefix(8000))
+        guard !text.isEmpty else { return .result(dialog: "There was nothing to send.") }
+        UserDefaults.standard.set(text, forKey: "pendingAskText")
+        UserDefaults.standard.set(String((botName ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)), forKey: "pendingAskBot")
+        return .result(dialog: "Sending that to your Bot.")
+    }
+}
+
 struct OpenGrokBotShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(intent: AskBotIntent(),
+                    phrases: ["Ask \(.applicationName)", "Ask my Bot in \(.applicationName)"],
+                    shortTitle: "Ask a Bot",
+                    systemImageName: "text.bubble")
         AppShortcut(intent: StartVoiceIntent(),
                     phrases: ["Talk to \(.applicationName)", "Start voice mode in \(.applicationName)"],
                     shortTitle: "Talk to Bot",

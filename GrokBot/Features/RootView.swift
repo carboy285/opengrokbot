@@ -19,6 +19,7 @@ struct RootView: View {
     @AppStorage("seenWelcome") private var seenWelcome = false
     @AppStorage("pendingVoiceStart") private var pendingVoice = false
     @AppStorage("autoVoiceBotID") private var autoVoiceBotID = ""
+    @Environment(\.scenePhase) private var phase
 
     private var matchingBots: [Bot] {
         model.visibleBots.filter { bot in
@@ -40,6 +41,19 @@ struct RootView: View {
         seenWelcome = true
         autoVoiceBotID = bot.id.uuidString
         chatPath = [bot.id]
+    }
+
+    /// Sends a request made with the "Ask a Bot" shortcut once the desktop workspace has loaded.
+    private func sendPendingAsk() {
+        guard remote.hasSnapshot, remote.online, let text = UserDefaults.standard.string(forKey: "pendingAskText"), !text.isEmpty else { return }
+        let wanted = (UserDefaults.standard.string(forKey: "pendingAskBot") ?? "").lowercased()
+        let bots = model.workspace.bots
+        let bot = (wanted.isEmpty ? nil : bots.first(where: { $0.name.lowercased() == wanted }) ?? bots.first(where: { $0.name.lowercased().contains(wanted) }))
+            ?? bots.first(where: { $0.isMain == true }) ?? bots.first
+        UserDefaults.standard.removeObject(forKey: "pendingAskText"); UserDefaults.standard.removeObject(forKey: "pendingAskBot")
+        guard let bot else { return }
+        seenWelcome = true; chatPath = [bot.id]
+        Task { _ = await remote.send(text, bot: bot) }
     }
 
     /// Messages in any chat that contain the search text, newest first.
@@ -98,9 +112,11 @@ struct RootView: View {
                 Button("Approve") { Task { await remote.answerApproval(true) } }
                 Button("Deny", role: .cancel) { Task { await remote.answerApproval(false) } }
             } message: { request in Text(request.detail + "\n\nYour Mac is waiting for your answer.") }
-            .onAppear { openPendingVoice() }
+            .onAppear { openPendingVoice(); sendPendingAsk() }
             .onChange(of: pendingVoice) { _, _ in openPendingVoice() }
-            .onChange(of: remote.hasSnapshot) { _, _ in openPendingVoice() }
+            .onChange(of: remote.hasSnapshot) { _, _ in openPendingVoice(); sendPendingAsk() }
+            .onChange(of: remote.online) { _, _ in sendPendingAsk() }
+            .onChange(of: phase) { _, new in if new == .active { sendPendingAsk() } }
             .fullScreenCover(isPresented: Binding(get: { !seenWelcome }, set: { if !$0 { seenWelcome = true } })) { WelcomeView { seenWelcome = true } }
             .sheet(isPresented: $createBot) { CreateBotView() }
             .sheet(item: $inspectedBot) { bot in
