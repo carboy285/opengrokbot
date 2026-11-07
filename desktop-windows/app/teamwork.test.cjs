@@ -52,3 +52,11 @@ test('Bots are told to keep working across many steps and try another way when s
   assert.match(prompt, /do not stop or apologize/);
   assert.match(prompt, /Up to forty/);
 });
+
+test('forget removes matching memory only from the chosen scope', () => {
+ const state=previewWorkspace(),main=state.bots[0];main.memory=['likes pizza','works at Acme'];state.sharedMemory=['likes pizza too','home is Austin'];
+ const reply={id:'r',botID:main.id,kind:'bot',text:'',state:'streaming'};state.entries.push(reply);
+ team.apply(state,main,reply,'Done.\n'+[{action:'forget',scope:'private',text:'PIZZA'},{action:'forget',scope:'shared',text:'austin'},{action:'forget',scope:'private',text:'ab'}].map(block).join('\n'),{providers:[{provider:'codex',model:'m'}],activeProvider:'codex',replyMode:'one'});
+ assert.deepEqual(main.memory,['works at Acme']);assert.deepEqual(state.sharedMemory,['likes pizza too']);
+ assert.ok(state.entries.some(x=>x.text.includes('Forgot 1 memory item')));assert.ok(state.entries.some(x=>x.text.includes('Nothing forgotten')));
+});

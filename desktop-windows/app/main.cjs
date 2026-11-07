@@ -205,7 +205,13 @@ const cloud = new CloudHost({
 const localVMs = new (require('./local-vm.cjs').LocalVMs)({getBot:id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),load:()=>loadJSON('bot-vms.json',{}),save:value=>atomicJSON('bot-vms.json',value),root:file('VirtualMachines')});
 const localBrowsers = new (require('./local-browser.cjs').LocalBrowsers)(id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),botDirectory);
 const loginStore=deviceActions.createLoginStore({storage:{load:()=>loadJSON('secure-logins.encrypted.json',[]),save:list=>atomicJSON('secure-logins.encrypted.json',list)},crypto:{encrypt:value=>{requireVault();return safeStorage.encryptString(value).toString('base64');},decrypt:value=>{requireVault();return safeStorage.decryptString(Buffer.from(value,'base64'));}},randomUUID});
-const devices=deviceActions.create({browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory});
+async function readOnePassword(item){
+ if(!deviceActions.isValidItemName(item))throw new Error('That 1Password item name is not valid.');
+ const {execFile}=require('node:child_process');
+ const out=await new Promise((resolve,reject)=>execFile('op',['item','get',item.trim(),'--format','json'],{timeout:45000,windowsHide:true,maxBuffer:262144},(error,stdout)=>error?reject(new Error(error.code==='ENOENT'?'1Password’s command-line tool (op) is not installed. Install it from 1password.com/downloads/command-line and turn on the desktop app integration.':'1Password did not return the login. Unlock 1Password, approve the prompt, and check the item name.')):resolve(stdout)));
+ const credentials=deviceActions.parseOnePassword(out);if(!credentials)throw new Error('1Password did not return a username and password for that item.');return credentials;
+}
+const devices=deviceActions.create({browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
 const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
 function openMirror(){
  if(mirrorWindow&&!mirrorWindow.isDestroyed()){mirrorWindow.show();mirrorWindow.focus();return;}
@@ -406,11 +412,12 @@ function configureIPC() {
   });
   handle('logins:list', () => loginStore.list());
   handle('logins:add', async value => { if (!value || typeof value !== 'object') throw new Error('Invalid login'); try { await loginStore.add(value); } catch (error) { throw new PublicError(error.message); } });
+  handle('logins:addOnePassword', async value => { if (!value || typeof value !== 'object') throw new Error('Invalid login'); try { await loginStore.addOnePassword(value); } catch (error) { throw new PublicError(error.message); } });
   handle('logins:remove', async id => { if (typeof id !== 'string' || id.length > 80) throw new Error('Invalid login'); await loginStore.remove(id); });
   handle('knowledge:add', async botID => {
     await ensureState();
     const bot = state.bots.find(x => x.id === botID); if (!bot || bot.memberIDs) throw new PublicError('Knowledge is available in individual Bot chats.');
-    const choice = await dialog.showOpenDialog(window, { title: 'Add knowledge files (text, Markdown, CSV…)', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Text files', extensions: ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'html', 'xml', 'yaml', 'yml'] }] });
+    const choice = await dialog.showOpenDialog(window, { title: 'Add knowledge files (text, Markdown, CSV…)', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Knowledge files', extensions: ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'html', 'xml', 'yaml', 'yml', 'pdf'] }] });
     if (choice.canceled || !choice.filePaths.length) return 0;
     const folder = path.join(botDirectory(bot.id), 'Knowledge'); await mkdir(folder, { recursive: true });
     let added = 0;

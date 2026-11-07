@@ -116,3 +116,63 @@ test('knowledge search ranks passages from text files', async () => {
   } finally { await rm(root, { recursive: true, force: true }); }
   assert.equal(da.rank([{ file: 'a', text: 'one two' }, { file: 'b', text: 'goat goat farm' }, { file: 'c', text: 'goat' }], 'goat farm').map(x => x.file).join(), 'b,c');
 });
+
+test('1Password items: names are validated and op output is parsed', () => {
+  assert.ok(da.isValidItemName('ESPN'));
+  assert.ok(!da.isValidItemName('--vault'));
+  assert.ok(!da.isValidItemName('a\nb'));
+  assert.ok(!da.isValidItemName(''));
+  const json = JSON.stringify({ fields: [{ id: 'username', purpose: 'USERNAME', value: 'me@example.com' }, { id: 'password', purpose: 'PASSWORD', value: 'pw-123' }] });
+  assert.deepEqual(da.parseOnePassword(json), { username: 'me@example.com', password: 'pw-123' });
+  assert.equal(da.parseOnePassword('{"fields":[]}'), null);
+  assert.equal(da.parseOnePassword('not json'), null);
+});
+
+test('a 1Password login stores only the item name and signs in without exposing the password', async () => {
+  let records = [];
+  const logins = da.createLoginStore({ storage: { load: async () => records, save: async list => { records = list; } }, crypto: { encrypt: x => x, decrypt: x => x }, randomUUID: () => 'id-1' });
+  await logins.addOnePassword({ label: 'ESPN', url: 'https://www.espn.com/login', item: 'ESPN login' });
+  assert.deepEqual(records[0], { id: 'id-1', label: 'ESPN', host: 'www.espn.com', username: '1Password', onePassword: 'ESPN login' });
+  await assert.rejects(logins.addOnePassword({ label: 'espn', url: 'https://www.espn.com', item: 'x' }), /already exists/);
+  await assert.rejects(logins.addOnePassword({ label: 'Bad', url: 'http://www.espn.com', item: 'x' }), /https/);
+  const filled = [];
+  const devices = da.create({
+    browsers: { fillLogin: async (id, details) => { filled.push(details); return 'Signed in.'; } },
+    approve: async (title, detail) => { assert.ok(detail.includes('1Password item')); assert.ok(!detail.includes('pw-123')); return true; },
+    logins, directory: () => os.tmpdir(), onePassword: async item => { assert.equal(item, 'ESPN login'); return { username: 'me@example.com', password: 'pw-123' }; }
+  });
+  const result = await devices.run({ action: 'secure_login', url: 'https://www.espn.com/login', name: 'ESPN' }, { botID: 'b', botName: 'Fantasy', unattended: false });
+  assert.match(result, /Signed in/);
+  assert.equal(filled[0].password, 'pw-123');
+  assert.ok(!result.includes('pw-123'));
+});
+
+test('Knowledge reads whole files in parts and PDFs by page', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'knowledge-'));
+  try {
+    await mkdir(path.join(dir, 'Knowledge'));
+    await writeFile(path.join(dir, 'Knowledge', 'Notes.txt'), 'a'.repeat(12000) + 'b'.repeat(50));
+    await writeFile(path.join(dir, 'Knowledge', 'Book.pdf'), 'fake');
+    const pdfPages = async () => ['first page words', 'second page words'];
+    const first = await da.knowledgeRead(dir, 'notes', 1, pdfPages);
+    assert.match(first, /part 1 of 2/); assert.match(first, /ask for page 2/);
+    assert.ok((await da.knowledgeRead(dir, 'Notes.txt', 2, pdfPages)).endsWith('b'.repeat(50)));
+    assert.match(await da.knowledgeRead(dir, 'book', 2, pdfPages), /page 2 of 2:\nsecond page words/);
+    assert.match(await da.knowledgeRead(dir, 'missing', 1, pdfPages), /No Knowledge file matches/);
+    assert.match(await da.knowledgeSearch(dir, 'second page', pdfPages), /\[Book.pdf\] first page words second page words/);
+    const run = await da.create({ browsers: {}, approve: async () => false, logins: {}, directory: () => dir, pdfPages }).run({ action: 'read_knowledge', name: 'book', page: 1 }, { botID: 'b', botName: 'x' });
+    assert.match(run, /Knowledge search results/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('pdf.js reads real PDF text on this machine', async () => {
+  const { pdfPages } = require('./pdf-text.cjs');
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>'];
+  const stream = 'BT /F1 18 Tf 20 100 Td (Hello Knowledge) Tj ET';
+  objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  let out = '%PDF-1.4\n'; const offsets = [];
+  objects.forEach((o, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('') + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  assert.deepEqual(await pdfPages(Buffer.from(out)), ['Hello Knowledge']);
+});

@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('desktop', {
   voiceKey:(provider,value)=>ipcRenderer.invoke('voice:key',provider,value),
   loginsList:()=>ipcRenderer.invoke('logins:list'),
   loginsAdd:value=>ipcRenderer.invoke('logins:add',value),
+  loginsAddOnePassword:value=>ipcRenderer.invoke('logins:addOnePassword',value),
   loginsRemove:id=>ipcRenderer.invoke('logins:remove',id),
   knowledgeAdd:id=>ipcRenderer.invoke('knowledge:add',id),
   cliKeysStatus:()=>ipcRenderer.invoke('cli-keys:status'),

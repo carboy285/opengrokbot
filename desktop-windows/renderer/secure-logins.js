@@ -10,6 +10,9 @@ export async function renderSecureLogins({ bridge, result, toast, page }) {
   for (const [key, label, type, placeholder] of [['label', 'Name', 'text', 'For example ESPN'], ['url', 'Website', 'text', 'https://www.espn.com/login'], ['username', 'Username or email', 'text', ''], ['password', 'Password', 'password', '']]) {
     const input = el('input'); input.type = type; input.placeholder = placeholder; input.autocomplete = 'off'; fields[key] = input; wrap.append(row(label, input));
   }
+  const itemInput = el('input'); itemInput.placeholder = 'Exact 1Password item name'; itemInput.autocomplete = 'off';
+  const itemRow = row('1Password item (optional)', itemInput);
+  wrap.append(itemRow, el('p', 'muted', 'Fill in a 1Password item name instead of a username and password to use 1Password (its command-line tool, op, must be installed). Nothing but the item name is saved here.'));
   const list = el('div', 'voice-settings');
   const save = el('button', '', 'Save login'); save.type = 'button';
   const refresh = async () => {
@@ -19,12 +22,14 @@ export async function renderSecureLogins({ bridge, result, toast, page }) {
     for (const login of logins) {
       const line = el('div', 'voice-key'); const remove = el('button', '', 'Remove'); remove.type = 'button';
       remove.addEventListener('click', async () => { try { await result(bridge.loginsRemove(login.id)); toast(`Removed ${login.label}.`); refresh(); } catch (error) { toast(error.message); } });
-      line.append(el('span', '', `${login.label} · ${login.username} · ${login.host}`), remove); list.append(line);
+      line.append(el('span', '', `${login.label} · ${login.onePassword ? '1Password' : login.username} · ${login.host}`), remove); list.append(line);
     }
   };
   save.addEventListener('click', async () => {
     try {
-      await result(bridge.loginsAdd({ label: fields.label.value, url: fields.url.value, username: fields.username.value, password: fields.password.value }));
+      if (itemInput.value.trim() && bridge.loginsAddOnePassword) await result(bridge.loginsAddOnePassword({ label: fields.label.value, url: fields.url.value, item: itemInput.value }));
+      else await result(bridge.loginsAdd({ label: fields.label.value, url: fields.url.value, username: fields.username.value, password: fields.password.value }));
+      itemInput.value = '';
       for (const input of Object.values(fields)) input.value = '';
       toast('Saved on this PC, encrypted.'); refresh();
     } catch (error) { toast(error.message); }
