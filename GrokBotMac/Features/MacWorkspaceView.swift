@@ -8,7 +8,8 @@ struct MacWorkspaceView: View {
     @State private var deleting: Bot?
     @State private var folderFilter: String? = nil
     private var sidebarBots: [Bot] { app.visibleBots.filter { folderFilter == nil || ($0.folder ?? "") == folderFilter } }
-    private func pinned(_ bot: Bot) -> Bool { bot.isPinned ?? (bot.isMain == true) }
+    private func pinned(_ bot: Bot) -> Bool { desktop.gateway?.isPinned(bot) ?? bot.isPinned ?? (bot.isMain == true) }
+    private func touch(_ bot: Bot) { if let gateway = desktop.gateway { gateway.touch(bot.id) } else { _ = app.touchBot(bot.id) } }
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -21,7 +22,7 @@ struct MacWorkspaceView: View {
                     Rectangle().fill(MacTheme.line).frame(width: hideRoster ? 0 : 1)
                     if let bot = desktop.selected(in: app) {
                         MacConversationView(bot: bot).id(bot.id)
-                        if desktop.showBotInspector {
+                        if desktop.showBotInspector && desktop.gateway == nil {
                             Rectangle().fill(MacTheme.line).frame(width: 1)
                             MacBotInspectorView(bot: bot)
                                 .id(bot.id)
@@ -55,12 +56,18 @@ struct MacWorkspaceView: View {
             .background(MacTheme.canvas)
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
+        .alert("Copy Bot", isPresented: Binding(get: { desktop.copyNotice != nil }, set: { if !$0 { desktop.copyNotice = nil } })) {
+            Button("OK") { desktop.copyNotice = nil }
+        } message: { Text(desktop.copyNotice ?? "") }
         .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
         .onChange(of: desktop.showSearch) { _, visible in searchFocused = visible }
         .foregroundStyle(.primary.opacity(0.9))
         .confirmationDialog("Delete \(deleting?.name ?? "this Bot") and its local notes?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete Bot", role: .destructive) {
-                if let bot = deleting {
+                if let bot = deleting, let gateway = desktop.gateway {
+                    gateway.stop(bot.id); gateway.delete(bot.id)
+                    if desktop.selectedID == bot.id { desktop.selectedID = nil }
+                } else if let bot = deleting {
                     desktop.stop(botID: bot.id)
                     app.removeBot(bot)
                     if !app.workspace.bots.contains(where: { $0.id == bot.id }) { desktop.drafts[bot.id] = nil }
@@ -74,7 +81,7 @@ struct MacWorkspaceView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Button { desktop.showMirror = true } label: { Label("This computer", systemImage: "desktopcomputer") }.buttonStyle(.plain).help("Switch to another computer on your account")
+                computerMenu
                 Spacer()
                 MacCircleButton(symbol: "magnifyingglass", label: "Search Bots") {
                     desktop.showSearch.toggle()
@@ -98,7 +105,7 @@ struct MacWorkspaceView: View {
                 LazyVStack(spacing: 8) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
                         ForEach(sidebarBots.filter { pinned($0) }) { bot in
-                            Button { desktop.selectedID = bot.id; _ = app.touchBot(bot.id) } label: {
+                            Button { desktop.selectedID = bot.id; touch(bot) } label: {
                                 VStack(spacing: 12) {
                                     MacBotAvatar(color: bot.color, size: 64, starred: true, appearance: bot.appearance)
                                     Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
@@ -108,7 +115,7 @@ struct MacWorkspaceView: View {
                         }
                     }.padding(.horizontal, 18).padding(.vertical, 20)
                     ForEach(app.recentlyUsed(sidebarBots.filter { !pinned($0) })) { bot in
-                        Button { desktop.selectedID = bot.id; _ = app.touchBot(bot.id) } label: {
+                        Button { desktop.selectedID = bot.id; touch(bot) } label: {
                             HStack(spacing: 16) {
                                 MacBotAvatar(color: bot.color, size: 39, appearance: bot.appearance)
                                 VStack(alignment: .leading, spacing: 6) {
@@ -160,16 +167,55 @@ struct MacWorkspaceView: View {
         }.background(MacTheme.sidebar)
     }
 
+    /// Switch between this computer and any other computer on the account. The other computer appears in this same window.
+    private var computerMenu: some View {
+        Menu {
+            Button { desktop.openComputer(nil, app: desktop.localApp ?? app) } label: { Label("This computer", systemImage: desktop.gateway == nil ? "checkmark" : "desktopcomputer") }
+            Divider()
+            if !desktop.remote.account.signedIn {
+                Button("Sign in to view another computer…") { desktop.openSettings(.computer) }
+            } else {
+                let others = desktop.computers()
+                if others.isEmpty { Text("No other computers found yet. Open OpenGrokBot on them and turn on phone access.") }
+                ForEach(others) { host in
+                    Button { desktop.openComputer(host, app: desktop.localApp ?? app) } label: {
+                        Label(host.name + (host.online ? "" : " · offline"), systemImage: desktop.gateway?.hostName == host.name ? "checkmark" : "server.rack")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: desktop.gateway == nil ? "desktopcomputer" : "server.rack")
+                Text(desktop.gateway?.hostName ?? "This computer").lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .help("Switch to another computer on your account. Its Bots appear here exactly like this Mac’s.")
+    }
+
     @ViewBuilder
     private func organizationActions(_ bot: Bot) -> some View {
-        Button(pinned(bot) ? "Unpin Bot" : "Pin to top") { desktop.remote.setPinned(bot, pinned: !pinned(bot)) }
-        Button("Bot details") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
-        Menu("Move to folder") {
-            Button("Unfiled") { _ = app.organize(bot, folder: "") }
-            ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in
-                Button(folder) { _ = app.organize(bot, folder: folder) }
+        Button(pinned(bot) ? "Unpin Bot" : "Pin to top") {
+            if let gateway = desktop.gateway { gateway.setPinned(bot, !pinned(bot)) } else { desktop.remote.setPinned(bot, pinned: !pinned(bot)) }
+        }
+        if desktop.gateway == nil {
+            Button("Bot details") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
+            Menu("Move to folder") {
+                Button("Unfiled") { _ = app.organize(bot, folder: "") }
+                ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in
+                    Button(folder) { _ = app.organize(bot, folder: folder) }
+                }
+                Button("New folder…") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
             }
-            Button("New folder…") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
+        }
+        if bot.memberIDs == nil {
+            Menu("Copy to another computer") {
+                if desktop.gateway != nil { Button("This computer") { desktop.copyBot(bot, shown: app, to: nil) } }
+                let targets = desktop.copyTargets()
+                ForEach(targets) { host in Button(host.name + (host.online ? "" : " · offline")) { desktop.copyBot(bot, shown: app, to: host) } }
+                if targets.isEmpty && desktop.gateway == nil { Text("No other computers found yet.") }
+            }
         }
     }
 

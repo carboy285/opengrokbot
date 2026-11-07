@@ -269,6 +269,16 @@ final class RemoteController: ObservableObject {
         let response = try await client.fetch(peer, target: "/v1/" + (vm ? "vm" : "browser") + "?bot=" + botID.uuidString)
         return try CloudCoding.decoder().decode(RemoteBrowserPreview.self, from: response.body)
     }
+    /// An encoded Bot package from the connected computer.
+    func botPackage(_ bot: Bot) async throws -> Data {
+        guard let peer = connection else { throw CloudError.message("Choose a hosting computer first.") }
+        return try await client.fetch(peer, target: "/v1/bot-package?bot=" + bot.id.uuidString).body
+    }
+    /// Sends a Bot package to a computer on this account (the connected one unless another is named).
+    func importPackage(_ data: Data, to host: CloudDevice? = nil) async throws {
+        guard let peer = host ?? connection else { throw CloudError.message("Choose a hosting computer first.") }
+        _ = try await client.fetch(peer, target: "/v1/command", command: RemoteCommand(action: "import_bot", package: data))
+    }
     func files(_ bot: Bot) async -> [RemoteFile] {
         guard let peer = connection, let response = try? await client.fetch(peer,target:"/v1/files?bot=" + bot.id.uuidString) else { return [] }
         return (try? CloudCoding.decoder().decode([RemoteFile].self,from:response.body)) ?? []

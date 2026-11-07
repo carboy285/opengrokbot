@@ -51,7 +51,9 @@ struct MacNewBotView: View {
                 Text("Creates a Bot with its own AI CLI conversation.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
                 Spacer()
                 MacPillButton(title: "Create Bot", prominent: true) {
-                    if app.addBot(name: name, purpose: purpose, color: color) {
+                    if let gateway = desktop.gateway {
+                        Task { if await gateway.create(name: name.trimmingCharacters(in: .whitespacesAndNewlines), purpose: purpose, color: color) { desktop.selectedID = nil; desktop.panel = nil } }
+                    } else if app.addBot(name: name, purpose: purpose, color: color) {
                         desktop.selectedID = app.workspace.bots.last?.id
                         desktop.panel = nil
                     }

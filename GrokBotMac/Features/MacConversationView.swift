@@ -143,7 +143,7 @@ struct MacConversationView: View {
                     Button { sendMessage() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(ink)
                             .frame(width: 38, height: 38).background(tint, in: Circle())
-                    }.buttonStyle(.plain).disabled(bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty)
+                    }.buttonStyle(.plain).disabled(desktop.needsProvider(bot))
                         .help("Send message").accessibilityLabel("Send message")
                 } else {
                     Button { startVoice() } label: {
@@ -158,7 +158,7 @@ struct MacConversationView: View {
             .onDisappear { removePasteMonitor() }
             HStack(spacing: 9) {
                 if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
-                if bot.memberIDs == nil && desktop.providersToRun(for: bot).isEmpty {
+                if desktop.needsProvider(bot) {
                     Button("Choose a provider") { desktop.showBotInspector = true }.buttonStyle(.link)
                 }
                 Spacer()
@@ -166,9 +166,8 @@ struct MacConversationView: View {
                     ProgressView().controlSize(.mini)
                     Text("Working…")
                     Button("Stop") { desktop.stop(botID: bot.id) }.buttonStyle(.link)
-                } else if let selected = desktop.providersToRun(for: bot).first {
-                    Text("Selected: " + selected.cli.provider.name + (selected.choice.model.isEmpty ? " · default model" : " · " + selected.choice.model))
-                        .lineLimit(1).help("Current provider and model for the next response")
+                } else if let line = desktop.providerLine(for: bot) {
+                    Text(line).lineLimit(1).help("Current provider and model for the next response")
                 } else { Text("Choose a provider") }
             }.font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
             if let feedback = desktop.sendFeedback[bot.id] {
@@ -232,7 +231,7 @@ struct MacConversationView: View {
         withAnimation { voiceOn = false }
     }
 
-    private var attachDisabled: Bool { bot.memberIDs != nil || desktop.importingAttachments.contains(bot.id) }
+    private var attachDisabled: Bool { bot.memberIDs != nil || desktop.gateway != nil || desktop.importingAttachments.contains(bot.id) }
 
     private var actionsMenu: some View {
         VStack(alignment: .leading, spacing: 2) {

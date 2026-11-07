@@ -127,6 +127,17 @@ final class AppModel: ObservableObject {
         return commit { value in for index in value.bots.indices { value.bots[index].sortOrder = ids.firstIndex(of: value.bots[index].id) } }
     }
 
+    /// Adds a copied Bot and its history as one saved change. The caller has already rebuilt it with fresh IDs.
+    @discardableResult
+    func importBot(_ bot: Bot, entries: [Entry], note: String) -> Bool {
+        guard bot.memberIDs == nil, workspace.bots.count < 100, !workspace.bots.contains(where: { $0.id == bot.id }) else { return false }
+        return commit { value in
+            value.bots.append(bot)
+            value.entries.append(contentsOf: entries)
+            value.entries.append(Entry(botID: bot.id, kind: .activity, text: note))
+        }
+    }
+
     func removeBot(_ bot: Bot) {
         guard bot.isMain != true else { return }
         commit { value in

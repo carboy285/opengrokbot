@@ -760,3 +760,52 @@ final class MacPhoneApprovalTests: XCTestCase {
         XCTAssertNil(try CloudCoding.decoder().decode(RemoteSnapshot.self, from: old).approval)
     }
 }
+
+@MainActor
+final class MacBotCopyTests: XCTestCase {
+    private func sample() -> BotPackage {
+        var bot = Bot(id: UUID(), name: "Fantasy", purpose: "Help", color: "pink", symbol: "sparkles")
+        bot.memory = ["likes pizza", ""]
+        bot.isMain = true; bot.isPinned = true
+        bot.aiConfiguration = BotAIConfiguration(providers: [BotAIProvider(provider: .codex, model: "m1"), BotAIProvider(provider: .claude, model: "")], activeProvider: .codex, replyMode: .compare)
+        var task = BotSchedule(name: "Daily", text: "Do it", nextRun: "2099-01-01T09:00:00Z", recurrence: "daily", timezone: "Etc/UTC")
+        task.lastRun = "x"; task.lastResult = "ok"
+        bot.schedules = [task]
+        var reply = Entry(botID: bot.id, kind: .bot, text: "hello"); reply.detail = "FULL PAGE"; reply.state = .streaming
+        return BotPackage(sourceName: "Bens-Windows-PC", bot: bot, entries: [Entry(botID: bot.id, kind: .user, text: "hi"), reply], sharedMemory: nil,
+                          knowledge: [BotPackage.File(name: "../../evil.txt", data: Data("a".utf8)), BotPackage.File(name: "run.exe", data: Data("a".utf8)), BotPackage.File(name: "notes.md", data: Data("ok".utf8))])
+    }
+
+    func testPackageSurvivesEncodingAndIsRebuiltSafely() throws {
+        let decoded = try BotPackage.decode(try sample().encoded())
+        XCTAssertEqual(decoded.bot.name, "Fantasy")
+        let clean = try XCTUnwrap(decoded.sanitized(existingNames: ["fantasy"], installed: [.claude], defaultProvider: .claude))
+        XCTAssertEqual(clean.bot.name, "Fantasy (copy)")
+        XCTAssertNotEqual(clean.bot.id, decoded.bot.id)
+        XCTAssertNotEqual(clean.bot.isMain, true, "A copy is never the main Bot")
+        XCTAssertNil(clean.bot.isPinned)
+        XCTAssertEqual(clean.bot.memory, ["likes pizza"])
+        XCTAssertEqual(clean.bot.aiConfiguration?.providers.map(\.provider), [.claude])
+        XCTAssertEqual(clean.bot.aiConfiguration?.replyMode, .one)
+        XCTAssertEqual(clean.bot.schedules?.first?.enabled, false)
+        XCTAssertNil(clean.bot.schedules?.first?.lastRun)
+        XCTAssertTrue(clean.entries.allSatisfy { $0.botID == clean.bot.id && $0.detail == nil })
+        XCTAssertEqual(clean.entries.last?.state, .complete)
+        XCTAssertEqual(clean.knowledge.map(\.name), ["evil.txt", "notes.md"], "Paths are flattened and unsupported types dropped")
+    }
+
+    func testProviderFallsBackAndGroupsAreRefused() throws {
+        let package = sample()
+        XCTAssertEqual(package.sanitized(existingNames: [], installed: [.gemini], defaultProvider: .gemini)?.bot.aiConfiguration?.providers.first?.provider, .gemini)
+        var group = package; group.bot.memberIDs = [UUID()]
+        XCTAssertNil(group.sanitized(existingNames: [], installed: [.codex], defaultProvider: .codex))
+        XCTAssertThrowsError(try BotPackage.decode(Data("{\"format\":\"other\"}".utf8)))
+    }
+
+    func testCommandsCarryAPackage() throws {
+        let command = RemoteCommand(action: "import_bot", package: Data("x".utf8))
+        let decoded = try CloudCoding.decoder().decode(RemoteCommand.self, from: try CloudCoding.encoder().encode(command))
+        XCTAssertEqual(decoded.package, Data("x".utf8))
+        XCTAssertEqual(decoded.action, "import_bot")
+    }
+}

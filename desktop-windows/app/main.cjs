@@ -14,6 +14,7 @@ const attachments=require('./attachments.cjs');
 const voice=require('./voice.cjs');
 const providerKeys=require('./provider-keys.cjs');
 const deviceActions=require('./device-actions.cjs');
+const botPackages=require('./bot-package.cjs');
 const backup=require('./backup.cjs');
 const { CloudHost } = require('./cloud-host.cjs');
 const updates = require('./updates.cjs');
@@ -199,6 +200,7 @@ const cloud = new CloudHost({
  applyPins:async rows=>{let changed=false;for(const row of rows){const bot=state.bots.find(bot=>bot.id.toLowerCase()===row.bot_id.toLowerCase());if(bot&&(bot.isPinned??!!bot.isMain)!==row.is_pinned){bot.isPinned=row.is_pinned;changed=true;}}if(changed){await atomicJSON('preview-workspace.json',state);notify();}},
  snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
  browser:async id=>{try{return await localBrowsers.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},vm:async id=>{try{return await localVMs.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},
+ botPackage:async id=>{try{await ensureState();const bot=state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase());if(!bot)throw new Error('Unknown Bot');const folder=path.join(botDirectory(bot.id),'Knowledge');let files=[];try{for(const entry of (await readdir(folder,{withFileTypes:true})).slice(0,100)){if(!entry.isFile()||entry.name.startsWith('.'))continue;const full=path.join(folder,entry.name);if((await stat(full)).size<=8000000)files.push({name:entry.name,data:await readFile(full)});}}catch(error){if(error.code!=='ENOENT')throw error;}return botPackages.build({state,botID:bot.id,sourceName:require('node:os').hostname(),files});}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
  changed:status=>{mirror.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
 });
@@ -226,6 +228,17 @@ async function remoteFiles(id){if(!state.bots.some(x=>x.id.toLowerCase()===Strin
 async function remoteCommand(command){
  if(state.entries.some(x=>x.id.toLowerCase()===command.requestID.toLowerCase()))return;
  const bot=state.bots.find(x=>x.id.toLowerCase()===String(command.botID).toLowerCase());
+ if(command.action==='import_bot'){
+  if(typeof command.package!=='string'||command.package.length>4000000)throw new PublicError('No Bot was sent.');
+  let pkg;try{pkg=JSON.parse(Buffer.from(command.package,'base64').toString('utf8'));}catch{throw new PublicError('That Bot package could not be read.');}
+  if(state.bots.length>=100)throw new PublicError('This computer already has 100 Bots.');
+  let result;try{result=botPackages.sanitize({pkg,existingNames:state.bots.map(x=>x.name),installed:installed.map(x=>x.provider),defaultProvider:selectedCLI()?.provider});}catch(error){throw new PublicError(error.message);}
+  const candidate=()=>({...state,bots:[...state.bots,result.bot],entries:[...state.entries,...result.entries]});
+  try{validateWorkspace(candidate());}catch{delete result.bot.appearance;try{validateWorkspace(candidate());}catch{throw new PublicError('That Bot could not be copied here.');}}
+  state.bots.push(result.bot);state.entries.push(...result.entries);
+  if(result.files.length){const folder=path.join(botDirectory(result.bot.id),'Knowledge');await mkdir(folder,{recursive:true});for(const f of result.files)await writeFile(path.join(folder,f.name),f.data);}
+  await atomicJSON('preview-workspace.json',state);notify();return;
+ }
  if(command.action==='touch_bot'){if(!bot)throw new Error('Unknown Bot');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();return;}
  if(command.action==='open_vm'){if(!bot)throw new Error('Unknown Bot');await localVMs.open(bot.id);return;}
  if(command.action==='open_browser'){if(!bot)throw new Error('Unknown Bot');localBrowsers.open(bot.id,command.text);return;}

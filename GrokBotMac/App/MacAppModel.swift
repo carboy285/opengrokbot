@@ -42,6 +42,9 @@ final class MacAppModel: ObservableObject {
     @Published var settingsTab = SettingsTab.general
     @Published var showSearch = false
     @Published var showMirror = false
+    /// Non-nil while the main window is showing another computer on this account instead of this Mac.
+    @Published var gateway: MacGateway?
+    private var gatewayRunning: AnyCancellable?
     @Published var showBotInspector = false
     @Published var drafts: [UUID: String] = [:] { didSet { scheduleDraftSave() } }
     @Published var attachments: [UUID: [String]] = [:] { didSet { scheduleDraftSave() } }
@@ -201,6 +204,63 @@ final class MacAppModel: ObservableObject {
         var history = updated.history ?? []; history.append(RoutineRun(id: runID, date: updated.lastRun ?? "", status: "running")); updated.history = Array(history.suffix(50))
         _ = app.updateSchedule(updated, botID: bot.id)
     }
+    /// This Mac's own workspace, even while another computer is on screen.
+    weak var localApp: AppModel?
+    @Published var copyNotice: String?
+    private var copyGateway: MacGateway?
+
+    private func ensureCopyGateway() -> MacGateway {
+        if let copyGateway { return copyGateway }
+        let made = MacGateway(source: remote.account)
+        copyGateway = made
+        return made
+    }
+
+    /// Other computers on this account (never this Mac itself).
+    func computers() -> [CloudDevice] {
+        guard remote.account.signedIn else { return [] }
+        let source = gateway ?? ensureCopyGateway()
+        return source.hosts.filter { $0.id != remote.account.localDevice?.id }
+    }
+
+    /// Computers a Bot on screen can be copied to: the others, minus the one being viewed.
+    func copyTargets() -> [CloudDevice] { computers().filter { $0.name != gateway?.hostName } }
+
+    /// Copies a Bot (its job, provider, memory, history, paused routines and small Knowledge files) to another computer, or to this Mac.
+    /// `bot` and `shown` belong to whatever is on screen: this Mac's workspace, or the other computer's while viewing it.
+    func copyBot(_ bot: Bot, shown: AppModel, to host: CloudDevice?) {
+        Task { @MainActor in
+            do {
+                if let gateway {
+                    let data = try await gateway.package(bot)
+                    if let host { try await gateway.deliver(data, to: host); copyNotice = "Copied “\(bot.name)” to \(host.name). Open it there to see it." }
+                    else if let localApp { copyNotice = try importBotPackage(data, into: localApp) }
+                } else if let host {
+                    guard let data = packageForCopy(bot, app: shown) else { throw CloudError.message("The Bot could not be packaged.") }
+                    let sender = ensureCopyGateway()
+                    try await sender.deliver(data, to: host)
+                    copyNotice = "Copied “\(bot.name)” to \(host.name). Open it there to see it."
+                }
+            } catch { copyNotice = "The Bot could not be copied: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }
+        }
+    }
+
+    /// Shows another computer in the main window. Pass nil to come back to this Mac.
+    func openComputer(_ host: CloudDevice?, app: AppModel) {
+        gatewayRunning = nil
+        if let host {
+            let next = gateway ?? MacGateway(source: remote.account)
+            gateway = next; next.select(host)
+            selectedID = nil; showBotInspector = false; panel = nil
+            runningBots = next.running
+            gatewayRunning = next.remote.$running.sink { [weak self] value in Task { @MainActor [weak self] in if self?.gateway != nil { self?.runningBots = value } } }
+        } else {
+            gateway?.close(); gateway = nil
+            runningBots = Set(runOwners.values)
+            selectedID = nil; selectFirst(in: localApp ?? app)
+        }
+    }
+
     func selectFirst(in app: AppModel) {
         if selectedID == nil { selectedID = app.workspace.bots.first?.id }
     }
@@ -234,11 +294,13 @@ final class MacAppModel: ObservableObject {
     }
 
     func chooseAttachments(for bot: Bot) {
+        if gateway != nil { sendFeedback[bot.id] = "Files can’t be attached while viewing another computer yet."; return }
         let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
         panel.message = "Choose up to 10 files, each no larger than 20 MB. Copies are stored in this Bot’s working folder."
         if panel.runModal() == .OK { importAttachments(panel.urls, for: bot) }
     }
     func importAttachments(_ urls: [URL], for bot: Bot) {
+        if gateway != nil { sendFeedback[bot.id] = "Files can’t be attached while viewing another computer yet."; return }
         guard bot.memberIDs == nil, !importingAttachments.contains(bot.id) else { sendFeedback[bot.id] = "Attachments are available in individual Bot chats."; return }
         let room = max(0, 10 - (attachments[bot.id]?.count ?? 0))
         guard !urls.isEmpty, urls.count <= room else { sendFeedback[bot.id] = "Choose no more than 10 files per draft."; return }
@@ -297,6 +359,7 @@ final class MacAppModel: ObservableObject {
     /// Attaches files or an image from a pasteboard. Returns true when the clipboard held something attachable.
     @discardableResult
     func pasteAttachments(from pasteboard: NSPasteboard, for bot: Bot) -> Bool {
+        if gateway != nil { return false }
         guard bot.memberIDs == nil else { sendFeedback[bot.id] = "Attachments are available in individual Bot chats."; return false }
         let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: fileOptions) as? [URL], !urls.isEmpty {
@@ -334,8 +397,23 @@ final class MacAppModel: ObservableObject {
 
 extension MacAppModel {
     var selectedCLI: InstalledCLI? { installedCLIs.first { $0.id == selectedCLIID } }
-    var canChat: Bool { selectedCLI != nil }
-    var statusText: String { selectedCLI.map { "\($0.provider.name) · On this Mac" } ?? "Set up an AI CLI" }
+    var canChat: Bool { gateway.map { $0.online && !$0.providers.isEmpty } ?? (selectedCLI != nil) }
+    var statusText: String {
+        if let gateway { return gateway.online ? "Connected to \(gateway.hostName)" : "Connecting to \(gateway.hostName)…" }
+        return selectedCLI.map { "\($0.provider.name) · On this Mac" } ?? "Set up an AI CLI"
+    }
+    /// True when a Bot cannot answer because no AI provider is available (on this Mac, or on the computer being viewed).
+    func needsProvider(_ bot: Bot) -> Bool { gateway != nil ? false : (bot.memberIDs == nil && providersToRun(for: bot).isEmpty) }
+    /// The provider line under the message box.
+    func providerLine(for bot: Bot) -> String? {
+        if gateway != nil {
+            let configuration = bot.aiConfiguration
+            let active = configuration?.providers.first { $0.provider == configuration?.activeProvider } ?? configuration?.providers.first
+            guard let active else { return "Runs on \(gateway?.hostName ?? "the other computer")" }
+            return "Selected: " + active.provider.name + (active.model.isEmpty ? " · default model" : " · " + active.model) + " · on \(gateway?.hostName ?? "the other computer")"
+        }
+        return providersToRun(for: bot).first.map { "Selected: " + $0.cli.provider.name + ($0.choice.model.isEmpty ? " · default model" : " · " + $0.choice.model) }
+    }
 
     func aiConfiguration(for bot: Bot) -> BotAIConfiguration {
         bot.aiConfiguration ?? BotAIConfiguration(providers: selectedCLI.map { [BotAIProvider(provider: $0.provider)] } ?? [], activeProvider: selectedCLI?.provider)
@@ -419,6 +497,13 @@ extension MacAppModel {
 
     @discardableResult
     func send(_ text: String, to bot: Bot, app: AppModel, requestID: UUID? = nil, automated: Bool = false) -> Bool {
+        if let gateway {
+            guard gateway.send(text, to: bot) else {
+                sendFeedback[bot.id] = gateway.online ? "Write a message first." : "\(gateway.hostName) is not reachable. Check that it is awake with phone access turned on."
+                return false
+            }
+            sendFeedback[bot.id] = nil; return true
+        }
         if let requestID, app.workspace.entries.contains(where: { $0.id == requestID }) { return true }
         if bot.memberIDs != nil {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app.sendGroup(text, group: bot, id: requestID) else { return false }
@@ -434,13 +519,14 @@ extension MacAppModel {
     }
 
     func retry(bot: Bot, app: AppModel) {
+        if let gateway { gateway.retry(bot.id); return }
         guard !runningBots.contains(bot.id) else { return }
         if app.requeueDelivery(to: bot.id) { deliverQueuedMessages(app: app); return }
         guard app.entries(for: bot).contains(where: { $0.kind == .user }) else { return }
         for provider in providersToRun(for: bot) { startReply(to: bot, cli: provider.cli, model: provider.choice.model, app: app) }
     }
 
-    func stop(botID: UUID) { for (runID, owner) in runOwners where owner == botID { runs[runID]?.cancel(); tasks[runID]?.cancel() } }
+    func stop(botID: UUID) { if let gateway { gateway.stop(botID); return }; for (runID, owner) in runOwners where owner == botID { runs[runID]?.cancel(); tasks[runID]?.cancel() } }
     func stopAll(immediately: Bool = false) { for task in tasks.values { task.cancel() }; for run in runs.values { run.cancel(immediately: immediately) } }
 
     func deliverQueuedMessages(app: AppModel) {

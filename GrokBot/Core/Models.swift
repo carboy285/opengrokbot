@@ -47,12 +47,12 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var detail: String? = nil
     let date: Date
 
-    init(botID: UUID, kind: Kind, text: String, id: UUID = UUID()) {
+    init(botID: UUID, kind: Kind, text: String, id: UUID = UUID(), date: Date = Date()) {
         self.id = id
         self.botID = botID
         self.kind = kind
         self.text = text
-        date = Date()
+        self.date = date
     }
 }
 

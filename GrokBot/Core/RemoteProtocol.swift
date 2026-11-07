@@ -58,6 +58,8 @@ struct RemoteCommand: Codable, Sendable {
     var taskID: UUID?
     var appearance: BotAppearance?
     var attachments: [RemoteAttachment]?
+    /// import_bot: an encoded Bot package from another computer on this account.
+    var package: Data?
 }
 /// An image sent with a message. Hosts store it in the Bot's Attachments folder.
 struct RemoteAttachment: Codable, Sendable, Equatable {

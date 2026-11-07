@@ -47,3 +47,9 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Templates and sharing: create a Bot from a template chip; Share this Bot… then Import a shared Bot… on another Mac.
 - Knowledge: add a PDF and a screenshot, ask the Bot to read both (read_knowledge). Windows: PDF only (no photo text recognition).
 - Windows: add a 1Password login (needs the `op` CLI).
+
+## 0.8.3: other computers and Bot copying
+- Mac: sidebar top-left switcher → choose the Windows PC. The window should show its Bots (pinned and recent) with the usual chat, send a message, stop, retry, change the model from the header menu, create a Bot, pin and delete.
+- Switch back to "This computer" and confirm this Mac's own Bots and chats are untouched.
+- Right-click a Bot → Copy to another computer: Mac → Windows, Windows (viewing) → Mac via "This computer", and viewing Windows → another computer. Check the copy has the history, memory, Knowledge files, paused routines and a note saying where it came from, and that the Bot answers on the new computer (it starts a fresh AI session).
+- Windows host with the clock set a few minutes wrong: Settings → Computer should say the clock is off (rather than the viewer timing out).

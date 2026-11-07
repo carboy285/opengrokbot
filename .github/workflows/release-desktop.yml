@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.8.2/ --output=artifacts/OpenGrokBot-0.8.2-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.8.3/ --output=artifacts/OpenGrokBot-0.8.3-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,7 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.8.2: Bots can now change things in your Apple apps on Mac. They can edit and delete calendar events, add, rename, finish, move (between lists) and delete reminders, add and update contacts, create and edit notes, and send, reply to, draft and manage mail and messages. Reminders no longer ask each time; sending, deleting and signing in always do. New: approve Bot requests from your iPhone, phone notifications through the free ntfy app, Ask a Bot from Siri and Shortcuts, a menu-bar quick-ask window, mail search across every mailbox with date and unread filters, Bots that can forget memory, eight ready-made Bot templates with sharing, reading whole Knowledge files and photos, and Windows PDF knowledge and 1Password logins. Nothing here has been run on a real Mac, iPhone or PC yet.
+          0.8.3: view another computer exactly like your own. On the Mac, pick any computer on your account from the switcher at the top of the sidebar and the whole app becomes that computer: all its Bots, pinned and recent, the same chat, model menu and composer, with everything running there. You can also copy a Bot to another computer on your account (right-click a Bot → Copy to another computer): its job, provider, memory, chat history, paused routines and small Knowledge files come along, and it works Mac to Windows, Windows to Mac, and from the computer you are viewing to this Mac. A Windows PC with a wrong clock now says so instead of silently not replying. Not yet tried on real devices. The viewing screen on Windows and iPhone is unchanged, and copying cannot carry the AI CLI’s own session, logins or API keys.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -137,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.2" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.3" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.8.2 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.2 · Edit & send from your Apple apps' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.8.3 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.3 · See another computer like your own, and copy Bots' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

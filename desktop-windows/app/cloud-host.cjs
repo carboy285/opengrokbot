@@ -42,8 +42,8 @@ function open(local, peer, owner, packet, kind = 'request') {
   return JSON.parse(data.subarray(8).toString('utf8'));
 }
 class CloudHost {
-  constructor({ load, save, snapshot, execute, models, files, vm = async () => ({title:"VM not set up",url:"",imageData:null}), browser = async () => ({title:"Browser not open",url:"",imageData:null}), pins = () => [], applyPins = async () => {}, changed = () => {}, fetchImpl = fetch }) {
-    Object.assign(this, { load, save, snapshot, execute, models, files, browser, vm, pins, applyPins, changed, fetchImpl });
+  constructor({ load, save, snapshot, execute, models, files, vm = async () => ({title:"VM not set up",url:"",imageData:null}), browser = async () => ({title:"Browser not open",url:"",imageData:null}), botPackage = async () => { throw new Error('This computer cannot copy Bots.'); }, pins = () => [], applyPins = async () => {}, changed = () => {}, fetchImpl = fetch }) {
+    Object.assign(this, { load, save, snapshot, execute, models, files, browser, botPackage, vm, pins, applyPins, changed, fetchImpl });
     this.data = { identities: {}, approvals: {}, receipts: [], pinPending: {} }; this.devices = []; this.phase = 'signed-out'; this.feedback = 'Sign in with the same account as your iPhone.'; this.generation = 0; this.accountGeneration = 0; this.enabled = false; this.refreshing = null; this.saveQueue = Promise.resolve();
   }
   get active() { return this.enabled && !!this.data.session; }
@@ -117,6 +117,7 @@ class CloudHost {
     const url = new URL(request.target, BASE);
     if (request.method === 'GET') {
       if (url.pathname === '/v1/state') { let snapshot = this.snapshot(); if(url.searchParams.get('overview')==='true'){const latest=new Map();for(const entry of snapshot.workspace.entries)latest.set(entry.botID,entry);snapshot={...snapshot,overview:true,revision:'overview-'+snapshot.revision,workspace:{...snapshot.workspace,sharedMemory:undefined,teamMessages:undefined,bots:snapshot.workspace.bots.map(({memory,schedules,...bot})=>bot),entries:snapshot.workspace.bots.map(bot=>latest.get(bot.id)).filter(Boolean).map(entry=>({...entry,text:entry.text.slice(0,1000)}))}};} return url.searchParams.get('since') === snapshot.revision ? { status: 204, body: '' } : this.response(200, { snapshot, removedEntries: [] }); }
+      if (url.pathname === '/v1/bot-package') return this.response(200, await this.botPackage(url.searchParams.get('bot')));
       if (url.pathname === '/v1/vm') return this.response(200, await this.vm(url.searchParams.get('bot')));
       if (url.pathname === '/v1/browser') return this.response(200, await this.browser(url.searchParams.get('bot')));
       if (url.pathname === '/v1/models') return this.response(200, await this.models(url.searchParams.get('provider')));
@@ -150,7 +151,13 @@ class CloudHost {
           if (!this.devices.some(x => lower(x.id) === lower(packet.sender))) await this.sync();
           const peer = this.devices.find(x => lower(x.id) === lower(packet.sender) && x.kind === 'controller');
           if (!peer) { await this.ack(packet); continue; }
-          let request; try { request = open(this.local, peer, this.data.session.user.id, packet); } catch { await this.ack(packet); continue; }
+          const skew = Math.round((Date.now() - Date.parse(packet.created_at)) / 1000);
+          if (Number.isFinite(skew) && Math.abs(skew) >= 90) {
+            // The packet would be rejected as expired or from the future, so the viewer would just see "the hosting computer did not reply".
+            this.clockNote = `This computer’s clock is about ${Math.abs(skew)} seconds ${skew > 0 ? 'ahead of' : 'behind'} the account server, so phone and computer requests are ignored. Turn on Windows Settings → Time & language → Date & time → Set time automatically, then press Sync now.`;
+            this.transition('clock', this.clockNote); await this.ack(packet); continue;
+          }
+          let request; try { request = open(this.local, peer, this.data.session.user.id, packet); this.clockNote = ''; } catch { await this.ack(packet); continue; }
           recent = Date.now(); this.lastRequest = new Date().toISOString();
           let response;
           if (!this.approved(peer)) { this.transition('approval-required', `Approve ${peer.name} after comparing the fingerprint shown on the iPhone.`); response = this.response(403, { error: 'Approve this phone in Windows Settings → Computer. Compare its fingerprint before approving.' }); }
@@ -161,7 +168,7 @@ class CloudHost {
           await this.request('/rest/v1/rpc/opengrok_send', { packet_id: packet.id, from_device: this.local.id, to_device: peer.id, packet_kind: 'response', payload }); await this.ack(packet);
           if (response.status !== 403) this.transition('online', 'Connected. Approved phones can use this computer’s Bots.');
         }
-        if (!packets.length && this.phase !== 'approval-required') this.transition('online', 'Phone access is ready. Keep this computer awake.');
+        if (!packets.length && this.phase !== 'approval-required' && !this.clockNote) this.transition('online', 'Phone access is ready. Keep this computer awake.');
         backoff = 1000;
       } catch (error) { if (generation !== this.generation) return; this.transition('offline', error.message + ' Retrying automatically.'); heartbeat = 0; wait = backoff; backoff = Math.min(15000, backoff * 2); }
       await new Promise(resolve => { const timer = setTimeout(done, wait); const signal = this.abort.signal; function done() { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); } signal.addEventListener('abort', done, { once: true }); if (signal.aborted) done(); });

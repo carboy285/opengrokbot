@@ -17,6 +17,35 @@ struct MacModelMenu: View {
     }
 
     var body: some View {
+        if let gateway = desktop.gateway { remoteMenu(gateway) } else { localMenu }
+    }
+
+    /// While viewing another computer, the providers installed there.
+    private func remoteMenu(_ gateway: MacGateway) -> some View {
+        let live = gateway.model.workspace.bots.first { $0.id == bot.id } ?? bot
+        let current = live.aiConfiguration?.providers.first { $0.provider == live.aiConfiguration?.activeProvider } ?? live.aiConfiguration?.providers.first
+        let name = current.map { $0.provider.name + ($0.model.isEmpty ? "" : " · " + $0.model) } ?? "Choose a model"
+        return Menu {
+            ForEach(gateway.providers) { provider in
+                Button { gateway.useProvider(provider.provider, for: live) } label: {
+                    Label(provider.provider.name, systemImage: current?.provider == provider.provider ? "checkmark" : "cpu")
+                }.disabled(gateway.running.contains(bot.id))
+            }
+            Divider()
+            Text("Runs on \(gateway.hostName)")
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "cpu").font(.system(size: 11))
+                Text(name).font(.system(size: 12)).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+            .padding(.horizontal, 11).padding(.vertical, 7).contentShape(Capsule()).glassChrome(in: Capsule())
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel("Model for \(bot.name): \(name)")
+    }
+
+    private var localMenu: some View {
         Menu {
             ForEach(configuration.providers) { choice in
                 Button { choose(choice.provider) } label: {

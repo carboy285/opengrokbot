@@ -10,7 +10,7 @@ struct GrokBotMacApp: App {
     var body: some Scene {
         WindowGroup {
             MacWorkspaceView()
-                .environmentObject(app)
+                .environmentObject(desktop.gateway?.model ?? app)
                 .environmentObject(desktop)
                 .preferredColorScheme(appearance == "system" ? nil : (appearance == "dark" ? .dark : .light))
                 .frame(minWidth: 860, minHeight: 620)
@@ -20,6 +20,7 @@ struct GrokBotMacApp: App {
                     if !app.previewEnabled { app.enterPreview() }
                     desktop.remote.attach(app: app, desktop: desktop)
                     MacIntentHub.shared.attach(app: app, desktop: desktop)
+                    desktop.localApp = app
                     desktop.selectFirst(in: app)
                     desktop.startScheduler(app: app)
                     desktop.refreshCLIs()
