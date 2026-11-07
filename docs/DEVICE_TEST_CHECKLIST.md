@@ -28,3 +28,11 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 2. Settings → API Keys: save/remove a key; the Bot uses it.
 3. Page reads show a summary line; slow pages return partial text instead of an error.
 4. Voice card, mute, captions, Groq / NVIDIA NIM speaking.
+
+## Apple writes (Mac)
+- Reminders: ask a Bot to add, rename, finish and delete a reminder. Add/rename/finish should not prompt (default); delete should prompt.
+- Calendar: change and delete an event by title; try two same-named events and confirm it asks for the `on` date.
+- Notes: create a note, append to it, delete it (goes to Recently Deleted).
+- Contacts: add a contact, then add a phone number to it.
+- Mail: send an email to yourself (prompt appears), draft one, reply to a message, mark read/flag, trash.
+- Messages: send a text to yourself by name and by number (prompt appears; macOS asks for Automation access to Messages the first time).

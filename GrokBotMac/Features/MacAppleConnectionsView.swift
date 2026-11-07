@@ -19,7 +19,7 @@ struct MacAppleConnectionsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Let your Bots look at your Apple apps").font(.system(size: 18, weight: .medium))
-                        Text("Each app is off until you turn it on, and macOS asks you to allow it. Turn an app off at any time. Bots can read what you enable, and can add calendar events or reminders only after you approve each one. They cannot send messages or email, or delete anything.")
+                        Text("Each app is off until you turn it on, and macOS asks you to allow it. Turn an app off at any time. Bots can read what you enable, and can add or change things in Calendar, Reminders, Contacts and Notes (you can choose whether each asks first; Reminders doesn’t by default). Sending email or messages, moving mail to the Trash and deleting anything always need your approval.")
                             .font(.system(size: 14)).lineSpacing(4).foregroundStyle(MacTheme.secondary)
                         Text("What a Bot reads becomes part of its conversation and is sent to the AI provider you chose for that Bot, like anything else you type. Turn on only what you are comfortable sharing with that provider.")
                             .font(.system(size: 13)).lineSpacing(4).foregroundStyle(.orange)
@@ -40,6 +40,11 @@ struct MacAppleConnectionsView: View {
                 Text(service.title).font(.system(size: 16, weight: .medium))
                 Text(service.summary).font(.system(size: 13)).lineSpacing(3).foregroundStyle(MacTheme.secondary)
                 if on { statusLine(service, status) }
+                if on, AppleConnections.autoApprovable.contains(service) {
+                    Toggle("Don’t ask before adding or changing", isOn: Binding(get: { apple.autoApproves(service) }, set: { apple.setAutoApproves(service, $0) }))
+                        .toggleStyle(.checkbox).font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                        .help("Deleting always asks. Sending mail or messages always asks.")
+                }
             }
             Spacer(minLength: 12)
             Toggle(service.title, isOn: Binding(get: { apple.isEnabled(service) }, set: { apple.setEnabled(service, $0) }))

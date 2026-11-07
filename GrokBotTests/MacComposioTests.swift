@@ -213,7 +213,12 @@ final class MacConnectionsTests: XCTestCase {
         let event = await actions.run(BotAction(action: "apple_add_event", name: "Dentist", at: "2026-11-12T15:00:00-06:00"), bot: bot, unattended: false)
         XCTAssertTrue(event.contains("off or not allowed"))
         XCTAssertTrue(log.items.isEmpty, "A disabled service never prompts")
-        let unknown = await actions.run(BotAction(action: "apple_send_email"), bot: bot, unattended: false)
+        for name in ["apple_send_email", "apple_send_message", "apple_add_note", "apple_delete_event", "apple_complete_reminder", "apple_add_contact", "apple_mail_update"] {
+            let result = await actions.run(BotAction(action: name, name: "x", to: "a@example.com", text: "x"), bot: bot, unattended: false)
+            XCTAssertTrue(result.contains("off or not allowed"), name)
+        }
+        XCTAssertTrue(log.items.isEmpty, "Nothing prompts while the services are off")
+        let unknown = await actions.run(BotAction(action: "apple_format_disk"), bot: bot, unattended: false)
         XCTAssertEqual(unknown, "Unsupported Mac action.")
     }
 
@@ -616,3 +621,57 @@ final class MacVoiceProvidersTests: XCTestCase {
 }
 
 #endif
+
+@MainActor
+final class MacAppleWritesTests: XCTestCase {
+    func testRemindersDoNotAskByDefaultButOtherServicesDo() throws {
+        let suite = "org.opengrokbot.tests.auto." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let apple = AppleConnections(defaults: defaults)
+        XCTAssertTrue(apple.autoApproves(.reminders))
+        XCTAssertFalse(apple.autoApproves(.calendar))
+        apple.setAutoApproves(.reminders, false)
+        apple.setAutoApproves(.mail, true)
+        let reloaded = AppleConnections(defaults: defaults)
+        XCTAssertFalse(reloaded.autoApproves(.reminders), "The choice is remembered")
+        XCTAssertFalse(reloaded.autoApproves(.mail), "Mail can never skip approval")
+        XCTAssertFalse(reloaded.autoApproves(.messages))
+    }
+
+    func testTitleMatchingPrefersExactThenContains() {
+        let titles = ["Call the plumber", "Call mom", "call mom tonight"]
+        XCTAssertEqual(AppleText.match(titles, "call mom"), [1])
+        XCTAssertEqual(AppleText.match(titles, "plumber"), [0])
+        XCTAssertEqual(AppleText.match(titles, "call"), [0, 1, 2])
+        XCTAssertEqual(AppleText.match(titles, "  "), [])
+    }
+
+    func testAddressesAndNames() {
+        XCTAssertEqual(AppleText.address("jane@example.com"), "jane@example.com")
+        XCTAssertEqual(AppleText.address("+1 (555) 123-4567"), "+15551234567")
+        XCTAssertNil(AppleText.address("Jane"))
+        XCTAssertNil(AppleText.address("a@b"))
+        XCTAssertNil(AppleText.address("a@b.com, c@d.com"))
+        XCTAssertNil(AppleText.address("12345"))
+        XCTAssertEqual(AppleText.splitName("Jane Q Smith").given, "Jane Q")
+        XCTAssertEqual(AppleText.splitName("Jane Q Smith").family, "Smith")
+        XCTAssertEqual(AppleText.splitName("Cher").family, "")
+    }
+
+    func testNoteHTMLEscapesText() {
+        let html = AppleText.noteHTML(title: "Plan <A>", body: "one & two\n\n<script>")
+        XCTAssertTrue(html.hasPrefix("<div><h1>Plan &lt;A&gt;</h1></div>"))
+        XCTAssertTrue(html.contains("one &amp; two"))
+        XCTAssertTrue(html.contains("<div><br></div>"))
+        XCTAssertFalse(html.contains("<script>"))
+    }
+
+    func testNewToolsAreRoutedAndParsed() {
+        for name in ["apple_edit_event", "apple_delete_event", "apple_edit_reminder", "apple_complete_reminder", "apple_delete_reminder", "apple_add_contact", "apple_edit_contact", "apple_add_note", "apple_edit_note", "apple_delete_note", "apple_send_email", "apple_draft_email", "apple_reply_email", "apple_mail_update", "apple_send_message"] {
+            XCTAssertTrue(MacDeviceActions.actionNames.contains(name), name)
+        }
+        let parsed = BotTeamwork.parse("```opengrokbot-action\n{\"action\":\"apple_edit_event\",\"name\":\"Dentist\",\"on\":\"2026-11-12\",\"newName\":\"Dentist (moved)\",\"change\":\"x\",\"subject\":\"s\",\"phone\":\"1\",\"email\":\"e\"}\n```").actions
+        XCTAssertEqual(parsed.first?.newName, "Dentist (moved)")
+        XCTAssertEqual(parsed.first?.on, "2026-11-12")
+    }
+}

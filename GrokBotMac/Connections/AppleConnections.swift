@@ -30,12 +30,12 @@ enum AppleService: String, CaseIterable, Identifiable, Sendable {
     }
     var summary: String {
         switch self {
-        case .calendar: "Upcoming events from every calendar on this Mac. A Bot can also add events, after you approve each one."
-        case .reminders: "Your open reminders. A Bot can also add reminders, after you approve each one."
-        case .contacts: "Look up names, phone numbers and email addresses."
-        case .mail: "Search recent messages in your Mail inbox by sender or subject. Read-only."
-        case .notes: "Search your Notes by title or text. Read-only."
-        case .messages: "Search recent iMessages and texts. Read-only. Needs Full Disk Access."
+        case .calendar: "Upcoming events from every calendar on this Mac. A Bot can also add, change and delete events."
+        case .reminders: "Your open reminders. A Bot can also add, change, finish and delete reminders."
+        case .contacts: "Look up names, phone numbers and email addresses. A Bot can also add contacts and update them."
+        case .mail: "Search recent messages in your Mail inbox by sender or subject. A Bot can also send, reply, draft, mark and trash mail, after you approve each one."
+        case .notes: "Search your Notes by title or text. A Bot can also create, add to and delete notes."
+        case .messages: "Search recent iMessages and texts. A Bot can also send a message, after you approve each one. Reading needs Full Disk Access."
         }
     }
     var action: String { "apple_" + rawValue }
@@ -71,17 +71,34 @@ final class AppleConnections: ObservableObject {
     static let shared = AppleConnections()
     @Published private(set) var enabled: Set<AppleService>
     @Published private(set) var access: [AppleService: AppleAccess] = [:]
+    /// Services where a Bot may add or edit things without asking each time. Deleting, sending and signing in always ask.
+    @Published private(set) var autoApproved: Set<AppleService>
     private let defaults: UserDefaults
+    static let autoApprovable: Set<AppleService> = [.reminders, .calendar, .contacts, .notes]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         enabled = Set(AppleService.allCases.filter { defaults.bool(forKey: Self.key($0)) })
+        // Reminders start out not asking; everything else starts out asking.
+        autoApproved = Set(Self.autoApprovable.filter { service in
+            defaults.object(forKey: Self.autoKey(service)) == nil ? service == .reminders : defaults.bool(forKey: Self.autoKey(service))
+        })
         refreshAccess()
     }
 
     private static func key(_ service: AppleService) -> String { "appleConnection." + service.rawValue }
 
+    private static func autoKey(_ service: AppleService) -> String { "appleAutoApprove." + service.rawValue }
+
     func isEnabled(_ service: AppleService) -> Bool { enabled.contains(service) }
+
+    func autoApproves(_ service: AppleService) -> Bool { autoApproved.contains(service) }
+
+    func setAutoApproves(_ service: AppleService, _ on: Bool) {
+        guard Self.autoApprovable.contains(service) else { return }
+        if on { autoApproved.insert(service) } else { autoApproved.remove(service) }
+        defaults.set(on, forKey: Self.autoKey(service))
+    }
 
     func setEnabled(_ service: AppleService, _ on: Bool) {
         if on { enabled.insert(service) } else { enabled.remove(service) }
