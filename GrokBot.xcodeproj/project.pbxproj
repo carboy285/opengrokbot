@@ -748,6 +748,10 @@
 				"D42190AB321F4E1303BCF0FF",
 				"1BC4BA355E16ACC96C4605D6",
 				"5B1865B379D5FA54681B5596",
+				"072598472E4E35F588534B4A",
+				"8149A59501EC62E0A4B65EE9",
+				"312B439BC7B9F77E2A1F1729",
+				"241A797D1BEF13731F9E564E",
 				"FABA5954987910794A35DF2B",
 				"BCDA9FF7E2B73E2427BB755A",
 				"75F4729C28BED68B552F6913",
@@ -968,6 +972,46 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "5B1865B379D5FA54681B5596";
 		};
+		"072598472E4E35F588534B4A" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacBotTemplates.swift";
+			"sourceTree" = "<group>";
+		};
+		"B1C71A174DDB24A9F0F21EB9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "072598472E4E35F588534B4A";
+		};
+		"8149A59501EC62E0A4B65EE9" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacQuickAskView.swift";
+			"sourceTree" = "<group>";
+		};
+		"B4708D98F83DC23A961C1D07" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "8149A59501EC62E0A4B65EE9";
+		};
+		"312B439BC7B9F77E2A1F1729" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacPushSettings.swift";
+			"sourceTree" = "<group>";
+		};
+		"167EEECB31C9A1DE140561A8" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "312B439BC7B9F77E2A1F1729";
+		};
+		"241A797D1BEF13731F9E564E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/App/MacPush.swift";
+			"sourceTree" = "<group>";
+		};
+		"1714ABC9B15D7036FB493841" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "241A797D1BEF13731F9E564E";
+		};
 		"FABA5954987910794A35DF2B" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -1139,6 +1183,10 @@
 				"A00D89FA4A8867714FD4EA32",
 				"11C6327260FC7C9DA9A9039B",
 				"5A7C5FBC54E845C9F3F0A30A",
+				"B1C71A174DDB24A9F0F21EB9",
+				"B4708D98F83DC23A961C1D07",
+				"167EEECB31C9A1DE140561A8",
+				"1714ABC9B15D7036FB493841",
 				"6B32A3AC5C73AB4CB15C9138",
 				"4ED8FDF23A6E2017DBDDE1DA",
 				"735D04007F1BADABA73C4B4B",

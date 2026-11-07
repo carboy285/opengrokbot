@@ -206,7 +206,7 @@ final class AppModel: ObservableObject {
             for action in parsed.actions {
                 switch action.action {
                 case "browse_web", "open_vm", "vm_exec": break // Executed by the desktop after successful CLI completion.
-                case let name where name.hasPrefix("apple_") || name.hasPrefix("browser_") || ["secure_login", "search_web", "search_knowledge"].contains(name): break // Mac-only tools, executed by the Mac app after successful CLI completion.
+                case let name where name.hasPrefix("apple_") || name.hasPrefix("browser_") || ["secure_login", "search_web", "search_knowledge", "read_knowledge"].contains(name): break // Mac-only tools, executed by the Mac app after successful CLI completion.
                 case "schedule_task":
                     guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, !(value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).contains(where: { $0.name == action.name && $0.enabled }),
                           let task = BotSchedule.make(action), let index = value.bots.firstIndex(where: { $0.id == bot.id }), (value.bots[index].schedules ?? []).count < 100 else { note("Task not scheduled: use a unique name, a future ISO date, valid timezone and recurrence, or message_received trigger."); continue }
@@ -248,6 +248,18 @@ final class AppModel: ObservableObject {
                         guard memory.count <= 100 else { note("This Bot’s memory is full."); continue }; value.bots[index].memory = memory
                     }
                     note(action.scope == "shared" ? "Saved to shared memory" : "Saved to this Bot’s memory")
+                case "forget":
+                    guard let wanted = action.text?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), wanted.count >= 3, wanted.count <= 2000,
+                          action.scope == "private" || action.scope == "shared" else { note("Nothing forgotten: choose private or shared and name the item (at least 3 characters)."); continue }
+                    var removed = 0
+                    if action.scope == "shared" {
+                        let before = value.sharedMemory ?? []; let kept = before.filter { !$0.lowercased().contains(wanted) }
+                        removed = before.count - kept.count; value.sharedMemory = kept
+                    } else if let index = value.bots.firstIndex(where: { $0.id == bot.id }) {
+                        let before = value.bots[index].memory ?? []; let kept = before.filter { !$0.lowercased().contains(wanted) }
+                        removed = before.count - kept.count; value.bots[index].memory = kept
+                    }
+                    note(removed == 0 ? "No memory matched “\(String(wanted.prefix(60)))”" : "Forgot \(removed) memory item\(removed == 1 ? "" : "s")")
                 case "create_group":
                     guard let name = action.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty, name.count <= 200, target(name) == nil, value.bots.count < 100,
                           let names = action.members, (2...8).contains(names.count) else { note("Group not created: use a unique name and 2–8 Bots."); continue }

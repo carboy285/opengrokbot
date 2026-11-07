@@ -135,6 +135,7 @@ struct MacSettingsView: View {
                     }
                 }.padding(20)
             }
+            section("Phone notifications") { MacPushSettings() }
             section("This Mac") {
                 VStack(spacing: 0) {
                     settingRow("Time zone") { Text(TimeZone.current.identifier).foregroundStyle(MacTheme.secondary) }

@@ -70,6 +70,11 @@ struct GrokBotMacApp: App {
                 }.keyboardShortcut("e", modifiers: [.command, .shift])
             }
         }
+
+        MenuBarExtra("OpenGrokBot", systemImage: "sparkles") {
+            MacQuickAskView().environmentObject(app).environmentObject(desktop)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 

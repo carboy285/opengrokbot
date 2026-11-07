@@ -571,6 +571,11 @@ extension MacAppModel {
 enum MacNotifier {
     @MainActor static func replyFinished(botName: String, text: String, failed: Bool) {
         guard !NSApp.isActive else { return }
+        if MacPush.enabled {
+            let title = failed ? "\(botName) couldn’t finish" : "\(botName) replied"
+            let body = MacPush.includeText ? text : (failed ? "Open OpenGrokBot to see what happened." : "Open OpenGrokBot to read it.")
+            Task { await MacPush.send(title: title, body: body, urgent: failed) }
+        }
         let content = UNMutableNotificationContent()
         content.title = failed ? "\(botName) couldn’t finish" : "\(botName) replied"
         content.body = String(text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).prefix(160))

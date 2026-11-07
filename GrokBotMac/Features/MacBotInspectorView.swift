@@ -111,6 +111,10 @@ struct MacBotInspectorView: View {
                     Button("Save") { _ = app.organize(bot, folder: folderDraft) }
                         .buttonStyle(InspectorButtonStyle()).disabled(folderDraft.count > 80 || folderDraft == (bot.folder ?? ""))
                 }
+                if bot.memberIDs == nil {
+                    Button("Share this Bot…", systemImage: "square.and.arrow.up") { if let note = BotSharing.export(bot) { desktop.sendFeedback[bot.id] = note } }
+                        .buttonStyle(InspectorButtonStyle()).help("Saves the name and job only, never memory, chats, logins or files.")
+                }
             }
             if let members = bot.memberIDs {
                 InspectorCard(title: "Group members", footer: "Each member answers with its own provider and model.") {

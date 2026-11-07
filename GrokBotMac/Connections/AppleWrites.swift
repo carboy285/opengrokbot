@@ -178,7 +178,7 @@ extension AppleReaders {
     end strip
     """
 
-    private static func run(_ body: String, _ args: [String]) async throws -> String {
+    static func run(_ body: String, _ args: [String]) async throws -> String {
         let source = stripHandler + "\n" + body
         let prefixed = args.map { "q:" + $0 } // The prefix keeps a leading "-" from being read as an option.
         let result = await Task.detached { CLIInstallationScanner.capture(path: "/usr/bin/osascript", arguments: ["-e", source] + prefixed, timeout: 40, limit: 16_000) }.value
@@ -314,6 +314,91 @@ extension AppleReaders {
         let answer = try await run(mailActBody, [query, mode, body])
         if answer == "NOTFOUND" { throw AppleError.message("No recent inbox message matches “\(query)”. Check with apple_mail first.") }
         return answer
+    }
+
+    // MARK: Mail search (any mailbox, a date window, unread only, attachment names)
+    private static let mailSearchBody = """
+    on run argv
+      set q to my strip(item 1 of argv)
+      set dayCount to (my strip(item 2 of argv)) as integer
+      set scopeName to my strip(item 3 of argv)
+      set onlyUnread to ((my strip(item 4 of argv)) is "1")
+      if dayCount < 1 then set dayCount to 365
+      set cutoff to (current date) - (dayCount * days)
+      set out to ""
+      set hits to 0
+      tell application "Mail"
+        set boxes to {}
+        if scopeName is "all" then
+          repeat with acct in accounts
+            try
+              set boxes to boxes & (mailboxes of acct)
+            end try
+          end repeat
+        else
+          set boxes to {inbox}
+        end if
+        repeat with b in boxes
+          set boxName to ""
+          try
+            set boxName to name of b
+          end try
+          if boxName does not contain "Junk" and boxName does not contain "Spam" and boxName does not contain "Trash" and boxName does not contain "Deleted" then
+            set msgs to {}
+            try
+              set msgs to messages of b
+            end try
+            set scanCount to count of msgs
+            if scanCount > 200 then set scanCount to 200
+            repeat with i from 1 to scanCount
+              set m to item i of msgs
+              set s to ""
+              set f to ""
+              set stamp to missing value
+              set isRead to true
+              try
+                set s to subject of m
+                set f to sender of m
+                set stamp to date received of m
+                set isRead to read status of m
+              end try
+              if stamp is not missing value and stamp >= cutoff and (q is "" or s contains q or f contains q) and ((not onlyUnread) or (not isRead)) then
+                set hits to hits + 1
+                set snippet to ""
+                if hits <= 5 then
+                  try
+                    set theContent to content of m
+                    if (length of theContent) > 300 then
+                      set snippet to text 1 thru 300 of theContent
+                    else
+                      set snippet to theContent
+                    end if
+                  end try
+                end if
+                set att to ""
+                try
+                  repeat with a in mail attachments of m
+                    set att to att & (name of a) & ", "
+                  end repeat
+                end try
+                if att is not "" then set att to " [attachments: " & att & "]"
+                set out to out & (stamp as string) & " | " & f & " | " & s & att & " | " & snippet & linefeed & "---" & linefeed
+                if hits >= 20 then exit repeat
+              end if
+            end repeat
+          end if
+          if hits >= 20 then exit repeat
+        end repeat
+      end tell
+      return out
+    end run
+    """
+
+    static func mailSearch(query: String, days: Int, allMailboxes: Bool, unreadOnly: Bool) async throws -> String {
+        let text = String(query.filter { !$0.isNewline }.prefix(100))
+        let answer = try await run(mailSearchBody, [text, String(min(max(days, 0), 3650)), allMailboxes ? "all" : "inbox", unreadOnly ? "1" : "0"])
+        let collapsed = AppleText.collapse(answer)
+        return collapsed.isEmpty ? "No matching messages\(allMailboxes ? "" : " in the most recent part of the inbox (try \"scope\":\"all\" to search every mailbox)")." : collapsed
     }
 
     // MARK: Messages

@@ -682,3 +682,62 @@ final class MacAppleWritesTests: XCTestCase {
         XCTAssertEqual(parsed.first?.on, "2026-11-12")
     }
 }
+
+@MainActor
+final class MacBatchTwoTests: XCTestCase {
+    func testPushTopicIsStableLongAndServerMustBeHTTPS() throws {
+        let suite = "org.opengrokbot.tests.push." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let first = MacPush.topic(defaults: defaults)
+        XCTAssertEqual(MacPush.topic(defaults: defaults), first)
+        XCTAssertTrue(first.hasPrefix("opengrokbot-"))
+        XCTAssertGreaterThanOrEqual(first.count, 30)
+        XCTAssertTrue(MacPush.isValid(topic: first))
+        XCTAssertFalse(MacPush.isValid(topic: "a b"))
+        XCTAssertNotNil(MacPush.validatedServer("https://ntfy.sh"))
+        XCTAssertNotNil(MacPush.validatedServer("https://ntfy.example.com/"))
+        XCTAssertNil(MacPush.validatedServer("http://ntfy.sh"))
+        XCTAssertNil(MacPush.validatedServer("https://user:pw@ntfy.sh"))
+        XCTAssertNil(MacPush.validatedServer("https://ntfy.sh/secret?x=1"))
+        let body = try XCTUnwrap(MacPush.payload(topic: first, title: "Fantasy replied", body: String(repeating: "x", count: 500), urgent: false))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual((object["message"] as? String)?.count, 300)
+    }
+
+    func testSharedBotCarriesOnlyNameJobAndColor() throws {
+        let bot = Bot(id: UUID(), name: "Fantasy", purpose: "Help", color: "pink", symbol: "sparkles")
+        var withMemory = bot; withMemory.memory = ["my secret"]
+        let data = try SharedBot(withMemory).encoded()
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(text.contains("my secret"))
+        XCTAssertEqual(SharedBot.decode(data), SharedBot(name: "Fantasy", purpose: "Help", color: "pink"))
+        XCTAssertNil(SharedBot.decode(Data("{}".utf8)))
+        XCTAssertNil(SharedBot.decode(Data("{\"format\":\"other\",\"version\":1,\"name\":\"a\",\"purpose\":\"b\",\"color\":\"pink\"}".utf8)))
+        XCTAssertEqual(SharedBot.decode(Data("{\"format\":\"opengrokbot-bot\",\"version\":1,\"name\":\"A\",\"purpose\":\"b\",\"color\":\"neon\"}".utf8))?.color, "purple")
+        XCTAssertFalse(BotTemplate.all.isEmpty)
+        XCTAssertEqual(Set(BotTemplate.all.map(\.id)).count, BotTemplate.all.count)
+    }
+
+    func testKnowledgeReadPagesTextFiles() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = KnowledgeSearch.folder(for: directory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try String(repeating: "a", count: 12_000) .appending(String(repeating: "b", count: 50)).write(to: folder.appendingPathComponent("Notes.txt"), atomically: true, encoding: .utf8)
+        let first = KnowledgeSearch.read(name: "notes", page: 1, in: directory)
+        XCTAssertTrue(first.contains("part 1 of 2"))
+        XCTAssertTrue(first.contains("ask for page 2"))
+        let second = KnowledgeSearch.read(name: "Notes.txt", page: 2, in: directory)
+        XCTAssertTrue(second.contains("part 2 of 2"))
+        XCTAssertTrue(second.hasSuffix(String(repeating: "b", count: 50)))
+        XCTAssertTrue(KnowledgeSearch.read(name: "missing", page: 1, in: directory).contains("No Knowledge file matches"))
+        XCTAssertTrue(KnowledgeSearch.isSupported("png"))
+        XCTAssertFalse(KnowledgeSearch.isSupported("exe"))
+    }
+
+    func testForgetActionRemovesMatchingMemory() throws {
+        let parsed = BotTeamwork.parse("```opengrokbot-action\n{\"action\":\"forget\",\"scope\":\"shared\",\"text\":\"pizza\"}\n```").actions
+        XCTAssertEqual(parsed.first?.action, "forget")
+        XCTAssertTrue(MacDeviceActions.actionNames.contains("read_knowledge"))
+    }
+}
