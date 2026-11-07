@@ -16,6 +16,12 @@ struct RemoteProvider: Codable, Equatable, Sendable, Identifiable {
     var version: String
     var id: String { provider.rawValue }
 }
+/// A Bot request waiting for a yes or no on the Mac that the approved phone can answer too.
+struct RemoteApproval: Codable, Sendable, Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var detail: String
+}
 struct RemoteSnapshot: Codable, Sendable {
     var protocolVersion: Int = 1
     var hostName: String
@@ -25,6 +31,7 @@ struct RemoteSnapshot: Codable, Sendable {
     var providers: [RemoteProvider]
     var defaultProvider: CLIProvider?
     var overview: Bool? = nil
+    var approval: RemoteApproval? = nil
 
     func botOverview() -> RemoteSnapshot {
         var result = self

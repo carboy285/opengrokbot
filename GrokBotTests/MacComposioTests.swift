@@ -741,3 +741,22 @@ final class MacBatchTwoTests: XCTestCase {
         XCTAssertTrue(MacDeviceActions.actionNames.contains("read_knowledge"))
     }
 }
+
+@MainActor
+final class MacPhoneApprovalTests: XCTestCase {
+    func testPhoneCannotAnswerWhenNothingIsWaiting() {
+        XCTAssertNil(MacApproval.shared.remoteRequest)
+        XCTAssertFalse(MacApproval.shared.respondFromPhone(id: UUID(), approved: true))
+    }
+
+    func testSnapshotsCarryAnApprovalAndOldSnapshotsStillDecode() throws {
+        let request = RemoteApproval(id: UUID(), title: "Send an email?", detail: "To: a@example.com")
+        let snapshot = RemoteSnapshot(hostName: "Mac", revision: "r", workspace: Workspace(), running: [], providers: [], defaultProvider: nil, approval: request)
+        let data = try CloudCoding.encoder().encode(snapshot)
+        XCTAssertEqual(try CloudCoding.decoder().decode(RemoteSnapshot.self, from: data).approval, request)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["approval"] = nil
+        let old = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertNil(try CloudCoding.decoder().decode(RemoteSnapshot.self, from: old).approval)
+    }
+}

@@ -19,6 +19,8 @@ final class RemoteController: ObservableObject {
     @Published private(set) var defaultProvider: CLIProvider?
     @Published private(set) var pinnedBotIDs: [UUID]?
     @Published private(set) var pinSyncNotice: String?
+    /// A Bot request the Mac is waiting on; answer it with answerApproval.
+    @Published private(set) var approval: RemoteApproval?
     private var serverPins: [UUID:Bool] = [:]
     private var pendingPins: [UUID:Bool] = [:]
     private var legacyPins = Set<UUID>()
@@ -68,7 +70,7 @@ final class RemoteController: ObservableObject {
     }
     private func clearState() {
         epoch = UUID(); initialLoadFailed = false; polling?.cancel(); polling = nil; connection = nil; state = nil
-        online = false; hasSnapshot = false; needsApproval = false; running = []; providers = []; defaultProvider = nil; pinnedBotIDs = nil
+        online = false; hasSnapshot = false; needsApproval = false; approval = nil; running = []; providers = []; defaultProvider = nil; pinnedBotIDs = nil
         drafts = [:]; draftImages = [:]; pendingSends = [:]; serverPins = [:]; pendingPins = [:]; legacyPins = []; pinSyncNotice = nil
         model?.applyRemoteSnapshot(Workspace()); model?.leavePreview()
     }
@@ -151,7 +153,7 @@ final class RemoteController: ObservableObject {
                 let snapshot = try patch.applying(to:state)
                 guard snapshot.protocolVersion == 1 else { throw RemoteError.incompatible }
                 let wasLoaded = hasSnapshot, finished = running.subtracting(Set(snapshot.running))
-                state = snapshot; hostName = snapshot.hostName; running = Set(snapshot.running)
+                state = snapshot; hostName = snapshot.hostName; running = Set(snapshot.running); approval = snapshot.approval
                 providers = snapshot.providers; defaultProvider = snapshot.defaultProvider
                 model?.applyRemoteSnapshot(snapshot.workspace)
                 if wasLoaded, !finished.isEmpty { ReplyNotifier.notify(finished: finished, workspace: snapshot.workspace, viewing: viewingBotID) }
@@ -245,6 +247,11 @@ final class RemoteController: ObservableObject {
             // must not keep the composer busy waiting for another relay exchange.
             return true
         } catch { if current == epoch, !Task.isCancelled { self.error = error.localizedDescription }; return false }
+    }
+    func answerApproval(_ approve: Bool) async {
+        guard let request = approval else { return }
+        approval = nil
+        _ = await command(RemoteCommand(action: "approval_response", text: request.id.uuidString, name: approve ? "approve" : "deny"))
     }
     func send(_ text: String, bot: Bot, images: [RemoteAttachment] = []) async -> Bool {
         let id = pendingSends[bot.id].flatMap { $0.0 == text ? $0.1:nil } ?? UUID()

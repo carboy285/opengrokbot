@@ -31,6 +31,7 @@ final class MacRemoteHost: ObservableObject {
     }
     func attach(app: AppModel, desktop: MacAppModel) {
         guard self.app == nil else { return }; self.app = app; self.desktop = desktop
+        MacApproval.shared.onChange = { [weak self] in self?.revision = UUID().uuidString }
         app.$workspace.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$runningBots.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
         desktop.$installedCLIs.sink { [weak self] _ in self?.revision = UUID().uuidString }.store(in: &subscriptions)
@@ -221,7 +222,7 @@ final class MacRemoteHost: ObservableObject {
         guard let app, let desktop else { return nil }
         var workspace = app.workspace; workspace.sessions = nil
         workspace.entries = workspace.entries.map { var entry = $0; entry.detail = nil; return entry } // The phone shows summaries only.
-        return RemoteSnapshot(hostName: Host.current().localizedName ?? "Mac", revision: revision, workspace: workspace, running: Array(desktop.runningBots), providers: desktop.installedCLIs.map { RemoteProvider(provider: $0.provider, version: $0.version) }, defaultProvider: desktop.selectedCLI?.provider)
+        return RemoteSnapshot(hostName: Host.current().localizedName ?? "Mac", revision: revision, workspace: workspace, running: Array(desktop.runningBots), providers: desktop.installedCLIs.map { RemoteProvider(provider: $0.provider, version: $0.version) }, defaultProvider: desktop.selectedCLI?.provider, approval: MacApproval.shared.remoteRequest)
     }
     func dispatch(_ request: RemoteHostRequest) async -> RemoteHostResponse {
         guard let parts = URLComponents(string: request.target), let app, let desktop else { return .error(400, "Invalid request") }
@@ -270,6 +271,8 @@ final class MacRemoteHost: ObservableObject {
                     message = MacAppModel.attachmentMessage(base: text, names: names)
                 }
                 guard desktop.send(message, to: bot, app: app, requestID: command.requestID) else { return .error(409, "The Bot is busy or needs provider setup. Check the desktop workspace.") }
+            case "approval_response":
+                guard let text = command.text, let id = UUID(uuidString: text), MacApproval.shared.respondFromPhone(id: id, approved: command.name == "approve") else { return .error(409, "That request is no longer waiting.") }
             case "stop": guard let bot else { return .error(404,"Bot not found") }; desktop.stop(botID: bot.id)
             case "retry": guard let bot, !desktop.runningBots.contains(bot.id) else { return .error(409,"Bot is busy") }; desktop.retry(bot: bot, app: app)
             case "create_bot":

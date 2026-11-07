@@ -94,6 +94,10 @@ struct RootView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $settings) { SettingsView() }
+            .alert(remote.approval?.title ?? "Approve?", isPresented: Binding(get: { remote.approval != nil }, set: { _ in }), presenting: remote.approval) { _ in
+                Button("Approve") { Task { await remote.answerApproval(true) } }
+                Button("Deny", role: .cancel) { Task { await remote.answerApproval(false) } }
+            } message: { request in Text(request.detail + "\n\nYour Mac is waiting for your answer.") }
             .onAppear { openPendingVoice() }
             .onChange(of: pendingVoice) { _, _ in openPendingVoice() }
             .onChange(of: remote.hasSnapshot) { _, _ in openPendingVoice() }
