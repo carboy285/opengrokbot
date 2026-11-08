@@ -6,6 +6,7 @@ struct MacSettingsView: View {
     @EnvironmentObject private var desktop: MacAppModel
     @AppStorage("macAppearance") private var appearance = "dark"
     @AppStorage("spellChecking") private var spellChecking = true
+    @AppStorage("accentStyle") private var accentStyle = "bot"
     @AppStorage("profileName") private var profileName = "You"
     @AppStorage("keepAwakeForRoutines") private var keepAwakeForRoutines = false
     @State private var reset = false
@@ -101,8 +102,12 @@ struct MacSettingsView: View {
                             Text("Light").tag("light")
                         }.labelsHidden().frame(width: 155)
                     }
-                    settingRow("Accent") { Text("Bot color").foregroundStyle(MacTheme.secondary) }
-                    settingRow("Language") { Text("English").foregroundStyle(MacTheme.secondary) }
+                    settingRow("Accent") {
+                        Picker("Accent", selection: $accentStyle) {
+                            Text("Bot color").tag("bot")
+                            Text("Neutral").tag("neutral")
+                        }.labelsHidden().frame(width: 155)
+                    }
                     settingRow("Check Spelling While Typing") { Toggle("Check spelling", isOn: $spellChecking).labelsHidden().toggleStyle(.switch).controlSize(.small) }
                 }
             }
@@ -121,7 +126,7 @@ struct MacSettingsView: View {
             unavailable(title: "AI runs from this Mac", detail: "This app launches the installed CLI on this Mac. Each Bot has a separate working folder and saved CLI session. Approved iPhones can control this workspace using the same account.", icon: "desktopcomputer")
             MacRemoteAccessView(remote: desktop.remote)
             Text("Bot browsers run locally, with a separate visible browser and cookie/login profile for each Bot. Open Bot details → Open local browser. No browser provider account is needed.").font(.callout).foregroundStyle(.secondary)
-            Button("View another computer on this account") { desktop.panel = nil; desktop.showMirror = true }
+            Button("Computers: look at another computer or copy Bots between them…") { desktop.copyingBot = nil; desktop.copyNotice = nil; desktop.panel = .computers }
             section("Always on") {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Keep this Mac awake while Bots have scheduled routines", isOn: $keepAwakeForRoutines).toggleStyle(.switch)

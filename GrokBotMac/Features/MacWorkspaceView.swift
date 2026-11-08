@@ -11,6 +11,19 @@ struct MacWorkspaceView: View {
     private func pinned(_ bot: Bot) -> Bool { desktop.gateway?.isPinned(bot) ?? bot.isPinned ?? (bot.isMain == true) }
     private func touch(_ bot: Bot) { if let gateway = desktop.gateway { gateway.touch(bot.id) } else { _ = app.touchBot(bot.id) } }
     @FocusState private var searchFocused: Bool
+    @AppStorage("profileName") private var profileName = "You"
+
+    /// The single hero card: the primary Bot (or, failing that, the first pinned one).
+    private var heroBots: [Bot] {
+        let main = sidebarBots.filter { $0.isMain == true }
+        return Array((main.isEmpty ? sidebarBots.filter { pinned($0) } : main).prefix(1))
+    }
+    /// Everything else: other pinned Bots first (with a pin glyph), then the rest by recent use.
+    private var listBots: [Bot] {
+        let hero = Set(heroBots.map(\.id))
+        let rest = sidebarBots.filter { !hero.contains($0.id) }
+        return rest.filter { pinned($0) } + app.recentlyUsed(rest.filter { !pinned($0) })
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -78,7 +91,6 @@ struct MacWorkspaceView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                computerMenu
                 Spacer()
                 MacCircleButton(symbol: "magnifyingglass", label: "Search Bots") {
                     desktop.showSearch.toggle()
@@ -86,6 +98,16 @@ struct MacWorkspaceView: View {
                 }
                 MacCircleButton(symbol: "plus", label: "New Bot") { desktop.panel = .newBot }
             }.padding(.horizontal, 18).padding(.top, 12)
+            if let gateway = desktop.gateway {
+                Button { desktop.openComputer(nil, app: desktop.localApp ?? app) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "server.rack")
+                        Text("Viewing \(gateway.hostName)").lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text("Back to this Mac").font(.system(size: 12)).underline()
+                    }.font(.system(size: 13)).padding(.horizontal, 14).padding(.vertical, 9).background(MacTheme.raised, in: Capsule())
+                }.buttonStyle(.plain).padding(.horizontal, 18).padding(.top, 12).help("Stop viewing \(gateway.hostName) and return to this Mac’s own Bots")
+            }
             if desktop.showSearch {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(MacTheme.secondary)
@@ -93,35 +115,35 @@ struct MacWorkspaceView: View {
                     if !app.search.isEmpty { Button { app.search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
                 }.padding(10).background(MacTheme.panel, in: Capsule()).padding(.horizontal, 18).padding(.top, 14)
             }
-            Picker("Bot folder", selection: $folderFilter) {
-                Text("All Bots").tag(Optional<String>.none)
-                Text("Unfiled").tag(Optional(""))
-                ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in Text(folder).tag(Optional(folder)) }
-            }.labelsHidden().padding(.horizontal, 18).padding(.top, 16)
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
-                        ForEach(sidebarBots.filter { pinned($0) }) { bot in
+                    HStack {
+                        Spacer(minLength: 0)
+                        ForEach(heroBots) { bot in
                             Button { desktop.selectedID = bot.id; touch(bot) } label: {
                                 VStack(spacing: 12) {
-                                    MacBotAvatar(color: bot.color, size: 64, starred: true, appearance: bot.appearance)
+                                    MacBotAvatar(color: bot.color, size: 56, starred: true, appearance: bot.appearance)
                                     Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
-                                }.padding(14).frame(maxWidth: .infinity).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
+                                }.padding(.vertical, 12).padding(.horizontal, 10).frame(width: 104).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 12))
                             }.buttonStyle(.plain).contextMenu { botMenu(bot) }.draggable(bot.id.uuidString)
                                 .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
                         }
-                    }.padding(.horizontal, 18).padding(.vertical, 20)
-                    ForEach(app.recentlyUsed(sidebarBots.filter { !pinned($0) })) { bot in
+                        Spacer(minLength: 0)
+                    }.padding(.horizontal, 18).padding(.vertical, 16)
+                    ForEach(listBots) { bot in
                         Button { desktop.selectedID = bot.id; touch(bot) } label: {
                             HStack(spacing: 16) {
-                                MacBotAvatar(color: bot.color, size: 39, appearance: bot.appearance)
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(bot.name).font(.system(size: 17, weight: .medium)).lineLimit(1).help(bot.name)
-                                    Text(app.latest(for: bot)).font(.system(size: 14)).foregroundStyle(MacTheme.secondary).lineLimit(1)
+                                MacBotAvatar(color: bot.color, size: 34, appearance: bot.appearance)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 6) {
+                                        Text(bot.name).font(.system(size: 16, weight: .medium)).lineLimit(1).help(bot.name)
+                                        if pinned(bot) { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(MacTheme.secondary).accessibilityLabel("Pinned") }
+                                    }
+                                    Text(app.latest(for: bot)).font(.system(size: 13)).foregroundStyle(MacTheme.secondary).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
                             }
-                            .padding(.horizontal, 15).padding(.vertical, 14)
+                            .padding(.horizontal, 14).padding(.vertical, 11)
                             .background(desktop.selected(in: app)?.id == bot.id ? Color.white.opacity(0.045) : .clear, in: RoundedRectangle(cornerRadius: 14))
                             .contentShape(RoundedRectangle(cornerRadius: 14))
                         }
@@ -136,41 +158,34 @@ struct MacWorkspaceView: View {
                 }.padding(.horizontal, 8)
             }
             Spacer(minLength: 10)
-            Button { desktop.panel = desktop.gateway == nil ? .setup : .remoteSettings } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(desktop.canChat ? Color.green : Color.orange.opacity(0.8)).frame(width: 5, height: 5)
-                    Text(desktop.statusText).font(.system(size: 11))
-                }.foregroundStyle(MacTheme.secondary)
-            }.buttonStyle(.plain).padding(.bottom, 14)
+            if desktop.gateway == nil, !desktop.canChat {
+                Button { desktop.panel = .setup } label: {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.orange.opacity(0.8)).frame(width: 5, height: 5)
+                        Text(desktop.statusText).font(.system(size: 11))
+                    }.foregroundStyle(MacTheme.secondary)
+                }.buttonStyle(.plain).padding(.bottom, 10)
+            }
             HStack(spacing: 10) {
                 Button { desktop.openSettings() } label: {
-                    Text(desktop.updates.available ? "↓" : "You").font(.system(size: 15)).frame(width: 42, height: 42).glassChrome(in: Circle())
-                }.buttonStyle(.plain).help("Settings")
+                    Group {
+                        if profileName.trimmingCharacters(in: .whitespaces).isEmpty || profileName == "You" { Image(systemName: "person.fill").font(.system(size: 14)) }
+                        else { Text(String(profileName.prefix(2)).uppercased()).font(.system(size: 13, weight: .medium)) }
+                    }.frame(width: 34, height: 34).glassChrome(in: Circle())
+                }.buttonStyle(.plain).help("Settings").accessibilityLabel("Settings")
                 Button { desktop.panel = desktop.gateway == nil ? .apps : .remoteSettings } label: {
-                    HStack(spacing: 9) {
-                        Text("Connect apps").font(.system(size: 16, weight: .medium))
-                        HStack(spacing: -4) {
-                            appChip("N", color: .white)
-                            appChip("#", color: Color(hex: 0x54B9AB))
-                            appChip("G", color: Color(hex: 0xD8DD50))
-                        }
-                    }.frame(maxWidth: .infinity).frame(height: 42).glassChrome(in: Capsule())
+                    Text("Connect apps").font(.system(size: 15, weight: .medium)).frame(maxWidth: .infinity).frame(height: 44).glassChrome(in: Capsule())
                 }.buttonStyle(.plain).accessibilityLabel("Connect apps")
+                if desktop.gateway == nil, desktop.updates.available || desktop.updates.stagedVersion != nil {
+                    Button {
+                        if desktop.updates.stagedVersion != nil { desktop.updates.restartAndInstall() } else { desktop.openSettings(.updates) }
+                    } label: {
+                        Image(systemName: "arrow.down").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 34, height: 34).background(Color(hex: 0x2F7BFF), in: Circle())
+                    }.buttonStyle(.plain).help(desktop.updates.stagedVersion != nil ? "Update ready: restart to install" : "An update is available").accessibilityLabel(desktop.updates.stagedVersion != nil ? "Restart to update" : "Update available")
+                }
             }.padding(.horizontal, 14).padding(.bottom, 15)
         }.background(MacTheme.sidebar)
-    }
-
-    /// Opens the Computers screen. It is a plain button (not a menu that rebuilds while the app refreshes in the background).
-    private var computerMenu: some View {
-        Button { desktop.copyingBot = nil; desktop.copyNotice = nil; desktop.panel = .computers } label: {
-            HStack(spacing: 6) {
-                Image(systemName: desktop.gateway == nil ? "desktopcomputer" : "server.rack")
-                Text(desktop.gateway?.hostName ?? "This computer").lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-            }
-        }
-        .buttonStyle(.plain)
-        .help("Computers on your account: look at one here, or copy Bots, keys and connectors between them.")
     }
 
     /// The same right-click menu for pinned cards and list rows.
@@ -188,12 +203,12 @@ struct MacWorkspaceView: View {
         }
         if desktop.gateway == nil {
             Button("Bot details") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
-            Menu("Move to folder") {
+            Menu("Move to section") {
                 Button("Unfiled") { _ = app.organize(bot, folder: "") }
                 ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in
                     Button(folder) { _ = app.organize(bot, folder: folder) }
                 }
-                Button("New folder…") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
+                Button("New section…") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
             }
         }
         if bot.memberIDs == nil {

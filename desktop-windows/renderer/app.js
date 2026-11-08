@@ -73,13 +73,14 @@ function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
   const matches=bot=>(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
   const primary=$('#primary-bot');primary.replaceChildren();
-  for(const bot of orderedBots().filter(x=>isPinned(x)&&matches(x))){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
+  const matching=orderedBots().filter(x=>matches(x));const hero=(matching.find(x=>x.isMain)||matching.find(x=>isPinned(x)));
+  for(const bot of hero?[hero]:[]){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
   const list=$('#bot-list');list.replaceChildren();
-  const visible=recentBots(orderedBots().filter(bot=>!isPinned(bot)&&matches(bot)));
+  const rest=matching.filter(bot=>bot!==hero);const visible=[...rest.filter(bot=>isPinned(bot)),...recentBots(rest.filter(bot=>!isPinned(bot)))];
   for(const bot of visible){
     const row=button('',()=>selectBot(bot.id),`bot-row ${bot.id===selected?'selected':''}`);row.draggable=true;
     const preview=entries(bot).at(-1)?.text||bot.purpose;
-    append(row,avatar(bot),append(node('span','details'),node('strong','',bot.name),node('small','',running.has(bot.id)?'Working…':preview)));
+    append(row,avatar(bot),append(node('span','details'),append(node('strong','',bot.name),...(isPinned(bot)?[node('i','pin','⚲')]:[])),node('small','',running.has(bot.id)?'Working…':preview)));
     row.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});
     wireBotDrag(row,bot);list.append(row);
   }
@@ -93,7 +94,7 @@ function render() {
   document.documentElement.style.setProperty('--bot-accent',avatarColors[bot.appearance?.color||bot.color]||'#9355ff');
   document.documentElement.style.setProperty('--bot-ink',['white','amber','orange','green','teal','gray'].includes(bot.appearance?.color||bot.color)?'#000':'#fff');
   renderMessages(bot);
-  const activeCLI=setup.installed.find(x=>x.id===setup.selected);$('#status-button').textContent=activeCLI?`${activeCLI.name} · On this device`:'Set up an AI CLI';
+  const activeCLI=setup.installed.find(x=>x.id===setup.selected);$('#status-button').textContent=activeCLI?`${activeCLI.name} · On this device`:'Set up an AI CLI';$('#status-button').hidden=!!activeCLI;
 
   renderInspector();
 }
@@ -439,7 +440,8 @@ if(bridge.checkUpdates&&Date.now()-Number(localStorage.getItem('lastUpdateCheck'
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||event.altKey||dialog.open)return;if(event.key.toLowerCase()==='k'){event.preventDefault();const content=panel('Switch Bot');const field=node('input','field'),results=node('div','switcher-results');field.placeholder='Find a Bot…';field.setAttribute('aria-label','Find a Bot');const draw=()=>{results.replaceChildren();for(const bot of orderedBots().filter(x=>x.name.toLowerCase().includes(field.value.toLowerCase())))results.append(button(bot.name,()=>{dialog.close();selectBot(bot.id);}));};field.addEventListener('input',draw);append(content,field,results);draw();field.focus();}});
 
 
-if(bridge.openMirror){const switcher=button('This computer ▾',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}});switcher.className='folder-filter';switcher.setAttribute('aria-label','Switch to another computer on this account');$('#search-slot').before(switcher);}
+
+if(window.desktop&&bridge.checkUpdates){result(bridge.checkUpdates()).then(update=>{if(update?.available&&!$('.update-button')){const pill=button('↓',()=>showSettings('Updates'),'update-button');pill.setAttribute('aria-label','Update available');pill.title='Update available';$('.sidebar footer .footer-actions').append(pill);}}).catch(()=>{});}
 
 async function showBotVM(bot){
  const content=panel(bot.name+' · Linux VM');append(content,node('p','muted','Install VirtualBox 7.2+, then download an Ubuntu 24.04 desktop ISO (x64) or supply a prepared Linux OVA. Setup creates a VM for this Bot: 2 CPU cores, 4 GB RAM and a 32 GB disk for ISO installs. OVA imports keep their disk size.'));

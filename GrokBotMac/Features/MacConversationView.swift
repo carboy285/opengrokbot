@@ -16,7 +16,8 @@ struct MacConversationView: View {
     @State private var scrollTask: Task<Void,Never>?
 
     private var avatarColor: String { bot.appearance?.color ?? bot.color }
-    private var tint: Color { bot.appearance == nil && bot.color == "white" ? .primary : AvatarArtwork.color(avatarColor) }
+    @AppStorage("accentStyle") private var accentStyle = "bot"
+    private var tint: Color { accentStyle == "neutral" || (bot.appearance == nil && bot.color == "white") ? .primary : AvatarArtwork.color(avatarColor) }
     private var ink: Color {
         if bot.appearance == nil && bot.color == "white" { return MacTheme.canvas }
         return ["white", "amber", "orange", "green", "teal", "gray"].contains(avatarColor) ? .black : .white
@@ -38,7 +39,7 @@ struct MacConversationView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(.horizontal, 24).padding(.top, 85).padding(.bottom, 24)
-                    .frame(maxWidth: 1040).frame(maxWidth: .infinity)
+                    .frame(maxWidth: 760).frame(maxWidth: .infinity)
                     .background(ChatScrollMonitor(onUserScroll: { nearBottom in followLatest = nearBottom },
                         onLayout: { if followLatest { scrollToLatest(proxy) } }))
                 }
@@ -116,18 +117,17 @@ struct MacConversationView: View {
             }
             HStack(alignment: .bottom, spacing: 11) {
                 Button { showActions.toggle() } label: {
-                    Image(systemName: "plus").font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(ink)
-                        .frame(width: 38, height: 38)
-                        .background(tint, in: Circle())
-                        .contentShape(Circle())
+                    Image(systemName: "plus").font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(MacTheme.secondary)
+                        .frame(width: 30, height: 36)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).help("Attach or export").accessibilityLabel("Attach or export")
                 .popover(isPresented: $showActions) { actionsMenu }
                 TextField("Message \(bot.name)", text: draft, axis: .vertical)
-                    .textFieldStyle(.plain).font(.system(size: 18)).lineLimit(1...7)
+                    .textFieldStyle(.plain).font(.system(size: 16)).lineLimit(1...7)
                     .disableAutocorrection(!spellChecking).focused($composing)
-                    .padding(.vertical, 6).frame(minHeight: 38)
+                    .padding(.vertical, 6).frame(minHeight: 36)
                     .onKeyPress(keys: [.return], phases: .down) { press in
                         if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.hasMarkedText() { return .ignored }
                         if press.modifiers.contains(.shift) {
@@ -141,21 +141,21 @@ struct MacConversationView: View {
                     .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showBotInspector = false } }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
                 if desktop.runningBots.contains(bot.id) {
-                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").foregroundStyle(ink).frame(width: 38, height: 38).background(tint, in: Circle()) }.buttonStyle(.plain).help("Stop response")
+                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").foregroundStyle(ink).frame(width: 36, height: 36).background(tint, in: Circle()) }.buttonStyle(.plain).help("Stop response")
                 } else if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(desktop.attachments[bot.id] ?? []).isEmpty {
                     Button { sendMessage() } label: {
-                        Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold)).foregroundStyle(ink)
-                            .frame(width: 38, height: 38).background(tint, in: Circle())
+                        Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).foregroundStyle(ink)
+                            .frame(width: 36, height: 36).background(tint, in: Circle())
                     }.buttonStyle(.plain).disabled(desktop.needsProvider(bot))
                         .help("Send message").accessibilityLabel("Send message")
                 } else {
                     Button { startVoice() } label: {
-                        Image(systemName: "waveform").font(.system(size: 18, weight: .semibold)).foregroundStyle(ink)
-                            .frame(width: 38, height: 38).background(tint, in: Circle())
+                        Image(systemName: "waveform").font(.system(size: 17, weight: .semibold)).foregroundStyle(ink)
+                            .frame(width: 36, height: 36).background(tint, in: Circle())
                     }.buttonStyle(.plain).help("Start voice mode").accessibilityLabel("Start voice mode")
                 }
             }
-            .padding(9).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
+            .padding(.horizontal, 10).padding(.vertical, 5).frame(minHeight: 46).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
             .onAppear { installPasteMonitor() }
             .onChange(of: bot.id) { _, _ in installPasteMonitor() }
             .onDisappear { removePasteMonitor() }
@@ -238,11 +238,7 @@ struct MacConversationView: View {
 
     private var actionsMenu: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ComposerActionRow(title: "Voice mode", icon: "waveform", disabled: false, tint: tint) {
-                showActions = false
-                startVoice()
-            }
-            ComposerActionRow(title: "Add files…", icon: "paperclip", disabled: attachDisabled, tint: tint) {
+            ComposerActionRow(title: "Attach files", icon: "paperclip", disabled: attachDisabled, tint: tint) {
                 showActions = false
                 DispatchQueue.main.async { desktop.chooseAttachments(for: bot) }
             }
@@ -256,7 +252,7 @@ struct MacConversationView: View {
                 DispatchQueue.main.async { desktop.exportConversation(bot, app: app) }
             }
         }
-        .padding(8).frame(width: 236)
+        .padding(8).frame(width: 220)
     }
 
     /// Lets ⌘V attach an image or file from the clipboard while the message box is focused.
@@ -314,7 +310,7 @@ struct MacMessageView: View {
                         Text(provider).font(.system(size: 11)).foregroundStyle(MacTheme.secondary).padding(.horizontal, 5)
                     }
                     MacMessageContent(text: entry.text.isEmpty && entry.state == .streaming ? "Thinking…" : entry.text, markdown: entry.kind == .bot)
-                    .font(.system(size: 18)).lineSpacing(6).textSelection(.enabled)
+                    .font(.system(size: 16)).lineSpacing(6).textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .background(entry.kind == .user ? MacTheme.userBubble : MacTheme.panel, in: RoundedRectangle(cornerRadius: entry.kind == .user ? 24 : 23))
                     .overlay(RoundedRectangle(cornerRadius: 23).stroke(Color.white.opacity(0.025), lineWidth: 1))

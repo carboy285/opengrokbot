@@ -66,3 +66,11 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - "Connect apps" and the status line at the bottom of the sidebar open the same screen while viewing the PC; "Open this Mac's settings" reaches this Mac's own.
 - Header model menu on the PC lists every installed provider with models; picking one changes the Bot on the PC; a new Bot shows the PC's default provider before its first reply.
 - Delete a Bot on the PC: the row disappears at once. Switching shows "Connecting to…". Search clears when you switch. "Copy everything" opens with only Bots ticked.
+
+## 0.9.0: visual pass (Mac, Windows, small iPhone change)
+- Chat column is about 55% of the window at 1100 pt wide, text 16 pt, nothing clipped.
+- Sidebar top: only the two round buttons. Hero card shows the primary Bot only; other pinned Bots sit at the top of the list with a pin. Footer: profile circle, Connect apps, and a blue arrow only when an update is available (staged → "Restart to update").
+- Viewing another computer: a "Viewing <name> · Back to this Mac" bar appears under the buttons and returns to the Mac; Settings → Computer opens the Computers screen.
+- Message box: 46 pt pill, plain +, round send/voice/stop button; + menu has Attach files, Paste image, Export conversation.
+- Settings → Accent = Neutral turns the send/voice/stop circles neutral; the copy icon next to the account email copies it.
+- Windows: same sidebar/footer/composer; no folder picker or "This computer" button in the header; Settings → Computer still has "View another computer".

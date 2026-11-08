@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct CloudSignInView: View {
     @ObservedObject var account: CloudAccount
@@ -8,7 +11,13 @@ struct CloudSignInView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             if account.signedIn {
-                Label(account.email,systemImage:"person.crop.circle").font(.headline)
+                HStack(spacing: 8) {
+                    Label(account.email,systemImage:"person.crop.circle").font(.headline)
+                    #if os(macOS)
+                    Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(account.email, forType: .string) } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(.plain).help("Copy email").accessibilityLabel("Copy email")
+                    #endif
+                }
                 Button("Sign out of this device",role:.destructive) { Task { await account.signOut() } }
             } else {
                 Text(create ? "Create your account":"Sign in to OpenGrokBot").font(.title3.weight(.medium))

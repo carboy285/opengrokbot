@@ -326,7 +326,7 @@ private struct MessageRow: View, Equatable {
                     if entry.text.isEmpty, entry.state == .streaming {
                         HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Thinking…").foregroundStyle(.secondary) }
                     } else {
-                        Text(formattedText).font(.body).lineSpacing(5).textSelection(.enabled)
+                        Text(formattedText).font(.system(size: 16)).lineSpacing(5).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }

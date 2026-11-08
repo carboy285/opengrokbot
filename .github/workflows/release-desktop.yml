@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.8.5/ --output=artifacts/OpenGrokBot-0.8.5-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.9.0/ --output=artifacts/OpenGrokBot-0.9.0-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,7 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.8.5: closer to a true remote. While you are viewing another computer, “You” and “Connect apps” now open THAT computer’s settings: its version, the AI CLIs installed there, which API keys are set (and you can save or remove a key on it), voice keys, connectors, and sharing state. The header model menu lists that computer’s providers and their models, and shows the default provider before a Bot has replied. Fixes from the 0.8.4 audit: “Copy everything” no longer ticks keys and connectors by default, copy results show once and read the same in both directions, deleted Bots leave the list immediately, switching shows “Connecting to…” instead of a Create Bot screen, search clears when you switch, pinned Bots have the full right-click menu, and Bot details explains itself instead of doing nothing. Not done yet: Bot details and file attachments while viewing another computer, usage and updates for the other computer, and the Windows and iPhone viewing screens. Not yet tried on real devices; update both computers to 0.8.5.
+          0.9.0: a visual pass. The chat column is narrower with 16 pt text, so long replies read more like a page. The sidebar is calmer: the “This computer” menu and the folder picker are gone from the top (look at other computers under Settings → Computer, the Computers command in the View menu, or the “Viewing…” bar that appears at the top while you are looking at another one), one hero card shows your main Bot with other pinned Bots listed first, and the footer is a profile circle, Connect apps, and a blue arrow when an update is ready. The message box is a taller pill with a plain + and a round send or voice button, the + menu is Attach files, Paste image and Export, and Settings has a working Accent choice (Bot color or Neutral) and a copy button next to your email. Windows gets the same sidebar and message-box changes. Not yet tried on real devices.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -137,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.5" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.9.0" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.8.5 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.5 · Closer to a true remote' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.9.0 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.9.0 · A calmer look' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
