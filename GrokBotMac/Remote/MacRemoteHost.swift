@@ -224,6 +224,18 @@ final class MacRemoteHost: ObservableObject {
         workspace.entries = workspace.entries.map { var entry = $0; entry.detail = nil; return entry } // The phone shows summaries only.
         return RemoteSnapshot(hostName: Host.current().localizedName ?? "Mac", revision: revision, workspace: workspace, running: Array(desktop.runningBots), providers: desktop.installedCLIs.map { RemoteProvider(provider: $0.provider, version: $0.version) }, defaultProvider: desktop.selectedCLI?.provider, approval: MacApproval.shared.remoteRequest)
     }
+    /// Results of commands other computers asked this one to run in a shared VM. Only the newest few are kept, and each is cut to 16 KB.
+    private var vmJobs: [UUID: RemoteVMResult] = [:]
+    private var vmJobOrder: [UUID] = []
+    private func startVMJob(_ id: UUID, bot: Bot, argv: [String]) {
+        vmJobs[id] = RemoteVMResult(status: "running", output: nil); vmJobOrder.append(id)
+        while vmJobOrder.count > 16 { vmJobs[vmJobOrder.removeFirst()] = nil }
+        Task { @MainActor in
+            do { vmJobs[id] = RemoteVMResult(status: "done", output: String(try await MacBotVMs.shared.executeLocal(bot, argv: argv).prefix(16_000))) }
+            catch { vmJobs[id] = RemoteVMResult(status: "error", output: ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)) }
+        }
+    }
+
     func dispatch(_ request: RemoteHostRequest) async -> RemoteHostResponse {
         guard let parts = URLComponents(string: request.target), let app, let desktop else { return .error(400, "Invalid request") }
         func query(_ name: String) -> String? { parts.queryItems?.first { $0.name == name }?.value }
@@ -233,6 +245,15 @@ final class MacRemoteHost: ObservableObject {
             }
             if request.method == "GET", parts.path == "/v1/vm", let bot = app.workspace.bots.first(where: { $0.id.uuidString.lowercased() == query("bot")?.lowercased() }) {
                 return try .json(try await MacBotVMs.shared.preview(bot))
+            }
+            if request.method == "GET", parts.path == "/v1/vms" {
+                // Only VMs the human chose to share, with guest commands already switched on.
+                let shared = app.workspace.bots.filter { $0.memberIDs == nil && MacBotVMs.shared.assigned($0.id) != nil && MacBotVMs.shared.sharedWithComputers($0.id) && MacBotVMs.shared.commandsEnabled($0.id) }
+                return try .json(shared.map { RemoteVM(botID: $0.id, botName: $0.name, state: "ready") })
+            }
+            if request.method == "GET", parts.path == "/v1/vm-result", let id = query("id").flatMap(UUID.init(uuidString:)) {
+                guard let result = vmJobs[id] else { return .error(404, "No such command.") }
+                return try .json(result)
             }
             if request.method == "GET", parts.path == "/v1/browser", let bot = app.workspace.bots.first(where: { $0.id.uuidString.lowercased() == query("bot")?.lowercased() }) {
                 return try .json(try await LocalBotBrowsers.shared.preview(bot))
@@ -278,6 +299,12 @@ final class MacRemoteHost: ObservableObject {
             case "open_vm":
                 guard let bot, MacBotVMs.shared.assigned(bot.id) != nil else { return .error(409, "Set up this Bot’s Linux VM on the host desktop first.") }
                 await MacBotVMs.shared.open(bot)
+            case "vm_exec":
+                guard let bot, let argv = command.argv, (1...16).contains(argv.count) else { return .error(400, "Send 1–16 command words for a shared VM.") }
+                guard MacBotVMs.shared.assigned(bot.id) != nil, MacBotVMs.shared.sharedWithComputers(bot.id), MacBotVMs.shared.commandsEnabled(bot.id) else {
+                    return .error(409, "This VM is not shared. On the computer that has it, turn on “Let my other computers use this VM” and “Allow guest commands” in Bot details.")
+                }
+                startVMJob(command.requestID, bot: bot, argv: argv)
             case "open_browser":
                 guard let bot else { return .error(404, "Bot not found") }
                 _ = try LocalBotBrowsers.shared.open(bot, address: command.text)  // the phone shows a preview; no window opens on the Mac

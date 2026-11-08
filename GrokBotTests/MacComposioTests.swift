@@ -250,6 +250,41 @@ final class MacConnectionsTests: XCTestCase {
         XCTAssertTrue(MacDeviceActions.searchSummary(query: "q", via: "", hits: [("T", "https://t.example", "s")]).contains("untrusted web content"))
     }
 
+    func testAVMOnAnotherComputerIsOffByDefaultAndCommandsAreForwardedThere() async throws {
+        let vms = MacBotVMs.shared
+        let botID = UUID(), mine = Bot(id: botID, name: "Fantasy", purpose: "Help", color: "white", symbol: "sparkles")
+        defer { vms.setRemoteLink(nil, for: botID); vms.setShared(false, id: botID); vms.remoteRunner = nil }
+        XCTAssertFalse(vms.sharedWithComputers(botID), "A VM is never shared until the human turns it on")
+        XCTAssertNil(vms.remoteLink(botID))
+        vms.setShared(true, id: botID); XCTAssertTrue(vms.sharedWithComputers(botID))
+        let link = MacBotVMs.RemoteLink(hostID: UUID(), hostName: "Bens-Windows-PC", vmBotID: UUID(), vmName: "Research")
+        vms.setRemoteLink(link, for: botID)
+        XCTAssertEqual(vms.remoteLink(botID), link)
+        var received: [String] = []
+        vms.remoteRunner = { given, argv in XCTAssertEqual(given, link); received = argv; return "hello" }
+        let output = try await vms.execute(mine, argv: ["/bin/echo", "hi"])
+        XCTAssertTrue(output.contains("Bens-Windows-PC")); XCTAssertTrue(output.hasSuffix("hello")); XCTAssertEqual(received, ["/bin/echo", "hi"])
+        do { _ = try await vms.execute(mine, argv: ["echo", "relative"]); XCTFail("A relative program path must be refused") } catch {}
+        do { _ = try await vms.execute(mine, argv: []); XCTFail("An empty command must be refused") } catch {}
+        do { _ = try await vms.execute(mine, argv: Array(repeating: "/bin/echo", count: 17)); XCTFail("More than 16 words must be refused") } catch {}
+        XCTAssertEqual(received, ["/bin/echo", "hi"], "Refused commands never reach the other computer")
+        vms.setRemoteLink(nil, for: botID)
+        do { _ = try await vms.executeLocal(mine, argv: ["/bin/echo"]); XCTFail("There is no VM here") } catch {}
+    }
+
+    func testVMCommandsAndResultsSurviveTheRelayEncoding() throws {
+        let id = UUID(), vm = UUID()
+        let sent = RemoteCommand(requestID: id, action: "vm_exec", botID: vm, argv: ["/bin/ls", "/home"])
+        let decoded = try CloudCoding.decoder().decode(RemoteCommand.self, from: CloudCoding.encoder().encode(sent))
+        XCTAssertEqual(decoded.argv, ["/bin/ls", "/home"]); XCTAssertEqual(decoded.botID, vm); XCTAssertEqual(decoded.requestID, id)
+        let older = try CloudCoding.decoder().decode(RemoteCommand.self, from: Data(#"{"requestID":"\#(id.uuidString)","action":"stop"}"#.utf8))
+        XCTAssertNil(older.argv, "Commands from older versions have no argv")
+        let result = try CloudCoding.decoder().decode(RemoteVMResult.self, from: Data(#"{"status":"done","output":"ok"}"#.utf8))
+        XCTAssertEqual(result.status, "done"); XCTAssertEqual(result.output, "ok")
+        let list = try CloudCoding.decoder().decode([RemoteVM].self, from: Data(#"[{"botID":"\#(vm.uuidString)","botName":"Research","state":"ready"}]"#.utf8))
+        XCTAssertEqual(list.first?.botName, "Research")
+    }
+
     func testDisabledServicesAndWritesAreRefusedWithoutPrompting() async throws {
         let suite = "org.opengrokbot.tests.apple." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }

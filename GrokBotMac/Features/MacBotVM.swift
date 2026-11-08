@@ -11,9 +11,43 @@ final class MacBotVMs: ObservableObject {
     private let preferences = UserDefaults.standard
     func commandsEnabled(_ id: UUID) -> Bool { preferences.bool(forKey: "bot-vm-commands-" + id.uuidString) }
     func setCommands(_ enabled: Bool, id: UUID) { preferences.set(enabled, forKey: "bot-vm-commands-" + id.uuidString); objectWillChange.send() }
-    func execute(_ bot: Bot, argv: [String]) async throws -> String {
-        guard commandsEnabled(bot.id), let id = assigned(bot.id), UUID(uuidString: id) != nil else { throw CloudError.message("Set up this Bot’s VM and enable Bot commands in its VM settings first.") }
+    // MARK: A VM on another computer
+    /// Another computer's VM that one of this Mac's Bots uses instead of a VM of its own.
+    struct RemoteLink: Codable, Equatable {
+        var hostID: UUID
+        var hostName: String
+        var vmBotID: UUID
+        var vmName: String
+    }
+    /// Set by the app: runs a command in a VM on another computer on this account.
+    var remoteRunner: (@MainActor (RemoteLink, [String]) async throws -> String)?
+    func remoteLink(_ id: UUID) -> RemoteLink? {
+        preferences.data(forKey: "bot-vm-remote-" + id.uuidString).flatMap { try? JSONDecoder().decode(RemoteLink.self, from: $0) }
+    }
+    func setRemoteLink(_ link: RemoteLink?, for id: UUID) {
+        if let link, let data = try? JSONEncoder().encode(link) { preferences.set(data, forKey: "bot-vm-remote-" + id.uuidString) } else { preferences.removeObject(forKey: "bot-vm-remote-" + id.uuidString) }
+        objectWillChange.send()
+    }
+    /// Whether other computers on this account may run commands in this Bot's VM. Off until the human turns it on here.
+    func sharedWithComputers(_ id: UUID) -> Bool { preferences.bool(forKey: "bot-vm-shared-" + id.uuidString) }
+    func setShared(_ on: Bool, id: UUID) { preferences.set(on, forKey: "bot-vm-shared-" + id.uuidString); objectWillChange.send() }
+
+    private static func checkCommand(_ argv: [String]) throws {
         guard (1...16).contains(argv.count), argv[0].hasPrefix("/"), argv.reduce(0, { $0 + $1.utf8.count }) <= 16000, !argv.contains(where: { $0.contains("\0") }) else { throw CloudError.message("Use 1–16 guest command arguments, starting with an absolute Linux executable path.") }
+    }
+
+    /// Runs a Bot's guest command in the VM it uses: one on another computer if it is set up that way, otherwise its own.
+    func execute(_ bot: Bot, argv: [String]) async throws -> String {
+        guard let link = remoteLink(bot.id) else { return try await executeLocal(bot, argv: argv) }
+        try Self.checkCommand(argv)
+        guard let remoteRunner else { throw CloudError.message("Sign in to your OpenGrokBot account to use a VM on another computer.") }
+        return "Linux guest on \(link.hostName) (\(link.vmName)):\n" + (try await remoteRunner(link, argv))
+    }
+
+    /// Runs a guest command in this Mac's own VM for the Bot. This is also what a command from another computer uses, so it never forwards again.
+    func executeLocal(_ bot: Bot, argv: [String]) async throws -> String {
+        guard commandsEnabled(bot.id), let id = assigned(bot.id), UUID(uuidString: id) != nil else { throw CloudError.message("Set up this Bot’s VM and enable Bot commands in its VM settings first.") }
+        try Self.checkCommand(argv)
         let result = await Task.detached { CLIInstallationScanner.capture(path: "/Applications/UTM.app/Contents/MacOS/utmctl", arguments: ["exec",id,"--cmd"] + argv, timeout: 65, limit: 16000) }.value
         guard result.exit >= 0 else { throw CloudError.message("Guest command did not finish. Install/start qemu-guest-agent in the Linux template and check UTM. A timed-out guest process may still be running.") }
         return "Linux guest exit \(result.exit):\n" + result.text
@@ -98,9 +132,59 @@ struct MacBotVMControls: View {
                 Text("Needs macOS Screen Recording permission. Only this Bot’s UTM console window is captured.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
                 Toggle("Allow guest commands", isOn: Binding(get: { vms.commandsEnabled(bot.id) }, set: { vms.setCommands($0, id: bot.id) }))
                 Text("Needs qemu-guest-agent in Linux. Commands may run as root inside the VM.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+                Toggle("Let my other computers use this VM", isOn: Binding(get: { vms.sharedWithComputers(bot.id) }, set: { vms.setShared($0, id: bot.id) }))
+                    .disabled(!vms.commandsEnabled(bot.id))
+                Text("Bots on your other computers (signed in to your account) can run commands in this VM. It needs “Allow guest commands” above, and you can turn it off at any time.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let feedback = vms.feedback[bot.id] { Text(feedback).font(.system(size: 12)).foregroundStyle(MacTheme.secondary).textSelection(.enabled) }
         }
+    }
+}
+
+/// Lets this Bot use a Linux VM that another computer on the account is sharing, instead of a VM of its own.
+struct MacRemoteVMCard: View {
+    let bot: Bot
+    @EnvironmentObject private var desktop: MacAppModel
+    @ObservedObject private var vms = MacBotVMs.shared
+    @State private var host: CloudDevice?
+    @State private var available: [RemoteVM] = []
+    @State private var loading = false
+    @State private var note: String?
+
+    var body: some View {
+        InspectorCard(title: "VM on another computer", footer: "The VM keeps running on the other computer. Commands travel over your encrypted account connection, and the other computer must have turned sharing on for that VM. The first time, approve this Mac there if it asks.") {
+            if let link = vms.remoteLink(bot.id) {
+                Text("Using “\(link.vmName)” on \(link.hostName). This Bot’s guest commands run there.").font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
+                Button("Stop using it") { vms.setRemoteLink(nil, for: bot.id); note = nil }.buttonStyle(InspectorButtonStyle())
+            } else {
+                let computers = desktop.computers()
+                if computers.isEmpty {
+                    Text("Sign in to your account on another computer that has OpenGrokBot open to use its VM here.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                } else {
+                    Menu(host?.name ?? "Choose a computer…") {
+                        ForEach(computers, id: \.id) { computer in Button(computer.name) { host = computer; Task { await load(computer) } } }
+                    }
+                    if loading { ProgressView().controlSize(.small) }
+                    ForEach(available) { vm in
+                        Button("Use “\(vm.botName)”", systemImage: "externaldrive.connected.to.line.below") {
+                            guard let host else { return }
+                            vms.setRemoteLink(MacBotVMs.RemoteLink(hostID: host.id, hostName: host.name, vmBotID: vm.botID, vmName: vm.botName), for: bot.id)
+                        }.buttonStyle(InspectorButtonStyle())
+                    }
+                }
+            }
+            if let note { Text(note).font(.system(size: 12)).foregroundStyle(MacTheme.secondary).textSelection(.enabled) }
+        }
+    }
+
+    private func load(_ computer: CloudDevice) async {
+        loading = true; note = nil; available = []
+        defer { loading = false }
+        do {
+            let list = try await desktop.ensureCopyGateway().vms(on: computer)
+            available = list
+            if list.isEmpty { note = "\(computer.name) is not sharing any VM. On that computer, open a Bot’s Linux VM settings, turn on “Allow guest commands”, then “Let my other computers use this VM”." }
+        } catch { note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
     }
 }
 

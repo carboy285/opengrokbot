@@ -269,6 +269,32 @@ final class RemoteController: ObservableObject {
         let response = try await client.fetch(peer, target: "/v1/" + (vm ? "vm" : "browser") + "?bot=" + botID.uuidString)
         return try CloudCoding.decoder().decode(RemoteBrowserPreview.self, from: response.body)
     }
+    /// Linux VMs another computer is sharing with this account.
+    func vmList(on host: CloudDevice? = nil) async throws -> [RemoteVM] {
+        guard let peer = host ?? connection else { throw CloudError.message("Choose a computer first.") }
+        let response = try await client.fetch(peer, target: "/v1/vms")
+        return try CloudCoding.decoder().decode([RemoteVM].self, from: response.body)
+    }
+    /// Runs a command inside a VM another computer is sharing and returns what it printed. The computer is asked to start the command, then
+    /// asked for the result every couple of seconds, because the relay answers within seconds but a command inside a VM may take a minute.
+    func runVMCommand(_ argv: [String], vm: UUID, on host: CloudDevice? = nil) async throws -> String {
+        guard let peer = host ?? connection else { throw CloudError.message("Choose a computer first.") }
+        guard (1...16).contains(argv.count) else { throw CloudError.message("Use 1–16 command words, with the program path first.") }
+        let requestID = UUID()
+        _ = try await client.fetch(peer, target: "/v1/command", command: RemoteCommand(requestID: requestID, action: "vm_exec", botID: vm, argv: argv))
+        let deadline = Date().addingTimeInterval(130)
+        while Date() < deadline {
+            try await Task.sleep(for: .seconds(2))
+            let response = try await client.fetch(peer, target: "/v1/vm-result?id=" + requestID.uuidString)
+            let result = try CloudCoding.decoder().decode(RemoteVMResult.self, from: response.body)
+            switch result.status {
+            case "done": return result.output ?? ""
+            case "error": throw CloudError.message(result.output ?? "The command did not run.")
+            default: continue
+            }
+        }
+        throw CloudError.message("The VM did not answer in time. Check that the other computer is awake and the VM is running.")
+    }
     /// An encoded Bot package from the connected computer.
     func botPackage(_ bot: Bot) async throws -> Data {
         guard let peer = connection else { throw CloudError.message("Choose a hosting computer first.") }

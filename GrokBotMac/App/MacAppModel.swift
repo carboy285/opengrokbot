@@ -94,6 +94,15 @@ final class MacAppModel: ObservableObject {
     init() {
         // Web searches go through Composio, so a Bot never needs a browser window to look something up.
         MacDeviceActions.shared.composioSearch = { [weak composio] query in try await composio?.webSearch(query) }
+        // A Bot that uses a VM on another computer sends its guest commands there over the encrypted relay.
+        MacBotVMs.shared.remoteRunner = { [weak self] link, argv in
+            guard let self, self.remote.account.signedIn else { throw CloudError.message("Sign in to your OpenGrokBot account to use a VM on another computer.") }
+            let gateway = self.ensureCopyGateway()
+            var host = gateway.hosts.first { $0.id == link.hostID }
+            for _ in 0..<12 where host == nil { try await Task.sleep(for: .milliseconds(500)); host = gateway.hosts.first { $0.id == link.hostID } }
+            guard let host else { throw CloudError.message("\(link.hostName) is not showing up right now. Make sure it is awake with OpenGrokBot open and phone access on.") }
+            return try await gateway.runVM(argv, vm: link.vmBotID, on: host)
+        }
         if FileManager.default.fileExists(atPath: Self.draftURL.path) {
             do {
                 let saved = try JSONDecoder().decode([String:String].self, from: Data(contentsOf: Self.draftURL))

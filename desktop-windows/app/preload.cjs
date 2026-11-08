@@ -1,6 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
   vmCommands:(id,value)=>ipcRenderer.invoke('vm:commands',id,value),
+  vmShare:(id,value)=>ipcRenderer.invoke('vm:share',id,value),
+  vmRemoteHosts:()=>ipcRenderer.invoke('vmremote:hosts'),
+  vmRemoteList:hostID=>ipcRenderer.invoke('vmremote:list',hostID),
+  vmRemoteGet:id=>ipcRenderer.invoke('vmremote:get',id),
+  vmRemoteSet:(id,link)=>ipcRenderer.invoke('vmremote:set',id,link),
   vmStatus:id=>ipcRenderer.invoke('vm:status',id),
   vmSetup:id=>ipcRenderer.invoke('vm:setup',id),
   vmOpen:id=>ipcRenderer.invoke('vm:open',id),

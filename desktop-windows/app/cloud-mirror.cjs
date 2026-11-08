@@ -3,18 +3,18 @@ const os=require('node:os');
 const {identity,seal,open,fingerprint}=require('./cloud-host.cjs');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 class CloudMirror{
- constructor(cloud,changed){this.cloud=cloud;this.changed=changed;this.generation=0;this.snapshot=null;this.devices=[];this.peer=null;this.phase='Choose a computer';this.inFlight=false;this.accountGeneration=cloud.accountGeneration;this.lastError='';this.receivedAt=null;this.stage='idle';}
+ constructor(cloud,changed,{slot=''}={}){this.slot=slot;this.cloud=cloud;this.changed=changed;this.generation=0;this.snapshot=null;this.devices=[];this.peer=null;this.phase='Choose a computer';this.inFlight=false;this.accountGeneration=cloud.accountGeneration;this.lastError='';this.receivedAt=null;this.stage='idle';}
  accountChanged(){if(this.accountGeneration!==this.cloud.accountGeneration){this.accountGeneration=this.cloud.accountGeneration;this.devices=[];this.stop();}}
  get owner(){return this.cloud.data.session?.user.id;}
- get local(){return this.cloud.data.controllers?.[this.owner?.toLowerCase()];}
+ get local(){return this.cloud.data.controllers?.[this.owner?.toLowerCase()+this.slot];}
  status(){return {phase:this.phase,stage:this.stage,error:this.lastError,receivedAt:this.receivedAt,host:this.peer?.name,hostID:this.peer?.id,hosts:this.devices.filter(x=>x.kind==='host'&&x.id!==this.cloud.local?.id).map(({id,name,available,last_seen})=>({id,name,online:available&&Date.now()-Date.parse(last_seen)<90000})),fingerprint:this.local?fingerprint(this.local.publicKey):null,snapshot:this.snapshot};}
  emit(){this.changed(this.status());}
  async discover(){
   if(!this.owner)throw new Error('Sign in under Settings → Computer first.');
   const owner=this.owner,epoch=this.cloud.accountGeneration;
-  this.cloud.data.controllers||={};this.cloud.data.controllers[owner.toLowerCase()]||=identity();await this.cloud.persist();
+  this.cloud.data.controllers||={};this.cloud.data.controllers[owner.toLowerCase()+this.slot]||=identity();await this.cloud.persist();
   const local=this.local;
-  await this.cloud.request('/rest/v1/rpc/opengrok_register_device',{device_id:local.id,device_name:os.hostname()+' · remote view',device_kind:'controller',device_key:local.publicKey,is_available:'true'});
+  await this.cloud.request('/rest/v1/rpc/opengrok_register_device',{device_id:local.id,device_name:os.hostname()+(this.slot?' · remote VM':' · remote view'),device_kind:'controller',device_key:local.publicKey,is_available:'true'});
   const devices=await this.cloud.request('/rest/v1/opengrok_devices?select=id,name,kind,public_key,last_seen,available&order=last_seen.desc',null,'GET');
   if(epoch!==this.cloud.accountGeneration||owner!==this.owner)throw new Error('The account changed.');
   if(!Array.isArray(devices))throw new Error('Invalid device list.');this.devices=devices;this.emit();return this.status();
@@ -23,6 +23,16 @@ class CloudMirror{
   this.stop();const epoch=this.generation,account=this.cloud.accountGeneration;await this.discover();if(epoch!==this.generation||account!==this.cloud.accountGeneration)throw new Error('The selected computer changed.');const peer=this.devices.find(x=>x.kind==='host'&&x.id===id&&x.id!==this.cloud.local?.id);if(!peer)throw new Error('Choose another computer on this account.');
   const key=this.owner.toLowerCase()+'|'+peer.id.toLowerCase();this.cloud.data.mirrorPins||={};const pin=this.cloud.data.mirrorPins[key];if(pin&&pin!==peer.public_key)throw new Error('This computer’s encryption identity changed. Re-register it on the server before connecting.');
   this.cloud.data.mirrorPins[key]=peer.public_key;await this.cloud.persist();if(epoch!==this.generation||account!==this.cloud.accountGeneration)throw new Error('The selected computer changed.');this.peer=peer;const generation=++this.generation;this.phase='Requesting Bots from '+peer.name+'…';this.stage='requesting';this.lastError='';this.emit();this.worker(generation,account).catch(()=>{});return this.status();
+ }
+/** Connects to one computer without starting the live Bot-list worker. Used for sending commands (such as running something in a shared VM). */
+ async attach(id){
+  this.stop();const account=this.cloud.accountGeneration;await this.discover();
+  const peer=this.devices.find(x=>x.kind==='host'&&x.id===id&&x.id!==this.cloud.local?.id);if(!peer)throw new Error('That computer is not available right now. Make sure it is awake with OpenGrokBot open and remote access on.');
+  const key=this.owner.toLowerCase()+'|'+peer.id.toLowerCase();this.cloud.data.mirrorPins||={};const pin=this.cloud.data.mirrorPins[key];
+  if(pin&&pin!==peer.public_key)throw new Error('This computer’s encryption identity changed. Re-register it on the server before connecting.');
+  this.cloud.data.mirrorPins[key]=peer.public_key;await this.cloud.persist();
+  if(account!==this.cloud.accountGeneration)throw new Error('The account changed.');
+  this.peer=peer;this.generation++;return peer;
  }
  async fetch(target,command){
   const generation=this.generation,account=this.cloud.accountGeneration,owner=this.owner,peer=this.peer,local=this.local;

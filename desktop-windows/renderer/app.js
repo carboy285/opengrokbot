@@ -439,8 +439,25 @@ async function showBotVM(bot){
  const draw=async()=>{const state=await result(bridge.vmStatus(bot.id));info.textContent=state.assigned?'VM: '+state.name+' · '+state.state:state.installed?'VirtualBox found. Choose a Linux guest image to set up.':'Install VirtualBox, then reopen this panel.';controls.replaceChildren();
   const setup=button(state.assigned?'Open VM console':'Choose image and set up VM…',async()=>{setup.disabled=true;info.textContent=state.assigned?'Opening console…':'Setting up VM. This may take several minutes…';try{await result(state.assigned?bridge.vmOpen(bot.id):bridge.vmSetup(bot.id));await draw();}catch(error){info.textContent=error.message;setup.disabled=false;}});setup.disabled=!state.installed||state.busy;controls.append(setup);
   if(state.hasCredentials){const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=state.commandsEnabled;checkbox.addEventListener('change',async()=>{try{await result(bridge.vmCommands(bot.id,checkbox.checked));}catch(error){info.textContent=error.message;}});append(controls,append(node('label'),checkbox,node('span','',' Allow this Bot to run guest commands (requires Guest Additions)')));}
+  if(state.hasCredentials){const share=node('input');share.type='checkbox';share.checked=!!state.shared;share.disabled=!state.commandsEnabled;share.addEventListener('change',async()=>{try{await result(bridge.vmShare(bot.id,share.checked));}catch(error){info.textContent=error.message;}});append(controls,append(node('label'),share,node('span','',' Let my other computers use this VM (needs guest commands above; you can turn it off at any time)')));}
   if(state.hasCredentials)controls.append(button('Copy guest login',async()=>{try{const login=await result(bridge.vmCredentials(bot.id));await navigator.clipboard.writeText('Username: '+login.username+'\nPassword: '+login.password);info.textContent='Guest login copied.';}catch(error){info.textContent=error.message;}}));
  };try{await draw();}catch(error){info.textContent=error.message;}
+ showRemoteVM(bot,content);
+}
+
+// Use a Linux VM that another computer on this account is sharing, instead of one on this PC.
+async function showRemoteVM(bot,content){
+ const box=node('div','remote-vm'),status=node('p','muted','');append(box,node('h3','','VM on another computer'),status);content.append(box);
+ if(!bridge.vmRemoteGet){status.textContent='Open the installed desktop app to use a VM on another computer.';return;}
+ const draw=async()=>{
+  box.replaceChildren(node('h3','','VM on another computer'),status);
+  let link=null;try{link=await result(bridge.vmRemoteGet(bot.id));}catch(error){status.textContent=error.message;return;}
+  if(link){status.textContent=`Using “${link.vmName}” on ${link.hostName}. This Bot’s guest commands run there.`;box.append(button('Stop using it',async()=>{try{await result(bridge.vmRemoteSet(bot.id,null));await draw();}catch(error){status.textContent=error.message;}}));return;}
+  status.textContent='The VM keeps running on the other computer. Commands travel over your encrypted account connection, and that computer must have turned sharing on for the VM. The first time, approve this PC there if it asks.';
+  const pick=button('Choose a computer…',async()=>{pick.disabled=true;status.textContent='Looking for your other computers…';try{const hosts=await result(bridge.vmRemoteHosts());if(!hosts.length){status.textContent='No other computer is signed in to your account with OpenGrokBot open.';pick.disabled=false;return;}status.textContent='Choose a computer:';for(const host of hosts){box.append(button(host.name+(host.online?'':' (offline)'),async()=>{status.textContent='Asking '+host.name+' for its shared VMs…';try{const list=await result(bridge.vmRemoteList(host.id));if(!list.length){status.textContent=host.name+' is not sharing any VM. On that computer, open a Bot’s Linux VM settings, turn on guest commands, then “Let my other computers use this VM”.';return;}status.textContent='Choose a VM on '+host.name+':';for(const vm of list)box.append(button('Use “'+vm.botName+'”',async()=>{try{await result(bridge.vmRemoteSet(bot.id,{hostID:host.id,hostName:host.name,vmBotID:vm.botID,vmName:vm.botName}));await draw();}catch(error){status.textContent=error.message;}}));}catch(error){status.textContent=error.message;}}));}}catch(error){status.textContent=error.message;pick.disabled=false;}});
+  box.append(pick);
+ };
+ await draw();
 }
 
 // ---- 0.8.6: palette, message actions, Create Bot, dictation, permissions, voice card ----

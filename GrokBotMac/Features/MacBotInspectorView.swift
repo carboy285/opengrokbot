@@ -134,6 +134,7 @@ struct MacBotInspectorView: View {
                 }.buttonStyle(InspectorButtonStyle())
             }
             MacBotVMControls(bot: bot)
+            if bot.memberIDs == nil { MacRemoteVMCard(bot: bot) }
             MacVoiceCard(bot: bot)
             routinesCard
             InspectorCard(title: "Shared memory", footer: "Every Bot can see these. Remove anything that is out of date.") {

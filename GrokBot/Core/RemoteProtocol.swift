@@ -74,6 +74,20 @@ struct RemoteCommand: Codable, Sendable {
     var attachments: [RemoteAttachment]?
     /// import_bot: an encoded Bot package from another computer on this account.
     var package: Data?
+    /// vm_exec: the command to run inside a shared VM (program path first), at most 16 words.
+    var argv: [String]?
+}
+/// A Linux VM a computer is sharing with the others on the account.
+struct RemoteVM: Codable, Sendable, Identifiable, Hashable {
+    var botID: UUID
+    var botName: String
+    var state: String
+    var id: UUID { botID }
+}
+/// How a command sent to a shared VM is going. `status` is running, done or error.
+struct RemoteVMResult: Codable, Sendable {
+    var status: String
+    var output: String?
 }
 /// An image sent with a message. Hosts store it in the Bot's Attachments folder.
 struct RemoteAttachment: Codable, Sendable, Equatable {

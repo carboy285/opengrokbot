@@ -67,6 +67,9 @@ final class MacGateway: ObservableObject {
     func hostSettings() async throws -> RemoteHostSettings { try await remote.hostSettings() }
     func setAPIKey(_ key: String, for provider: CLIProvider) async throws { try await remote.setAPIKey(key, for: provider) }
 
+    func vms(on host: CloudDevice) async throws -> [RemoteVM] { try await remote.vmList(on: host) }
+    func runVM(_ argv: [String], vm: UUID, on host: CloudDevice) async throws -> String { try await remote.runVMCommand(argv, vm: vm, on: host) }
+
     /// The Bot as a package, from the computer being viewed.
     func package(_ bot: Bot) async throws -> Data { try await remote.botPackage(bot) }
     func settingsBundle() async throws -> Data { try await remote.settingsBundle() }

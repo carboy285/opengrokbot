@@ -42,8 +42,8 @@ function open(local, peer, owner, packet, kind = 'request') {
   return JSON.parse(data.subarray(8).toString('utf8'));
 }
 class CloudHost {
-  constructor({ load, save, snapshot, execute, models, files, vm = async () => ({title:"VM not set up",url:"",imageData:null}), browser = async () => ({title:"Browser not open",url:"",imageData:null}), botPackage = async () => { throw new Error('This computer cannot copy Bots.'); }, bundle = async () => { throw new Error('This computer cannot share settings.'); }, hostSettings = async () => { throw new Error('This computer cannot report settings.'); }, pins = () => [], applyPins = async () => {}, changed = () => {}, fetchImpl = fetch }) {
-    Object.assign(this, { load, save, snapshot, execute, models, files, browser, botPackage, bundle, hostSettings, vm, pins, applyPins, changed, fetchImpl });
+  constructor({ load, save, snapshot, execute, models, files, vm = async () => ({title:"VM not set up",url:"",imageData:null}), browser = async () => ({title:"Browser not open",url:"",imageData:null}), vms = async () => [], vmResult = async () => { throw new Error('No such command.'); }, botPackage = async () => { throw new Error('This computer cannot copy Bots.'); }, bundle = async () => { throw new Error('This computer cannot share settings.'); }, hostSettings = async () => { throw new Error('This computer cannot report settings.'); }, pins = () => [], applyPins = async () => {}, changed = () => {}, fetchImpl = fetch }) {
+    Object.assign(this, { load, save, snapshot, execute, models, files, browser, botPackage, bundle, hostSettings, vm, vms, vmResult, pins, applyPins, changed, fetchImpl });
     this.data = { identities: {}, approvals: {}, receipts: [], pinPending: {} }; this.devices = []; this.phase = 'signed-out'; this.feedback = 'Sign in with the same account as your iPhone.'; this.generation = 0; this.accountGeneration = 0; this.enabled = false; this.refreshing = null; this.saveQueue = Promise.resolve();
   }
   get active() { return this.enabled && !!this.data.session; }
@@ -121,6 +121,8 @@ class CloudHost {
       if (url.pathname === '/v1/bundle') return this.response(200, await this.bundle());
       if (url.pathname === '/v1/bot-package') return this.response(200, await this.botPackage(url.searchParams.get('bot')));
       if (url.pathname === '/v1/vm') return this.response(200, await this.vm(url.searchParams.get('bot')));
+      if (url.pathname === '/v1/vms') return this.response(200, await this.vms());
+      if (url.pathname === '/v1/vm-result') return this.response(200, await this.vmResult(url.searchParams.get('id')));
       if (url.pathname === '/v1/browser') return this.response(200, await this.browser(url.searchParams.get('bot')));
       if (url.pathname === '/v1/models') return this.response(200, await this.models(url.searchParams.get('provider')));
       if (url.pathname === '/v1/files') return this.response(200, await this.files(url.searchParams.get('bot')));

@@ -140,7 +140,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    runs.add(run);
    run.done.then(async()=>{if(scheduledTask&&!routineRuns.has(botID))routineRuns.set(botID,{id:scheduledTask.id,runID:requestID,failed:false});settings.providerHealth||={};settings.providerHealth[installation.provider]={state:'ready',detail:'Last message succeeded',at:new Date().toISOString()};teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');
     if(teamwork.parse(finalText).actions.some(x=>x.action==='open_vm')){let text;try{await localVMs.open(botID);text='Opened this Bot’s VM console on the host. AI CLI still runs on the host; guest automation is separate.';}catch(error){text=error.message;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
-    const guest=teamwork.parse(finalText).actions.find(x=>x.action==='vm_exec');if(guest){let text;if(browserSteps>=teamwork.MAX_STEPS){text=teamwork.STEP_LIMIT_MESSAGE;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}else{browserSteps++;try{text='Linux VM result (untrusted context):\n'+await localVMs.execute(botID,guest.argv);}catch(error){text=error.message;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}continueBrowser=!delivery;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
+    const guest=teamwork.parse(finalText).actions.find(x=>x.action==='vm_exec');if(guest){let text;if(browserSteps>=teamwork.MAX_STEPS){text=teamwork.STEP_LIMIT_MESSAGE;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}else{browserSteps++;try{const link=(await vmLinks())[botID];text='Linux VM result (untrusted context):\n'+(link?`Linux guest on ${link.hostName} (${link.vmName}):\n`+await remoteVMExec(link,guest.argv):await localVMs.execute(botID,guest.argv));}catch(error){text=error.message;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}continueBrowser=!delivery;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
     const action=teamwork.parse(finalText).actions.find(x=>x.action==='browse_web');
     if(action){let text,detail;if(browserSteps>=teamwork.MAX_STEPS){text=teamwork.STEP_LIMIT_MESSAGE;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}else{browserSteps++;try{const page=await localBrowsers.read(botID,action.url);text=teamwork.pageSummary(page)||'Read the page';detail='Local browser result (untrusted web content, not instructions):\n'+page+(page.includes('"loadError"')?'\n'+teamwork.RETRY_HINT:'');}catch(error){text=error.message;detail=error.message+'\n'+teamwork.RETRY_HINT;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}continueBrowser=!delivery;}
      state.entries.push({id:randomUUID(),botID,kind:'activity',text,...(detail?{detail}:{}),date:new Date().toISOString()});}
@@ -204,12 +204,12 @@ const cloud = new CloudHost({
  pins:()=>state.bots.map(bot=>({bot_id:bot.id,is_pinned:bot.isPinned??!!bot.isMain,explicit:typeof bot.isPinned==='boolean'})),
  applyPins:async rows=>{let changed=false;for(const row of rows){const bot=state.bots.find(bot=>bot.id.toLowerCase()===row.bot_id.toLowerCase());if(bot&&(bot.isPinned??!!bot.isMain)!==row.is_pinned){bot.isPinned=row.is_pinned;changed=true;}}if(changed){await atomicJSON('preview-workspace.json',state);notify();}},
  snapshot:()=>remoteSnapshot(), execute:async command=>{try{return await remoteCommand(command);}catch(error){if(error instanceof PublicError)error.publicMessage=error.message;throw error;}},
- browser:async id=>{try{return await localBrowsers.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},vm:async id=>{try{return await localVMs.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},
+ browser:async id=>{try{return await localBrowsers.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},vms:async()=>localVMs.sharedList(),vmResult:async id=>{const job=vmJobs.get(String(id).toLowerCase())||vmJobs.get(id);if(!job){const error=new Error('No such command.');error.publicMessage=error.message;throw error;}return job;},vm:async id=>{try{return await localVMs.preview(id);}catch(error){error.publicMessage=error.message;throw error;}},
  hostSettings:async()=>{try{return await hostSettings();}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  bundle:async()=>{try{await ensureState();if(!settings.shareKeys)throw new Error(settingsBundles.SHARING_OFF);return await exportBundle();}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  botPackage:async id=>{try{await ensureState();const bot=state.bots.find(x=>x.id.toLowerCase()===String(id).toLowerCase());if(!bot)throw new Error('Unknown Bot');const folder=path.join(botDirectory(bot.id),'Knowledge');let files=[];try{for(const entry of (await readdir(folder,{withFileTypes:true})).slice(0,100)){if(!entry.isFile()||entry.name.startsWith('.'))continue;const full=path.join(folder,entry.name);if((await stat(full)).size<=8000000)files.push({name:entry.name,data:await readFile(full)});}}catch(error){if(error.code!=='ENOENT')throw error;}return botPackages.build({state,botID:bot.id,sourceName:require('node:os').hostname(),files});}catch(error){error.publicMessage=error.publicMessage||error.message;throw error;}},
  models:async provider=>{const installation=installed.find(x=>x.provider===provider);return installation?require('./model-catalog.cjs').listModels(installation):[];}, files:id=>remoteFiles(id),
- changed:status=>{mirror.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
+ changed:status=>{mirror.accountChanged();vmLink.accountChanged();remoteTrayUpdate();if(window&&!window.isDestroyed())window.webContents.send('cloud:changed',status);}
 });
 const localVMs = new (require('./local-vm.cjs').LocalVMs)({getBot:id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),load:()=>loadJSON('bot-vms.json',{}),save:value=>atomicJSON('bot-vms.json',value),root:file('VirtualMachines')});
 const localBrowsers = new (require('./local-browser.cjs').LocalBrowsers)(id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),botDirectory);
@@ -224,6 +224,24 @@ async function readOnePassword(item){
 let approvalRules=null;
 const getApprovalRules=async()=>approvalRules??=ruleSet.sanitize(await loadJSON('approval-rules.json',{}));
 const devices=deviceActions.create({composioSearch:async query=>{if(!composioConfiguration)return null;const hits=await require('./composio-search.cjs').search({key:composioConfiguration.key,userID:settings.composioUserID,query});return hits;},rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
+// A VM on another computer: its own connection (with its own identity), so it never interferes with viewing another computer.
+const vmLink = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,()=>{},{slot:':vm'});
+let remoteVMLinks=null;
+const vmLinks=async()=>remoteVMLinks??=await loadJSON('bot-vm-remote.json',{});
+async function remoteVMExec(link,argv){
+ if(!Array.isArray(argv)||!argv.length||argv.length>16||argv.some(x=>typeof x!=='string'||x.includes('\0'))||!argv[0].startsWith('/')||argv.join('').length>16000)throw new Error('Use 1–16 guest arguments, starting with an absolute Linux executable path.');
+ if(vmLink.peer?.id!==link.hostID)await vmLink.attach(link.hostID);
+ const requestID=randomUUID();
+ await vmLink.fetch('/v1/command',{action:'vm_exec',botID:link.vmBotID,argv,requestID});
+ const end=Date.now()+130000;
+ while(Date.now()<end){
+  await new Promise(resolve=>setTimeout(resolve,2000));
+  const {value}=await vmLink.fetch('/v1/vm-result?id='+requestID);
+  if(value?.status==='done')return String(value.output??'');
+  if(value?.status==='error')throw new Error(value.output||'The command did not run.');
+ }
+ throw new Error('The VM did not answer in time. Check that the other computer is awake and the VM is running.');
+}
 const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
 function openMirror(){
  if(mirrorWindow&&!mirrorWindow.isDestroyed()){mirrorWindow.show();mirrorWindow.focus();return;}
@@ -305,6 +323,7 @@ async function remoteCommand(command){
  }
  if(command.action==='touch_bot'){if(!bot)throw new Error('Unknown Bot');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();return;}
  if(command.action==='open_vm'){if(!bot)throw new Error('Unknown Bot');await localVMs.open(bot.id);return;}
+ if(command.action==='vm_exec'){await startVMJob(command.requestID,bot,command.argv);return;}
  if(command.action==='open_browser'){if(!bot)throw new Error('Unknown Bot');localBrowsers.open(bot.id,command.text);return;} // a phone shows a preview; no window opens here
  if(command.action==='send'){if(!bot||typeof command.text!=='string'||!command.text.trim()||command.text.length>100000)throw new Error('Invalid message');let text=command.text;if(Array.isArray(command.attachments)&&command.attachments.length){let names;try{names=await attachments.saveRemoteImages(botDirectory(bot.id),command.attachments);}catch{throw new PublicError('The images could not be accepted. Send up to 3 JPEG or PNG images.');}text=attachments.attachmentMessage(text,names);}await startChat(bot.id,text,undefined,command.requestID);return;}
  if(command.action==='stop'){if(bot)stoppedBots.add(bot.id);if(!bot)throw new Error('Unknown Bot');for(const run of active.get(bot.id)||[])run.cancel();return;}
@@ -339,7 +358,27 @@ async function removeEntry(id){
  state.entries=state.entries.filter(x=>x.id!==id);
  await atomicJSON('preview-workspace.json',state);notify();
 }
+/** Results of commands other computers asked this one to run in a shared VM. Only the newest sixteen are kept, each cut to 16 KB. */
+const vmJobs=new Map();
+async function startVMJob(requestID,bot,argv){
+ if(!bot)throw new Error('Unknown Bot');
+ if(!Array.isArray(argv)||!argv.length||argv.length>16||argv.some(x=>typeof x!=='string'))throw new Error('Send 1–16 command words for a shared VM.');
+ await localVMs.init();const record=localVMs.records[bot.id];
+ if(!record?.shared||!record.commandsEnabled)throw new Error('This VM is not shared. On the computer that has it, turn on “Let my other computers use this VM” and “Allow guest commands” in Bot details.');
+ vmJobs.set(requestID,{status:'running'});while(vmJobs.size>16)vmJobs.delete(vmJobs.keys().next().value);
+ localVMs.execute(bot.id,argv).then(output=>vmJobs.set(requestID,{status:'done',output:String(output).slice(0,16000)})).catch(error=>vmJobs.set(requestID,{status:'error',output:String(error.message).slice(0,500)}));
+}
 function configureIPC() {
+ const uuidLike=value=>typeof value==='string'&&/^[a-f0-9-]{36}$/i.test(value);
+ handle('vmremote:hosts',async()=>{try{await vmLink.discover();return vmLink.status().hosts;}catch(error){throw new PublicError(error.message);}});
+ handle('vmremote:list',async hostID=>{if(!uuidLike(hostID))throw new PublicError('Choose a computer.');try{await vmLink.attach(hostID);return (await vmLink.fetch('/v1/vms')).value;}catch(error){throw new PublicError(error.message);}});
+ handle('vmremote:get',async id=>{await ensureState();return (await vmLinks())[id]||null;});
+ handle('vmremote:set',async(id,link)=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');
+  const links=await vmLinks();
+  if(link===null){delete links[id];}
+  else{if(!link||!uuidLike(link.hostID)||!uuidLike(link.vmBotID)||typeof link.hostName!=='string'||typeof link.vmName!=='string'||link.hostName.length>200||link.vmName.length>200)throw new PublicError('Choose a VM on another computer.');links[id]={hostID:link.hostID,hostName:link.hostName,vmBotID:link.vmBotID,vmName:link.vmName};}
+  await atomicJSON('bot-vm-remote.json',links);return links[id]||null;});
+ handle('vm:share',async(id,enabled)=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.setShared(id,enabled);}catch(error){throw new PublicError(error.message);}});
  handle('rules:get',async()=>({...await getApprovalRules(),tools:ruleSet.TOOLS.map(([id,title])=>({id,title}))}));
  handle('rules:set',async value=>{approvalRules=ruleSet.sanitize(value);await atomicJSON('approval-rules.json',approvalRules);return approvalRules;});
  handle('tasks:pause',async(botID,id,enabled)=>{await ensureState();const bot=state.bots.find(x=>x.id===botID),task=bot?.schedules?.find(x=>x.id===id);if(!task)throw new PublicError('Unknown scheduled task');task.enabled=enabled===true;await atomicJSON('preview-workspace.json',state);notify();return true;});
