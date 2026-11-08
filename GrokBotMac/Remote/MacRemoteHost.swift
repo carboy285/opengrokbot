@@ -280,7 +280,7 @@ final class MacRemoteHost: ObservableObject {
                 await MacBotVMs.shared.open(bot)
             case "open_browser":
                 guard let bot else { return .error(404, "Bot not found") }
-                _ = try LocalBotBrowsers.shared.open(bot, address: command.text)
+                _ = try LocalBotBrowsers.shared.open(bot, address: command.text)  // the phone shows a preview; no window opens on the Mac
             case "cancel_task":
                 guard let id = command.botID, let taskID = command.taskID, app.removeSchedule(taskID, botID: id) else { return .error(400, "Task could not be cancelled.") }
             case "update_avatar":

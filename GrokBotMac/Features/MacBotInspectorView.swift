@@ -128,9 +128,9 @@ struct MacBotInspectorView: View {
                 }
             }
             memoryCard
-            InspectorCard(title: "Browser", footer: "Its own browser profile, in a window on this Mac.") {
+            InspectorCard(title: "Browser", footer: "Its own browser profile. When the Bot browses, nothing opens on your screen; use this button, or Show browser in the chat, to watch.") {
                 Button("Open local browser", systemImage: "globe") {
-                    do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription }
+                    do { _ = try LocalBotBrowsers.shared.open(bot, reveal: true) } catch { app.errorMessage = error.localizedDescription }
                 }.buttonStyle(InspectorButtonStyle())
             }
             MacBotVMControls(bot: bot)
@@ -297,7 +297,7 @@ struct MacBotInspectorView: View {
                 }
             }
             InspectorCard(title: "Actions") {
-                Button("Open browser", systemImage: "globe") { do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription } }
+                Button("Open browser", systemImage: "globe") { do { _ = try LocalBotBrowsers.shared.open(bot, reveal: true) } catch { app.errorMessage = error.localizedDescription } }
                 Button("Open working folder", systemImage: "folder") { desktop.openWorkingDirectory(for: bot) }
                 if MacBotVMs.shared.assigned(bot.id) != nil { Button("Open VM console", systemImage: "display") { Task { await MacBotVMs.shared.open(bot) } } }
                 if busy { Button("Stop response", systemImage: "stop.fill") { desktop.stop(botID: bot.id) }.buttonStyle(InspectorButtonStyle(tint: tint, ink: ink)) }

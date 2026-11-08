@@ -3,23 +3,26 @@ import SwiftUI
 import WebKit
 
 @MainActor
-final class LocalBotBrowsers {
+final class LocalBotBrowsers: ObservableObject {
     static let shared = LocalBotBrowsers()
-    private var sessions: [UUID:LocalBotBrowserSession] = [:]
-    func open(_ bot: Bot, address: String? = nil) throws -> LocalBotBrowserSession {
-        if let session = sessions[bot.id] { session.window?.makeKeyAndOrderFront(nil); if let address { try session.navigate(address) }; return session }
-        guard sessions.count < 8 else { throw CloudError.message("Close a Bot browser before opening another. Up to eight browser windows can be open.") }
+    @Published private(set) var sessions: [UUID:LocalBotBrowserSession] = [:]
+    func session(for id: UUID) -> LocalBotBrowserSession? { sessions[id] }
+    /// A Bot using its browser never puts a window on the screen: the page loads in a window nobody can see. The human sees it only by
+    /// pressing Show browser (or Pause & take over), or by opening the browser from Bot details (`reveal: true`).
+    func open(_ bot: Bot, address: String? = nil, reveal: Bool = false) throws -> LocalBotBrowserSession {
+        if let session = sessions[bot.id] { if reveal { session.reveal() }; if let address { try session.navigate(address) }; return session }
+        guard sessions.count < 8 else { throw CloudError.message("Close a Bot browser before opening another. Up to eight browsers can be open.") }
         let session = LocalBotBrowserSession(bot: bot)
         sessions[bot.id] = session
         session.closed = { [weak self] in self?.sessions[bot.id] = nil }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
         window.title = bot.name + " · Local browser"; window.isReleasedWhenClosed = false; window.delegate = session
         window.contentView = NSHostingView(rootView: LocalBotBrowserSurface(session: session)); session.window = window
-        window.center(); window.makeKeyAndOrderFront(nil)
+        if reveal { session.reveal() } else { session.conceal() }
         try session.navigate(address ?? "https://duckduckgo.com")
         return session
     }
-    func read(_ bot: Bot, address: String, directory: URL) async throws -> String { let session = try open(bot); return try await session.read(address, directory: directory) }
+    func read(_ bot: Bot, address: String, directory: URL) async throws -> String { let session = try open(bot); session.working = "\(bot.name) is reading a page…"; defer { session.working = nil }; return try await session.read(address, directory: directory) }
     func preview(_ bot: Bot) async throws -> RemoteBrowserPreview {
         guard let session = sessions[bot.id] else { return RemoteBrowserPreview(title: "Browser not open", url: "", imageData: nil) }
         let config = WKSnapshotConfiguration(); config.snapshotWidth = 900
@@ -47,6 +50,8 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
     @Published var working: String?
     /// While paused the human has the browser: a Bot's next step waits here until Resume.
     @Published var paused = false
+    /// True while the window is on the screen. A Bot's own work leaves it false.
+    @Published private(set) var revealed = false
     private var reader: CheckedContinuation<String,Error>?
     private var readerNavigation: WKNavigation?
     private var timeout: Task<Void,Never>?
@@ -333,6 +338,30 @@ final class LocalBotBrowserSession: NSObject, ObservableObject, WKNavigationDele
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if Self.allowed(navigationAction.request.url) { webView.load(navigationAction.request) }; return nil
     }
+    /// Puts the browser window on the screen for the human.
+    func reveal() {
+        guard let window else { return }
+        let wasHidden = !revealed
+        revealed = true
+        window.alphaValue = 1; window.ignoresMouseEvents = false; window.hasShadow = true; window.isExcludedFromWindowsMenu = false
+        window.collectionBehavior = []
+        if wasHidden { window.center() }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    /// Keeps the window out of sight and out of the way, but still "on screen" to WebKit so pages keep loading and rendering normally.
+    func conceal() {
+        guard let window else { return }
+        revealed = false
+        window.alphaValue = 0; window.ignoresMouseEvents = true; window.hasShadow = false; window.isExcludedFromWindowsMenu = true
+        window.collectionBehavior = [.transient, .ignoresCycle, .stationary, .fullScreenAuxiliary]
+        window.orderFrontRegardless()
+    }
+    /// Closing a window while the Bot is using it only hides it again, so its work is not cut off.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard working != nil || reader != nil else { return true }
+        conceal(); return false
+    }
     func windowWillClose(_ notification: Notification) { web.stopLoading(); finish(.failure(CloudError.message("The Bot browser was closed."))); window?.contentView = nil; closed?(); closed = nil }
     func clearData() {
         let alert = NSAlert(); alert.messageText = "Clear this Bot’s browser cookies and login storage?"; alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Clear browser data")
@@ -371,4 +400,34 @@ private struct LocalBotBrowserSurface: View {
         }.frame(minWidth: 650, minHeight: 450)
     }
     private func navigate() { do { try session.navigate(session.address) } catch { session.feedback = error.localizedDescription } }
+}
+
+/// Shown above the message box while a Bot is using its browser. The browser itself stays out of sight until Show browser is pressed.
+struct MacBrowserPill: View {
+    let botID: UUID
+    @ObservedObject private var browsers = LocalBotBrowsers.shared
+    var body: some View {
+        if let session = browsers.session(for: botID) { MacBrowserPillContent(session: session) }
+    }
+}
+
+private struct MacBrowserPillContent: View {
+    @ObservedObject var session: LocalBotBrowserSession
+    var body: some View {
+        if let working = session.working {
+            HStack(spacing: 10) {
+                if session.paused { Image(systemName: "pause.circle.fill").foregroundStyle(.orange) } else { ProgressView().controlSize(.small) }
+                Text(session.paused ? "Paused. You have control of the browser." : working).font(.system(size: 12)).lineLimit(1)
+                Spacer(minLength: 8)
+                Button(session.revealed ? "Hide browser" : "Show browser") { if session.revealed { session.conceal() } else { session.reveal() } }
+                Button(session.paused ? "Resume" : "Pause & take over") {
+                    session.paused.toggle()
+                    if session.paused { session.reveal() } else { session.conceal() }
+                }
+            }
+            .buttonStyle(.plain).font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 14).padding(.vertical, 8).background(MacTheme.raised, in: Capsule()).padding(.horizontal, 4)
+            .transition(.opacity)
+        }
+    }
 }

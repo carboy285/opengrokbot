@@ -27,12 +27,6 @@ struct RootView: View {
             (filter != .groups || bot.memberIDs != nil)
         }
     }
-    /// One hero card: the main Bot (or the first pinned one). Other pinned Bots lead the list with a pin.
-    private var heroBot: Bot? { pinnedBots.first(where: { $0.isMain == true }) ?? pinnedBots.first }
-    private var listedBots: [Bot] {
-        let hero = heroBot?.id
-        return pinnedBots.filter { $0.id != hero } + bots
-    }
     private var pinnedBots: [Bot] {
         let ids = remote.pinnedBotIDs ?? model.workspace.bots.filter { $0.isMain == true }.map(\.id)
         return matchingBots.filter { remote.isPinned($0) }.sorted {
@@ -170,14 +164,20 @@ struct RootView: View {
     private var roster: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if let hero = heroBot {
-                    HStack {
-                        Spacer(minLength: 0)
-                        pinnedTile(hero, large: true)
-                        Spacer(minLength: 0)
-                    }.padding(.top, 32).padding(.bottom, 28)
+                if !pinnedBots.isEmpty {
+                    if pinnedBots.count == 1, let bot = pinnedBots.first {
+                        HStack {
+                            Spacer(minLength: 0)
+                            pinnedTile(bot, large: true)
+                            Spacer(minLength: 0)
+                        }.padding(.top, 32).padding(.bottom, 28)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 18)], spacing: 28) {
+                            ForEach(pinnedBots) { bot in pinnedTile(bot, large: false) }
+                        }.padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 26)
+                    }
                 }
-                ForEach(listedBots) { bot in
+                ForEach(bots) { bot in
                     NavigationLink(value: bot.id) { botRow(bot) }.buttonStyle(.plain)
                         .contextMenu { botActions(bot) }
                 }
@@ -237,7 +237,6 @@ struct RootView: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(bot.name).font(.system(.body, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
-                    if remote.isPinned(bot) { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
                     Spacer(minLength: 0)
                     if let date = latest?.date {
                         Text(date, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.tertiary).lineLimit(1)

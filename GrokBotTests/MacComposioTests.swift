@@ -237,6 +237,19 @@ final class MacConnectionsTests: XCTestCase {
         XCTAssertEqual(log.items.count, 3, "An always-ask rule forces the dialog")
     }
 
+    func testWebSearchActionPrefersComposioAndFallsBackOnlyWhenItIsNotSetUp() async throws {
+        let suite = "org.opengrokbot.tests.search." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let actions = MacDeviceActions(apple: AppleConnections(defaults: defaults), approval: MacApproval(), logins: uniqueLogins())
+        actions.composioSearch = { _ in [WebSearchHit(title: "Composio hit", url: "https://c.example", snippet: "y")] }
+        let viaComposio = await actions.run(BotAction(action: "search_web", text: "nfl"), bot: bot, unattended: false)
+        XCTAssertTrue(viaComposio.contains("via Composio")); XCTAssertTrue(viaComposio.contains("Composio hit"))
+        actions.composioSearch = { _ in [] }
+        let empty = await actions.run(BotAction(action: "search_web", text: "nothing"), bot: bot, unattended: false)
+        XCTAssertTrue(empty.contains("no results"))
+        XCTAssertTrue(MacDeviceActions.searchSummary(query: "q", via: "", hits: [("T", "https://t.example", "s")]).contains("untrusted web content"))
+    }
+
     func testDisabledServicesAndWritesAreRefusedWithoutPrompting() async throws {
         let suite = "org.opengrokbot.tests.apple." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
@@ -318,6 +331,47 @@ final class MacVoiceAndSummaryTests: XCTestCase {
         let sentence = VoiceText.nextChunk("Hello there. And more", from: 0, final: false, eager: true)
         XCTAssertEqual(sentence.chunk, "Hello there.")
         XCTAssertEqual(VoiceText.nextChunk("Short", from: 0, final: true).chunk, "Short")
+    }
+
+    func testComposioSearchFindsResultsInAnyShapeAndCleansThem() throws {
+        let json = """
+        {"successful":true,"data":{"response_data":{"organic_results":[
+          {"title":"Result One","link":"https://one.example/a","snippet":"First   snippet\\nwith spaces"},
+          {"title":"Result Two","url":"https://two.example/b","description":"Second"},
+          {"title":"Bad scheme","url":"javascript:alert(1)"},
+          {"title":"Credentials","url":"https://user:pw@evil.example/"},
+          {"title":"Duplicate","url":"https://one.example/a"}]}}}
+        """
+        let outcome = ComposioSearch.outcome(status: 200, data: Data(json.utf8))
+        guard case .hits(let hits) = outcome else { return XCTFail("Expected results") }
+        XCTAssertEqual(hits.map(\.url), ["https://one.example/a", "https://two.example/b"])
+        XCTAssertEqual(hits[0].snippet, "First snippet with spaces")
+        XCTAssertEqual(ComposioSearch.outcome(status: 401, data: Data()), .stop(.rejected))
+        XCTAssertEqual(ComposioSearch.outcome(status: 429, data: Data()), .stop(.rateLimited))
+        XCTAssertEqual(ComposioSearch.outcome(status: 404, data: Data()), .skip(.unsupported("Composio search failed (HTTP 404).")))
+        XCTAssertEqual(ComposioSearch.outcome(status: 200, data: Data(#"{"successful":false,"error":"tool unavailable"}"#.utf8)), .skip(.unsupported("tool unavailable")))
+        let many = (0..<30).map { #"{"title":"T\#($0)","url":"https://e\#($0).example"}"# }.joined(separator: ",")
+        guard case .hits(let capped) = ComposioSearch.outcome(status: 200, data: Data(("{\"data\":{\"items\":[" + many + "]}}").utf8)) else { return XCTFail("Expected results") }
+        XCTAssertEqual(capped.count, ComposioSearch.maxHits)
+    }
+
+    func testComposioSearchTriesToolsInOrderAndNeverLeaksTheKey() async throws {
+        var seen: [String] = []
+        let good = Data(#"{"successful":true,"data":{"results":[{"title":"Hit","url":"https://hit.example","snippet":"s"}]}}"#.utf8)
+        let hits = try await ComposioSearch.search(query: "weather today", userID: "u1") { tool, body in
+            seen.append(tool)
+            XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("secret-key"))
+            return tool == ComposioSearch.tools[0] ? (404, Data("{}".utf8)) : (200, good)
+        }
+        XCTAssertEqual(hits.map(\.title), ["Hit"]); XCTAssertEqual(seen, ComposioSearch.tools)
+        var calls = 0
+        do { _ = try await ComposioSearch.search(query: "q", userID: "u") { _, _ in calls += 1; return (401, Data()) }; XCTFail("A rejected key must throw") }
+        catch { XCTAssertEqual(error as? ComposioSearch.Failure, .rejected) }
+        XCTAssertEqual(calls, 1, "A rejected key stops at once")
+        let none = try await ComposioSearch.search(query: "q", userID: "u") { _, _ in (200, Data(#"{"successful":true,"data":{"results":[]}}"#.utf8)) }
+        XCTAssertTrue(none.isEmpty)
+        do { _ = try await ComposioSearch.search(query: "q", userID: "u") { _, _ in throw URLError(.notConnectedToInternet) }; XCTFail("Total failure must throw") }
+        catch { XCTAssertEqual(error as? ComposioSearch.Failure, .unreachable) }
     }
 
     func testTeachRecordingMergesClicksHidesSecretsAndBuildsAnInstruction() {

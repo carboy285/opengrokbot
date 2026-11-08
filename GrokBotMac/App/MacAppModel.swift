@@ -92,6 +92,8 @@ final class MacAppModel: ObservableObject {
     var runOwners: [UUID:UUID] = [:]
 
     init() {
+        // Web searches go through Composio, so a Bot never needs a browser window to look something up.
+        MacDeviceActions.shared.composioSearch = { [weak composio] query in try await composio?.webSearch(query) }
         if FileManager.default.fileExists(atPath: Self.draftURL.path) {
             do {
                 let saved = try JSONDecoder().decode([String:String].self, from: Data(contentsOf: Self.draftURL))

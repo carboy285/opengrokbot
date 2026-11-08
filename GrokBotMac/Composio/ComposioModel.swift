@@ -101,13 +101,28 @@ final class ComposioModel: ObservableObject {
         return created
     }
 
+    /// Composio's own search toolkit is always added to a session so Bots can look things up without opening a browser. It needs no sign-in.
     /// If Composio rejects the request (an app it does not recognize), retry once with only the known-good apps.
     private func createSession(key: String, userID: String, requested: [String]) async throws -> (session: ComposioSession, used: [String], skipped: [String]) {
-        do { return (try await client(key).create(userID: userID, toolkits: requested), requested, []) }
+        let withSearch = requested + (requested.contains(ComposioSearch.toolkit) ? [] : [ComposioSearch.toolkit])
+        do { return (try await client(key).create(userID: userID, toolkits: withSearch), requested, []) }
         catch ComposioError.status(let code) where (400...499).contains(code) && ![401, 403, 429].contains(code) {
-            guard let plan = ComposioCatalog.fallback(for: requested) else { throw ComposioError.status(code) }
-            return (try await client(key).create(userID: userID, toolkits: plan.use), plan.use, plan.skipped)
+            do {
+                // Maybe only the search toolkit was refused.
+                return (try await client(key).create(userID: userID, toolkits: requested), requested, [])
+            } catch ComposioError.status(let again) where (400...499).contains(again) && ![401, 403, 429].contains(again) {
+                guard let plan = ComposioCatalog.fallback(for: requested) else { throw ComposioError.status(again) }
+                return (try await client(key).create(userID: userID, toolkits: plan.use), plan.use, plan.skipped)
+            }
         }
+    }
+
+    /// Searches the web through Composio. Returns nil when no Composio project is set up here (the caller then falls back to the Bot's browser).
+    func webSearch(_ query: String) async throws -> [WebSearchHit]? {
+        guard configured, let key else { return nil }
+        let identity = installationUserID(), client = client(key)
+        do { return try await client.webSearch(query, userID: identity) }
+        catch let failure as ComposioSearch.Failure { throw CloudError.message(ComposioSearch.message(failure)) }
     }
 
     static func skippedNote(_ skipped: [String]) -> String {

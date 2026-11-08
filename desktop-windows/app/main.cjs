@@ -83,7 +83,10 @@ function saveSettings(){return atomicJSON('settings.json',settings);}
 function selectedCLI(){return installed.find(x=>x.id===settings?.selected);}
 function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete,health:settings.providerHealth||{}};}
 function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
-function notify(){revision=randomUUID();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
+// A streaming reply changes many times a second and each message carries the whole workspace, so updates are sent at most about twelve times a second.
+let notifyTimer=null,lastNotify=0;
+function sendNotify(){notifyTimer=null;lastNotify=Date.now();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
+function notify(){revision=randomUUID();if(notifyTimer)return;notifyTimer=setTimeout(sendNotify,Math.max(0,80-(Date.now()-lastNotify)));}
 async function cliKeyEnv(provider){
  try{const keys=await loadJSON('cli-keys.encrypted.json',{});if(!keys[provider]||!safeStorage.isEncryptionAvailable())return {};return providerKeys.environmentFor(provider,safeStorage.decryptString(Buffer.from(keys[provider],'base64')));}catch{return {};}
 }
@@ -210,6 +213,7 @@ const cloud = new CloudHost({
 });
 const localVMs = new (require('./local-vm.cjs').LocalVMs)({getBot:id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),load:()=>loadJSON('bot-vms.json',{}),save:value=>atomicJSON('bot-vms.json',value),root:file('VirtualMachines')});
 const localBrowsers = new (require('./local-browser.cjs').LocalBrowsers)(id=>state?.bots.find(bot=>bot.id.toLowerCase()===String(id).toLowerCase()),botDirectory);
+localBrowsers.onActivity=value=>{if(window&&!window.isDestroyed())window.webContents.send('browser:activity',value);};
 const loginStore=deviceActions.createLoginStore({storage:{load:()=>loadJSON('secure-logins.encrypted.json',[]),save:list=>atomicJSON('secure-logins.encrypted.json',list)},crypto:{encrypt:value=>{requireVault();return safeStorage.encryptString(value).toString('base64');},decrypt:value=>{requireVault();return safeStorage.decryptString(Buffer.from(value,'base64'));}},randomUUID});
 async function readOnePassword(item){
  if(!deviceActions.isValidItemName(item))throw new Error('That 1Password item name is not valid.');
@@ -219,7 +223,7 @@ async function readOnePassword(item){
 }
 let approvalRules=null;
 const getApprovalRules=async()=>approvalRules??=ruleSet.sanitize(await loadJSON('approval-rules.json',{}));
-const devices=deviceActions.create({rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
+const devices=deviceActions.create({composioSearch:async query=>{if(!composioConfiguration)return null;const hits=await require('./composio-search.cjs').search({key:composioConfiguration.key,userID:settings.composioUserID,query});return hits;},rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
 const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
 function openMirror(){
  if(mirrorWindow&&!mirrorWindow.isDestroyed()){mirrorWindow.show();mirrorWindow.focus();return;}
@@ -301,7 +305,7 @@ async function remoteCommand(command){
  }
  if(command.action==='touch_bot'){if(!bot)throw new Error('Unknown Bot');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();return;}
  if(command.action==='open_vm'){if(!bot)throw new Error('Unknown Bot');await localVMs.open(bot.id);return;}
- if(command.action==='open_browser'){if(!bot)throw new Error('Unknown Bot');localBrowsers.open(bot.id,command.text);return;}
+ if(command.action==='open_browser'){if(!bot)throw new Error('Unknown Bot');localBrowsers.open(bot.id,command.text);return;} // a phone shows a preview; no window opens here
  if(command.action==='send'){if(!bot||typeof command.text!=='string'||!command.text.trim()||command.text.length>100000)throw new Error('Invalid message');let text=command.text;if(Array.isArray(command.attachments)&&command.attachments.length){let names;try{names=await attachments.saveRemoteImages(botDirectory(bot.id),command.attachments);}catch{throw new PublicError('The images could not be accepted. Send up to 3 JPEG or PNG images.');}text=attachments.attachmentMessage(text,names);}await startChat(bot.id,text,undefined,command.requestID);return;}
  if(command.action==='stop'){if(bot)stoppedBots.add(bot.id);if(!bot)throw new Error('Unknown Bot');for(const run of active.get(bot.id)||[])run.cancel();return;}
  if(command.action==='retry'){if(!bot)throw new Error('Unknown Bot');const message=state.teamMessages?.findLast(x=>x.to===bot.id&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(bot.id);return;}
@@ -347,7 +351,8 @@ function configureIPC() {
  handle('vm:setup',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');const choice=await dialog.showOpenDialog(window,{title:'Choose an Ubuntu 24.04 Linux ISO or a Linux OVA template',properties:['openFile'],filters:[{name:'Linux guest image',extensions:['iso','ova']}]});if(choice.canceled)return localVMs.status(id);try{return await localVMs.setup(id,choice.filePaths[0]);}catch(error){throw new PublicError(error.message);}});
  handle('vm:open',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.open(id);}catch(error){throw new PublicError(error.message);}});
  handle('vm:credentials',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.credentials(id);}catch(error){throw new PublicError(error.message);}});
- handle('browser:open',async(id,address)=>{await ensureState();try{localBrowsers.open(id,address);return true;}catch(error){throw new PublicError(error.message);}});
+ handle('browser:open',async(id,address)=>{await ensureState();try{localBrowsers.open(id,address,{reveal:true});return true;}catch(error){throw new PublicError(error.message);}});
+ handle('browser:reveal',async(id,show)=>{await ensureState();if(typeof id!=='string')throw new PublicError('Choose a Bot.');return localBrowsers.setRevealed(id,show===true);});
  handle('workspace:mirror',async()=>{await ensureState();if(!cloud.data.session)throw new PublicError('Sign in under Settings → Computer first.');openMirror();});
  handle('mirror:browser',(id,kind)=>mirrorAction(async()=>{if(typeof id!=='string'||!/^[a-f0-9-]{36}$/i.test(id)||!['browser','vm'].includes(kind||'browser'))throw new Error('Choose a Bot and browser or VM.');return (await mirror.fetch('/v1/'+(kind||'browser')+'?bot='+encodeURIComponent(id))).value;}));
  handle('mirror:retry',()=>mirrorAction(async()=>{if(!mirror.peer)return mirror.discover();return mirror.select(mirror.peer.id);}));

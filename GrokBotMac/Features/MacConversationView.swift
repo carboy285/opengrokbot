@@ -33,10 +33,13 @@ struct MacConversationView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 25) {
-                        ForEach(app.entries(for: bot)) { entry in
-                            MacMessageView(entry: entry, onReply: { reply(to: $0) }, onReact: reactHandler(), onDelete: deleteHandler(), onRetry: retryHandler(for: entry)).id(entry.id)
+                        let messages = app.entries(for: bot)
+                        let lastBotID = messages.last(where: { $0.kind == .bot })?.id
+                        ForEach(messages) { entry in
+                            // Equatable rows: a streaming reply redraws only the message that changed, not every message in the chat.
+                            MacMessageRow(entry: entry, canReact: desktop.gateway == nil, isLastBot: lastBotID == entry.id, actions: messageActions).equatable().id(entry.id)
                         }
-                        if app.entries(for: bot).isEmpty { emptyConversation.padding(.top, 120) }
+                        if messages.isEmpty { emptyConversation.padding(.top, 120) }
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(.horizontal, 24).padding(.top, 85).padding(.bottom, 24)
@@ -116,6 +119,7 @@ struct MacConversationView: View {
                     }.padding(.horizontal, 4)
                 }.font(.caption)
             }
+            MacBrowserPill(botID: bot.id)
             MacTeachBar(bot: bot, teach: desktop.teach)
             HStack(alignment: .bottom, spacing: 11) {
                 Button { showActions.toggle() } label: {
@@ -302,14 +306,13 @@ struct MacConversationView: View {
         composing = true
     }
     /// Reactions and deleting a message change this Mac's own chat only, so they are hidden while viewing another computer.
-    private func reactHandler() -> ((Entry, String?) -> Void)? {
-        desktop.gateway == nil ? { entry, emoji in _ = app.setReaction(emoji, for: entry.id) } : nil
-    }
-    private func deleteHandler() -> ((Entry) -> Void)? {
-        desktop.gateway == nil ? { entry in _ = app.deleteEntry(entry.id) } : nil
-    }
-    private func retryHandler(for entry: Entry) -> ((Entry) -> Void)? {
-        app.entries(for: bot).last(where: { $0.kind == .bot })?.id == entry.id ? { _ in desktop.retry(bot: bot, app: app) } : nil
+    private var messageActions: MacMessageActions {
+        let model = app, desktopModel = desktop, current = bot
+        return MacMessageActions(
+            reply: { entry in reply(to: entry) },
+            react: { entry, emoji in _ = model.setReaction(emoji, for: entry.id) },
+            delete: { entry in _ = model.deleteEntry(entry.id) },
+            retry: { _ in desktopModel.retry(bot: current, app: model) })
     }
 
     private func sendMessage() {
@@ -324,6 +327,25 @@ struct MacConversationView: View {
             desktop.outgoingDrafts[bot.id] = RecoverableDraft(text: draft.wrappedValue, files: files)
             draft.wrappedValue = ""; desktop.attachments[bot.id] = []; desktop.flushDrafts(); composing = true
         }
+    }
+}
+
+/// What the hover buttons on a message do. Never compared: a row is redrawn only when its message or its flags change.
+struct MacMessageActions: @unchecked Sendable {
+    var reply: (Entry) -> Void = { _ in }
+    var react: (Entry, String?) -> Void = { _, _ in }
+    var delete: (Entry) -> Void = { _ in }
+    var retry: (Entry) -> Void = { _ in }
+}
+
+struct MacMessageRow: View, Equatable {
+    let entry: Entry
+    let canReact: Bool
+    let isLastBot: Bool
+    let actions: MacMessageActions
+    nonisolated static func == (lhs: MacMessageRow, rhs: MacMessageRow) -> Bool { lhs.entry == rhs.entry && lhs.canReact == rhs.canReact && lhs.isLastBot == rhs.isLastBot }
+    var body: some View {
+        MacMessageView(entry: entry, onReply: actions.reply, onReact: canReact ? actions.react : nil, onDelete: canReact ? actions.delete : nil, onRetry: isLastBot ? actions.retry : nil)
     }
 }
 

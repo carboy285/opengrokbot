@@ -1,9 +1,10 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
 struct GrokBotMacApp: App {
-    @StateObject private var app = AppModel()
+    @StateObject private var app = AppModel(deferSaves: true)
     @StateObject private var desktop = MacAppModel()
     @AppStorage("macAppearance") private var appearance = "dark"
 
@@ -37,8 +38,11 @@ struct GrokBotMacApp: App {
                 }
                 .onChange(of: desktop.installedCLIs) { _, _ in desktop.deliverQueuedMessages(app: app) }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in desktop.flushDrafts(); desktop.stopAll(immediately: true) }
-                .onReceive(desktop.updates.objectWillChange) { _ in desktop.objectWillChange.send() }
-                .onReceive(desktop.remote.objectWillChange) { _ in desktop.objectWillChange.send() }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in app.flushSaves() }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in app.flushSaves() }
+                // These only refresh status text, so a burst of changes (a heartbeat, a download tick) redraws the app at most once a second.
+                .onReceive(desktop.updates.objectWillChange.throttle(for: .seconds(1), scheduler: DispatchQueue.main, latest: true)) { _ in desktop.objectWillChange.send() }
+                .onReceive(desktop.remote.objectWillChange.throttle(for: .seconds(1), scheduler: DispatchQueue.main, latest: true)) { _ in desktop.objectWillChange.send() }
                 .alert("Allow this device to use your Bots?", isPresented: Binding(
                     get: { desktop.remote.pendingPhoneApproval != nil },
                     set: { if !$0 { desktop.remote.pendingPhoneApproval = nil } }

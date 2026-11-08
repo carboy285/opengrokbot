@@ -2,15 +2,25 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published private(set) var workspace = Workspace()
+    @Published private(set) var workspace = Workspace() { didSet { entryRevision &+= 1 } }
     @Published var previewEnabled = false
     @Published var errorMessage: String?
     @Published var search = ""
     let client: any HarnessClient = UnverifiedHarnessClient()
     private let store: WorkspaceStore
     private var loadFailed = false
+    /// When on, changes appear at once and are written to disk a moment later on a background queue, so a click never waits for the disk.
+    /// Call `flushSaves()` when the app is about to quit. Off by default so tests and simple callers get an immediate write.
+    private let deferSaves: Bool
+    private var dirty = false
+    private var saveGeneration = 0
+    private let saveQueue = DispatchQueue(label: "org.opengrokbot.workspace-save", qos: .utility)
+    private var entryRevision = 0
+    private var entryCache: (revision: Int, byBot: [UUID: [Entry]])?
+    private var pendingReplyText: [UUID: String] = [:]
+    private var replyFlushScheduled = false
 
-    init(store: WorkspaceStore = .application) { self.store = store }
+    init(store: WorkspaceStore = .application, deferSaves: Bool = false) { self.store = store; self.deferSaves = deferSaves }
 
     var visibleBots: [Bot] {
         let matchingChats = search.isEmpty ? Set<UUID>() : Set(workspace.entries.filter { $0.text.localizedCaseInsensitiveContains(search) }.map(\.botID))
@@ -83,7 +93,11 @@ final class AppModel: ObservableObject {
     func applyRemoteSnapshot(_ snapshot: Workspace) { workspace = snapshot; previewEnabled = true; loadFailed = false }
 
     func leavePreview() { previewEnabled = false; search = "" }
-    func entries(for bot: Bot) -> [Entry] { workspace.entries.filter { $0.botID == bot.id } }
+    /// Messages grouped by Bot, rebuilt once after each change instead of by every row on every redraw.
+    func entries(for bot: Bot) -> [Entry] {
+        if entryCache?.revision != entryRevision { entryCache = (entryRevision, Dictionary(grouping: workspace.entries, by: \.botID)) }
+        return entryCache?.byBot[bot.id] ?? []
+    }
     func latest(for bot: Bot) -> String { entries(for: bot).last?.text ?? bot.purpose }
 
     @discardableResult
@@ -398,17 +412,60 @@ final class AppModel: ObservableObject {
         return entry.id
     }
 
+    /// Streaming text arrives many times a second. Only the newest text matters, so it is shown at most about twenty times a second.
     func updateReply(_ id: UUID, text: String) {
-        guard let index = workspace.entries.firstIndex(where: { $0.id == id }) else { return }
-        workspace.entries[index].text = text
+        pendingReplyText[id] = text
+        guard !replyFlushScheduled else { return }
+        replyFlushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in MainActor.assumeIsolated { self?.flushReplyText() } }
+    }
+
+    private func flushReplyText() {
+        replyFlushScheduled = false
+        guard !pendingReplyText.isEmpty else { return }
+        let pending = pendingReplyText; pendingReplyText = [:]
+        for (id, text) in pending {
+            // The streaming message is at the end, so search from there.
+            guard let index = workspace.entries.lastIndex(where: { $0.id == id }), workspace.entries[index].text != text else { continue }
+            workspace.entries[index].text = text
+        }
     }
 
     func finishReply(_ id: UUID, state: MessageState, message: String? = nil) {
-        guard let index = workspace.entries.firstIndex(where: { $0.id == id }) else { return }
+        flushReplyText()
+        guard let index = workspace.entries.lastIndex(where: { $0.id == id }) else { return }
         workspace.entries[index].state = state
         if let message, workspace.entries[index].text.isEmpty { workspace.entries[index].text = message }
+        if deferSaves { scheduleSave(); return }
         do { try store.save(workspace) }
         catch { errorMessage = "The reply is visible but could not be saved. Check available storage before closing the app." }
+    }
+
+    // MARK: Saving
+    private func scheduleSave() {
+        dirty = true; saveGeneration &+= 1
+        let generation = saveGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in MainActor.assumeIsolated { self?.writeIfCurrent(generation) } }
+    }
+
+    private func writeIfCurrent(_ generation: Int) {
+        guard generation == saveGeneration, dirty else { return }
+        dirty = false
+        let snapshot = workspace, store = store
+        saveQueue.async { [weak self] in
+            do { try store.save(snapshot) }
+            catch { DispatchQueue.main.async { MainActor.assumeIsolated { self?.errorMessage = "Your changes could not be saved. Check available device storage and try again." } } }
+        }
+    }
+
+    /// Writes any pending change now, after any write already under way. Call when the app is about to quit or go to the background.
+    func flushSaves() {
+        flushReplyText()
+        guard dirty else { return }
+        dirty = false; saveGeneration &+= 1
+        let snapshot = workspace, store = store
+        do { try saveQueue.sync { try store.save(snapshot) } }
+        catch { errorMessage = "Your changes could not be saved. Check available device storage and try again." }
     }
 
     /// Replaces everything with a restored backup. CLI session IDs belong to the original device and are dropped.
@@ -429,6 +486,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     private func commit(_ change: (inout Workspace) -> Void) -> Bool {
         guard !loadFailed else { errorMessage = "Saved data could not be read. It has been kept. Restore the file or explicitly reset conversations before writing new data."; return false }
+        if deferSaves { change(&workspace); scheduleSave(); return true }
         var updated = workspace
         change(&updated)
         do { try store.save(updated); workspace = updated; return true }

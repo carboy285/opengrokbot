@@ -11,6 +11,7 @@ const button = (text, action, className = 'pill') => { const value = node('butto
 const append = (parent, ...children) => { parent.append(...children.filter(Boolean)); return parent; };
 const avatarColors={white:'#ffffff',black:'#111111',purple:'#9355ff',pink:'#fa2a99',ochre:'#a46e39',red:'#ff2948',orange:'#ff7012',amber:'#f69a0a',green:'#10bf70',teal:'#15b6a5',blue:'#2385ff',gray:'#969696'};
 const avatarShapes=['circle','cloud','square','sparkle','flower','heart','clover','droplet','capsule','triangle','pebble','star','hexagon','fruit'];
+const shapePaths=new Map();
 function avatar(value='white',starred=false){
  const bot=typeof value==='object'?value:{color:value},appearance=bot.appearance||{color:bot.color,shape:bot.color==='white'||bot.color==='pink'?'circle':bot.color==='ochre'?'hexagon':'pebble'};
  const face=node('span','avatar custom-avatar');face.style.setProperty('--avatar-color',avatarColors[appearance.color]||avatarColors.purple);face.setAttribute('aria-hidden','true');
@@ -20,7 +21,8 @@ function avatar(value='white',starred=false){
   const path=document.createElementNS(svg.namespaceURI,'path');let d='';
   if(appearance.shape==='heart')d='M50 94 C10 75 -10 55 4 30 C10 -2 40 1 50 22 C60 1 90 -2 96 30 C110 55 90 75 50 94 Z';
   else if(appearance.shape==='square')d='M22 8 Q12 8 12 18 L12 82 Q12 92 22 92 L78 92 Q88 92 88 82 L88 18 Q88 8 78 8 Z';
-  else {for(let i=0;i<120;i++){const a=i/120*2*Math.PI-Math.PI/2;let r=.46;switch(appearance.shape){case'hexagon':r=.42/Math.cos((a+2*Math.PI)%(Math.PI/3)-Math.PI/6);break;case'cloud':r=.42+.055*Math.cos(7*a)+.025*Math.sin(3*a);break;case'flower':r=.41+.07*Math.cos(5*a);break;case'star':r=.37+.105*Math.cos(6*a);break;case'sparkle':r=.37+.11*Math.cos(4*a);break;case'clover':r=.4+.085*Math.cos(4*a+.6);break;case'triangle':r=.37+.105*Math.cos(3*a);break;case'droplet':r=.39+.08*Math.cos(a)+.055*Math.cos(3*a);break;case'pebble':r=.43+.035*Math.cos(3*a)+.025*Math.sin(2*a);break;case'capsule':r=.45;break;}d+=(i?'L':'M')+(50+100*r*Math.cos(a))+','+(50+100*r*Math.sin(a));}d+='Z';}
+  else if(shapePaths.has(appearance.shape))d=shapePaths.get(appearance.shape);
+  else {for(let i=0;i<120;i++){const a=i/120*2*Math.PI-Math.PI/2;let r=.46;switch(appearance.shape){case'hexagon':r=.42/Math.cos((a+2*Math.PI)%(Math.PI/3)-Math.PI/6);break;case'cloud':r=.42+.055*Math.cos(7*a)+.025*Math.sin(3*a);break;case'flower':r=.41+.07*Math.cos(5*a);break;case'star':r=.37+.105*Math.cos(6*a);break;case'sparkle':r=.37+.11*Math.cos(4*a);break;case'clover':r=.4+.085*Math.cos(4*a+.6);break;case'triangle':r=.37+.105*Math.cos(3*a);break;case'droplet':r=.39+.08*Math.cos(a)+.055*Math.cos(3*a);break;case'pebble':r=.43+.035*Math.cos(3*a)+.025*Math.sin(2*a);break;case'capsule':r=.45;break;}d+=(i?'L':'M')+(50+100*r*Math.cos(a))+','+(50+100*r*Math.sin(a));}d+='Z';shapePaths.set(appearance.shape,d);}
   path.setAttribute('d',d);path.setAttribute('fill','var(--avatar-color)');if(appearance.shape==='square')path.setAttribute('transform','rotate(-20 50 50)');if(appearance.shape==='capsule')path.setAttribute('transform','translate(0 12) scale(1 .76)');svg.append(path);
   for(const [x,y]of [[42,36],[63,32]]){const eye=document.createElementNS(svg.namespaceURI,'rect');for(const[k,v]of Object.entries({x,y,width:9,height:24,rx:4.5,fill:appearance.color==='white'?'#111':'#fff',transform:'rotate(-25 50 50)'}))eye.setAttribute(k,v);svg.append(eye);}face.append(svg);
  }
@@ -45,6 +47,7 @@ let running=new Set();
 const pendingFiles=new Map();
 let inspectorOpen=false,inspectorTab="Details",inspectorSignature="",inspectorGeneration=0;
 const modelCatalogs=new Map();
+const browserActivity=new Map();
 let search = '';
 let toastTimer;
 let focusGeneration = 0;
@@ -75,13 +78,14 @@ function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
   const matches=bot=>(!bot.hidden||!!search)&&(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
   const primary=$('#primary-bot');primary.replaceChildren();
-  const matching=orderedBots().filter(x=>matches(x));const hero=(matching.find(x=>x.isMain)||matching.find(x=>isPinned(x)));
-  for(const bot of hero?[hero]:[]){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
+  const matching=orderedBots().filter(x=>matches(x));const heroes=[...matching.filter(x=>x.isMain&&isPinned(x)),...matching.filter(x=>!x.isMain&&isPinned(x))];
+  for(const bot of heroes){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
+  const lastText=new Map();for(const entry of workspace.entries)lastText.set(entry.botID,entry.text);
   const list=$('#bot-list');list.replaceChildren();
-  const rest=matching.filter(bot=>bot!==hero);const visible=[...rest.filter(bot=>isPinned(bot)),...recentBots(rest.filter(bot=>!isPinned(bot)))];
+  const visible=recentBots(matching.filter(bot=>!isPinned(bot)));
   for(const bot of visible){
     const row=button('',()=>selectBot(bot.id),`bot-row ${bot.id===selected?'selected':''}`);row.draggable=true;
-    const preview=entries(bot).at(-1)?.text||bot.purpose;
+    const preview=String(lastText.get(bot.id)||bot.purpose||'').slice(0,90);
     append(row,avatar(bot),append(node('span','details'),append(node('strong','',bot.name),...(isPinned(bot)?[node('i','pin','⚲')]:[]),...(bot.unread&&bot.id!==selected?[Object.assign(node('i','unread-dot'),{title:'Unread'})]:[])),node('small','',running.has(bot.id)?'Working…':preview)));
     row.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});
     wireBotDrag(row,bot);list.append(row);
@@ -98,7 +102,7 @@ function render() {
   renderMessages(bot);
   const activeCLI=setup.installed.find(x=>x.id===setup.selected);$('#status-button').textContent=activeCLI?`${activeCLI.name} · On this device`:'Set up an AI CLI';$('#status-button').hidden=!!activeCLI;
 
-  renderInspector();
+  renderInspector();renderBrowserPill();
 }
 function wireBotDrag(row,bot){
  row.draggable=true;row.addEventListener('dragstart',event=>{draggedBot=bot.id;event.dataTransfer.setData('text/plain',bot.id);event.dataTransfer.effectAllowed='move';});row.addEventListener('dragend',()=>{draggedBot=null;});row.addEventListener('dragover',event=>{if(draggedBot)event.preventDefault();});
@@ -131,17 +135,18 @@ const chatResizeObserver=new ResizeObserver(()=>scheduleChatBottom());chatResize
 function renderMessages(bot){
  let messages=$('#message-content');if(!messages){messages=node('div');messages.id='message-content';chatViewport.replaceChildren(messages);chatResizeObserver.observe(messages);}
  const previousScroll=chatViewport.scrollTop;
- if(chatScroll.bot!==bot.id){chatScroll.bot=bot.id;chatScroll.follow=true;chatScroll.userUntil=0;messages.replaceChildren();messages.dataset.bot=bot.id;}
+ if(chatScroll.bot!==bot.id){chatScroll.bot=bot.id;chatScroll.follow=true;chatScroll.userUntil=0;messages.replaceChildren();messages.dataset.bot=bot.id;messages.rows=new Map();}
+ const rows=messages.rows||=new Map();
  for(const el of messages.querySelectorAll('[data-extra]'))el.remove();
  const live=new Set();let index=0;const lastEntryID=entries(bot).at(-1)?.id;
  for(const entry of entries(bot)){
-  live.add(entry.id);let row=messages.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`);
-  if(!row){row=node('div',entry.kind==='activity'||entry.delivery==='scheduled'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));}
+  live.add(entry.id);let row=rows.get(entry.id);
+  if(!row){row=node('div',entry.kind==='activity'||entry.delivery==='scheduled'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));rows.set(entry.id,row);}
   const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==(entry.state||'')){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state',entry.delivery==='scheduled'?'Routine started':'Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
   if(entry.kind!=='activity'&&entry.delivery!=='scheduled'){const key=`${entry.reaction||''}|${entry.state||''}|${running.has(bot.id)}|${entry.id===lastEntryID}`;if(row.toolsKey!==key||!body.querySelector(':scope>.message-tools')){body.querySelector(':scope>.message-tools')?.remove();row.toolsKey=key;body.append(messageTools(bot,entry,entry.id===lastEntryID));}}
   if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
  }
- for(const row of messages.querySelectorAll('[data-entry]'))if(!live.has(row.dataset.entry))row.remove();
+ for(const [id,row] of rows)if(!live.has(id)){row.remove();rows.delete(id);}
  const pending=pendingSends.get(bot.id);
  if(pending&&!live.has(pending.id)){const row=append(node('div','message-row user pending'),append(node('div','message-body'),node('div','bubble',pending.text),node('small','delivery-state',pending.failed?'Failed to send':'Sending…')));row.dataset.extra='true';if(pending.failed)row.firstChild.append(button('Retry sending',()=>submitMessage(bot,pending.text,pending.id)));messages.append(row);}
  if(!entries(bot).length&&!pending){const empty=node('div','empty','What’s on your mind?');empty.dataset.extra='true';messages.append(empty);}
@@ -706,3 +711,13 @@ async function renderCatalog(content) {
 // Accent: Bot colour or neutral.
 function applyAccent() { document.documentElement.dataset.accent = localStorage.getItem('accentStyle') === 'neutral' ? 'neutral' : 'bot'; }
 applyAccent();
+
+// A Bot's browser stays out of sight. This bar appears while a Bot is using it, with a button to look at it.
+function renderBrowserPill() {
+  const pill = $('#browser-pill'); if (!pill) return;
+  const bot = currentBot(), state = bot && browserActivity.get(bot.id);
+  pill.hidden = !state; pill.replaceChildren(); if (!state) return;
+  append(pill, node('span', 'browser-dot'), node('span', '', `${bot.name} ${state.working}`),
+    button(state.revealed ? 'Hide browser' : 'Show browser', async () => { try { await result(bridge.revealBrowser(bot.id, !state.revealed)); } catch (error) { toast(error.message); } }, 'link-button'));
+}
+bridge.onBrowserActivity?.(value => { if (value?.working) browserActivity.set(value.botID, value); else browserActivity.delete(value?.botID); renderBrowserPill(); });

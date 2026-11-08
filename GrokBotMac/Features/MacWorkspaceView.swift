@@ -15,17 +15,13 @@ struct MacWorkspaceView: View {
     @FocusState private var searchFocused: Bool
     @AppStorage("profileName") private var profileName = "You"
 
-    /// The single hero card: the primary Bot (or, failing that, the first pinned one).
+    /// Every pinned Bot is a tile at the top, with the main Bot first.
     private var heroBots: [Bot] {
-        let main = sidebarBots.filter { $0.isMain == true }
-        return Array((main.isEmpty ? sidebarBots.filter { pinned($0) } : main).prefix(1))
+        let pins = sidebarBots.filter { pinned($0) }
+        return pins.filter { $0.isMain == true } + pins.filter { $0.isMain != true }
     }
-    /// Everything else: other pinned Bots first (with a pin glyph), then the rest by recent use.
-    private var listBots: [Bot] {
-        let hero = Set(heroBots.map(\.id))
-        let rest = sidebarBots.filter { !hero.contains($0.id) }
-        return rest.filter { pinned($0) } + app.recentlyUsed(rest.filter { !pinned($0) })
-    }
+    /// Everything else, by recent use.
+    private var listBots: [Bot] { app.recentlyUsed(sidebarBots.filter { !pinned($0) }) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -117,19 +113,19 @@ struct MacWorkspaceView: View {
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    HStack {
-                        Spacer(minLength: 0)
-                        ForEach(heroBots) { bot in
-                            Button { desktop.selectedID = bot.id; touch(bot) } label: {
-                                VStack(spacing: 12) {
-                                    MacBotAvatar(color: bot.color, size: 56, starred: true, appearance: bot.appearance)
-                                    Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
-                                }.padding(.vertical, 12).padding(.horizontal, 10).frame(width: 104).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 12))
-                            }.buttonStyle(.plain).contextMenu { botMenu(bot) }.draggable(bot.id.uuidString)
-                                .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
-                        }
-                        Spacer(minLength: 0)
-                    }.padding(.horizontal, 18).padding(.vertical, 16)
+                    if !heroBots.isEmpty {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
+                            ForEach(heroBots) { bot in
+                                Button { desktop.selectedID = bot.id; touch(bot) } label: {
+                                    VStack(spacing: 12) {
+                                        MacBotAvatar(color: bot.color, size: 64, starred: true, appearance: bot.appearance)
+                                        Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
+                                    }.padding(14).frame(maxWidth: .infinity).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
+                                }.buttonStyle(.plain).contextMenu { botMenu(bot) }.draggable(bot.id.uuidString)
+                                    .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
+                            }
+                        }.padding(.horizontal, 18).padding(.vertical, 20)
+                    }
                     ForEach(listBots) { bot in
                         Button { desktop.selectedID = bot.id; touch(bot) } label: {
                             HStack(spacing: 16) {
@@ -138,7 +134,6 @@ struct MacWorkspaceView: View {
                                     HStack(spacing: 6) {
                                         Text(bot.name).font(.system(size: 16, weight: .medium)).lineLimit(1).help(bot.name)
                                         if bot.unread == true { Circle().fill(Color(hex: 0x2F7BFF)).frame(width: 8, height: 8).accessibilityLabel("Unread") }
-                                        if pinned(bot) { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(MacTheme.secondary).accessibilityLabel("Pinned") }
                                     }
                                     Text(app.latest(for: bot)).font(.system(size: 13)).foregroundStyle(MacTheme.secondary).lineLimit(1)
                                 }

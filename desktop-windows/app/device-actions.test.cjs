@@ -68,6 +68,19 @@ test('an always-ask rule for a site forces approval of an ordinary click there, 
   assert.match(await make('www.shop.example').run({ action: 'browser_click', text: 'Scores' }, { ...ctx, unattended: true }), /unattended/);
 });
 
+test('web search uses Composio when it is set up and only falls back to the browser when it is not or it fails', async () => {
+  let browserSearches = 0;
+  const browsers = fakeBrowsers({ search: async () => { browserSearches++; return [{ title: 'Browser hit', url: 'https://b.example', snippet: 'x' }]; } });
+  const make = composioSearch => da.create({ browsers, composioSearch, approve: async () => true, logins: da.createLoginStore(memoryStore()), directory: () => os.tmpdir() });
+  const ctx = { botID: 'b', botName: 'Fantasy', unattended: false };
+  const viaComposio = await make(async () => [{ title: 'Composio hit', url: 'https://c.example', snippet: 'y' }]).run({ action: 'search_web', text: 'nfl' }, ctx);
+  assert.match(viaComposio, /via Composio/); assert.match(viaComposio, /Composio hit/); assert.equal(browserSearches, 0);
+  assert.match(await make(async () => []).run({ action: 'search_web', text: 'nothing' }, ctx), /no results/); assert.equal(browserSearches, 0);
+  assert.match(await make(async () => null).run({ action: 'search_web', text: 'nfl' }, ctx), /Browser hit/); assert.equal(browserSearches, 1);
+  const failed = await make(async () => { throw new Error('offline'); }).run({ action: 'search_web', text: 'nfl' }, ctx);
+  assert.match(failed, /Composio search failed: offline/); assert.match(failed, /Browser hit/); assert.equal(browserSearches, 2);
+});
+
 test('harmless actions run without prompting and results summarize for the chat', async () => {
   let asked = 0;
   const devices = da.create({ browsers: fakeBrowsers(), approve: async () => { asked++; return true; }, logins: da.createLoginStore(memoryStore()), directory: () => os.tmpdir() });

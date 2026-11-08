@@ -13,7 +13,7 @@ final class MacGateway: ObservableObject {
 
     init(source: CloudAccount) {
         let cache = FileManager.default.temporaryDirectory.appendingPathComponent("OpenGrokBot-gateway-cache-" + UUID().uuidString + ".json")
-        model = AppModel(store: WorkspaceStore(url: cache))
+        model = AppModel(store: WorkspaceStore(url: cache), deferSaves: true)
         remote = RemoteController(
             account: CloudAccount(kind: "controller", secrets: KeychainSecretStore(service: "org.opengrokbot.mac.mirror-identity")),
             secrets: KeychainSecretStore(service: "org.opengrokbot.mac.mirror-selection"))

@@ -4,10 +4,16 @@ test('project sessions use fixed origin, unique user, explicit tool allowlist an
   const calls=[];const options={fetcher:async(url,request)=>{calls.push({url,request});return new Response(JSON.stringify(url.endsWith('/link')?{redirect_url:'https://connect.composio.dev/link/test'}:url.includes('/toolkits?')?{items:[{slug:'github',name:'GitHub',enabled:true,is_no_auth:false,connected_account:{status:'ACTIVE'}}]}:{session_id:'trs_fixture',mcp:{url:'https://connect.composio.dev/mcp/test'}}),{status:200});}};
   const session=await api.create('private-project-key','device-specific-user',['github'],options);
   assert.equal(calls[0].request.headers['x-api-key'],'private-project-key');assert.equal(calls[0].request.redirect,'error');
-  assert.deepEqual(JSON.parse(calls[0].request.body),{user_id:'device-specific-user',toolkits:{enable:['github']},manage_connections:{enable:false}});
+  assert.deepEqual(JSON.parse(calls[0].request.body),{user_id:'device-specific-user',toolkits:{enable:['github','composio_search']},manage_connections:{enable:false}});
   assert.equal((await api.toolkits('key',session.session_id,options))[0].connected,true);
   assert.equal(await api.link('key',session.session_id,'github',options),'https://connect.composio.dev/link/test');
   assert.ok(calls.every(x=>new URL(x.url).origin==='https://backend.composio.dev'));
+});
+test('if Composio does not accept its search toolkit the session is created again without it',async()=>{
+  const bodies=[];const fetcher=async(url,request)=>{const body=JSON.parse(request.body);bodies.push(body.toolkits.enable);return body.toolkits.enable.includes('composio_search')?new Response('{}',{status:400}):new Response(JSON.stringify({session_id:'s1',mcp:{url:'https://backend.composio.dev/mcp/s1'}}),{status:200});};
+  const session=await api.create('k','u',['github'],{fetcher});
+  assert.equal(session.session_id,'s1');assert.deepEqual(bodies,[['github','composio_search'],['github']]);
+  await assert.rejects(api.create('k','u',['github'],{fetcher:async()=>new Response('{}',{status:401})}),/rejected/);
 });
 test('rejects unsafe returned endpoints and never surfaces raw service errors',async()=>{
   for(const value of ['http://composio.dev/a','https://composio.dev.evil.example/a','https://user:secret@composio.dev/a','https://composio.dev:8443/a'])assert.equal(api.trustedURL(value),null);

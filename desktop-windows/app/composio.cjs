@@ -4,12 +4,17 @@ const validID=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,299}$/.test(valu
 async function request(key,suffix,{method='GET',body,fetcher=fetch}={}){
   let response;
   try{response=await fetcher('https://backend.composio.dev/api/v3.1/tool_router/session'+suffix,{method,headers:{'x-api-key':key,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(30000)});}catch{throw new Error('Composio could not be reached. Check your connection and try again.');}
-  if(!response.ok)throw new Error([401,403].includes(response.status)?'Composio rejected this project key or its permissions.':response.status===429?'Composio’s rate limit was reached. Try again later.':`Composio request failed (HTTP ${response.status}).`);
+  if(!response.ok)throw Object.assign(new Error([401,403].includes(response.status)?'Composio rejected this project key or its permissions.':response.status===429?'Composio’s rate limit was reached. Try again later.':`Composio request failed (HTTP ${response.status}).`),{status:response.status});
   const text=await response.text();if(text.length>4000000)throw new Error('Composio returned an unsupported response.');
   try{return JSON.parse(text);}catch{throw new Error('Composio returned an unsupported response.');}
 }
+const searchToolkit=require('./composio-search.cjs').TOOLKIT;
 async function create(key,userID,toolkits,options={}){
-  const session=await request(key,'',{...options,method:'POST',body:{user_id:userID,toolkits:{enable:toolkits},manage_connections:{enable:false}}});
+  // Composio's own search toolkit is always added so Bots can look things up without opening a browser. It needs no sign-in.
+  const withSearch=toolkits.includes(searchToolkit)?toolkits:[...toolkits,searchToolkit];
+  const make=list=>request(key,'',{...options,method:'POST',body:{user_id:userID,toolkits:{enable:list},manage_connections:{enable:false}}});
+  let session;
+  try{session=await make(withSearch);}catch(error){if(error.status>=400&&error.status<500&&![401,403,429].includes(error.status))session=await make(toolkits);else throw error;}
   if(!validID(session.session_id)||!trustedURL(session.mcp?.url))throw new Error('Composio returned an unsupported session.');return session;
 }
 async function toolkits(key,sessionID,options={}){

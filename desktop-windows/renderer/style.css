@@ -183,3 +183,8 @@
 .app-card{display:flex;align-items:center;gap:12px;padding:12px;background:var(--raised);border-radius:14px}
 .app-card .details{display:flex;flex-direction:column;flex:1;min-width:0}
 .app-initial{width:38px;height:38px;border-radius:10px;background:var(--panel);display:flex;align-items:center;justify-content:center;font-weight:600;flex:none}
+
+.browser-pill{display:flex;align-items:center;gap:10px;margin:0 auto 8px;padding:7px 14px;max-width:760px;border-radius:999px;background:var(--raised);font-size:13px}
+.browser-pill[hidden]{display:none}
+.browser-dot{width:8px;height:8px;border-radius:50%;background:var(--bot-accent,#9355ff);animation:micpulse 1.1s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.browser-dot{animation:none}}

@@ -22,7 +22,7 @@ async function settle(web,{interval=300,limit=5000}={}){
 async function captureView(web,directory){
  try{
   const image=await web.capturePage();
-  if(!image||image.isEmpty())return {error:'The browser window has nothing to capture. Make sure it is not minimized.'};
+  if(!image||image.isEmpty())return {error:'The browser has nothing to capture right now. Try again, or ask the human to press Show browser.'};
   const size=image.getSize();
   const jpeg=(size.width>1400?image.resize({width:1400}):image).toJPEG(80);
   return {path:await attachments.savePageScreenshot(directory,jpeg)};
@@ -122,14 +122,20 @@ class LocalBrowsers{
   });
  }
  update(entry){if(entry.window.isDestroyed()||entry.view.webContents.isDestroyed())return;const web=entry.view.webContents;entry.window.webContents.send('bot-browser:state',{url:web.getURL(),title:web.getTitle(),loading:web.isLoading(),back:web.navigationHistory.canGoBack(),forward:web.navigationHistory.canGoForward()});}
- open(id,address){
+
+ /** Tells the app window what a Bot's browser is doing, so it can offer Show browser. */
+ activity(id){const entry=this.entries.get(id);if(this.onActivity)this.onActivity({botID:id,working:entry?.working||null,revealed:!!entry&&entry.revealed&&!entry.window.isDestroyed()&&entry.window.isVisible()});}
+ setWorking(id,text){const entry=this.entries.get(id);if(!entry)return;entry.working=text||null;this.activity(id);}
+ setRevealed(id,show){const entry=this.entries.get(id);if(!entry||entry.window.isDestroyed())return false;if(show){entry.revealed=true;entry.window.show();entry.window.focus();}else{entry.revealed=false;entry.window.hide();}this.activity(id);return true;}
+ open(id,address,{reveal=false}={}){
   const bot=this.getBot(id);if(!bot)throw new Error('Choose a Bot.');if(address!=null&&!allowed(address))throw new Error('Enter an HTTP or HTTPS page.');
   let entry=this.entries.get(bot.id);
   if(!entry||entry.window.isDestroyed()){
    if(this.entries.size>=8)throw new Error('Close a Bot browser before opening another. Up to eight browser windows can be open.');
-   const window=new BrowserWindow({width:1150,height:820,minWidth:650,minHeight:450,title:bot.name+' · Local browser',webPreferences:{preload:path.join(__dirname,'browser-preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
-   const view=new WebContentsView({webPreferences:{partition:'persist:opengrokbot-browser-'+bot.id.toLowerCase(),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
-   entry={window,view,reading:false};this.entries.set(bot.id,entry);window.contentView.addChildView(view);
+   // The window starts hidden: a Bot using its browser never puts anything on the screen. The human opens it with Show browser.
+   const window=new BrowserWindow({show:false,width:1150,height:820,minWidth:650,minHeight:450,title:bot.name+' · Local browser',webPreferences:{preload:path.join(__dirname,'browser-preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:false}});
+   const view=new WebContentsView({webPreferences:{partition:'persist:opengrokbot-browser-'+bot.id.toLowerCase(),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,backgroundThrottling:false}});
+   entry={window,view,reading:false,working:null,revealed:false};this.entries.set(bot.id,entry);window.on('close',event=>{if(entry.working||entry.reading){event.preventDefault();window.hide();entry.revealed=false;this.activity(bot.id);}});window.on('hide',()=>{entry.revealed=false;this.activity(bot.id);});window.contentView.addChildView(view);
    const size=()=>{const bounds=window.getContentBounds();view.setBounds({x:0,y:64,width:bounds.width,height:Math.max(0,bounds.height-64)});};window.on('resize',size);size();
    window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',event=>event.preventDefault());
    view.webContents.setWindowOpenHandler(({url})=>{if(allowed(url))view.webContents.loadURL(url).catch(()=>{});return {action:'deny'};});
@@ -139,12 +145,13 @@ class LocalBrowsers{
    for(const event of ['did-start-loading','did-stop-loading','did-navigate','did-navigate-in-page','page-title-updated'])view.webContents.on(event,()=>this.update(entry));
    window.on('closed',()=>{if(!view.webContents.isDestroyed()){view.webContents.session.removeListener('will-download',entry.blockDownload);view.webContents.close();}this.entries.delete(bot.id);});
    window.loadFile(chromeFile).catch(()=>{});view.webContents.loadURL(address||'https://duckduckgo.com').catch(()=>{});
-  }else{entry.window.show();entry.window.focus();if(address)entry.view.webContents.loadURL(address).catch(()=>{});}
+  }else if(address)entry.view.webContents.loadURL(address).catch(()=>{});
+  if(reveal)this.setRevealed(bot.id,true);
   return entry;
  }
  async read(id,address){
   if(!allowed(address))throw new Error('Choose an HTTP or HTTPS page.');
-  const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is already reading a page.');entry.reading=true;
+  const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is already reading a page.');entry.reading=true;this.setWorking(id,'is reading a page…');
   const web=entry.view.webContents;let timer,note,loadError;
   try{
    try{
@@ -162,7 +169,7 @@ class LocalBrowsers{
    else page.screenshotError=shot.error;
    return JSON.stringify(page);
   }catch{throw new Error('The local browser could not finish reading the page. Its window stays open so you can inspect it or sign in, then retry.');}
-  finally{entry.reading=false;}
+  finally{entry.reading=false;this.setWorking(id,null);}
  }
  _entry(id){const bot=this.getBot(id);if(!bot)throw new Error('Choose a Bot.');const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is busy. Try again in a moment.');return {entry,bot,web:entry.view.webContents};}
  /** The address of the page a Bot's browser is on, or an empty string. Used to match written approval rules. */

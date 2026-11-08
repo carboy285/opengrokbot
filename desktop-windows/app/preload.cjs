@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('desktop', {
   vmCredentials:id=>ipcRenderer.invoke('vm:credentials',id),
   touchBot:id=>ipcRenderer.invoke('bot:touch',id),
   openBrowser:(id,address)=>ipcRenderer.invoke('browser:open',id,address),
+  revealBrowser:(id,show)=>ipcRenderer.invoke('browser:reveal',id,show),
+  onBrowserActivity:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('browser:activity',listener);return ()=>ipcRenderer.removeListener('browser:activity',listener);},
   openMirror:()=>ipcRenderer.invoke('workspace:mirror'),
   cloudStatus:()=>ipcRenderer.invoke('cloud:status'),
   cloudSignIn:(email,password,create)=>ipcRenderer.invoke('cloud:sign-in',email,password,create),
