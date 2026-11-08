@@ -165,6 +165,8 @@ class LocalBrowsers{
   finally{entry.reading=false;}
  }
  _entry(id){const bot=this.getBot(id);if(!bot)throw new Error('Choose a Bot.');const entry=this.open(id);if(entry.reading)throw new Error('This Bot’s browser is busy. Try again in a moment.');return {entry,bot,web:entry.view.webContents};}
+ /** The address of the page a Bot's browser is on, or an empty string. Used to match written approval rules. */
+ pageHost(id){try{return new URL(this._entry(id).web.getURL()).host;}catch{return '';}}
  async inspectClick(id,target){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageClick,{target,mode:'inspect'}));}
  async click(id,target){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageClick,{target,mode:'click'}));}
  async inspectField(id,target,submit){const {web}=this._entry(id);return web.executeJavaScript(inPage(pageField,{target,mode:'inspect',value:'',submit:!!submit}));}

@@ -10,6 +10,8 @@ function validateWorkspace(value) {
   const ids = new Set();
   for (const bot of value.bots) {
     if (typeof bot.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(bot.id) || ids.has(bot.id.toLowerCase()) || typeof bot.name !== 'string' || !bot.name.trim() || bot.name.length > 200 || typeof bot.purpose !== 'string' || bot.purpose.length > 2000 || !COLORS.has(bot.color)) throw new Error('Invalid Bot');
+    if(bot.hidden!=null&&typeof bot.hidden!=='boolean'||bot.unread!=null&&typeof bot.unread!=='boolean')throw new Error('Invalid Bot flags');
+    if(bot.voice!=null){const v=bot.voice;if(typeof v!=='object'||Array.isArray(v)||v.speaker!=null&&(typeof v.speaker!=='string'||v.speaker.length>20)||v.speed!=null&&(typeof v.speed!=='number'||!(v.speed>=0.75&&v.speed<=1.5))||v.language!=null&&(typeof v.language!=='string'||v.language.length>12))throw new Error('Invalid Bot voice');}
     if(bot.lastUsedAt!=null&&(typeof bot.lastUsedAt!=='string'||!Number.isFinite(Date.parse(bot.lastUsedAt))))throw new Error('Invalid recent use');
     if(bot.schedules!=null&&(!Array.isArray(bot.schedules)||bot.schedules.length>100||bot.schedules.some(x=>!require('./schedules.cjs').valid(x))))throw new Error('Invalid scheduled tasks');
     if(bot.isPinned!=null&&typeof bot.isPinned!=='boolean'||bot.folder!=null&&(typeof bot.folder!=='string'||bot.folder.length>80)||bot.sortOrder!=null&&(!Number.isInteger(bot.sortOrder)||bot.sortOrder<0||bot.sortOrder>10000))throw new Error('Invalid Bot organization');
@@ -23,6 +25,7 @@ function validateWorkspace(value) {
   const entries = new Set();
   for (const entry of value.entries) {
     if (typeof entry.id !== 'string' || entries.has(entry.id.toLowerCase()) || typeof entry.botID!=='string' || !ids.has(entry.botID.toLowerCase()) || !KINDS.has(entry.kind) || typeof entry.text !== 'string' || entry.text.length > (entry.kind === 'bot' ? 32 * 1024 * 1024 : 100000)) throw new Error('Invalid entry');
+    if(entry.reaction!=null&&(typeof entry.reaction!=='string'||[...entry.reaction].length>8))throw new Error('Invalid reaction');
     if(entry.state!==undefined&&!['streaming','complete','stopped','failed'].includes(entry.state))throw new Error('Invalid message state');
     entries.add(entry.id.toLowerCase());
   }

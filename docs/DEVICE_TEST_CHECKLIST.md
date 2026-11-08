@@ -75,13 +75,14 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Settings → Accent = Neutral turns the send/voice/stop circles neutral; the copy icon next to the account email copies it.
 - Windows: same sidebar/footer/composer; no folder picker or "This computer" button in the header; Settings → Computer still has "View another computer".
 
-## 0.8.6 (continued): palette, message actions, dictation, permissions, voice speed
-- ⌘K and ⌘F open the palette; typing filters Bots; up/down/return choose; Escape closes it. New group chat is hidden while viewing another computer.
-- Bot row menu: Rename, Pin, Mark unread (dot appears, clears on opening), Hide (gone from list, still found by search), Delete.
-- Hover a message: Reply quotes it in the box, React puts an emoji pill under it (tap again to remove), Retry resends, Delete removes it.
-- New Bot: small dialog, shape grid and 10 colours, optional templates.
-- Mic in the message box: first use asks for Microphone and Speech Recognition; words appear while you talk; tap again or send to stop. If you deny access, a note explains where to allow it.
-- Settings → Permissions: Reminders/Calendar/Contacts/Notes can be set to Always ask or Allow without asking; delete, send, saved logins and unattended runs show as locked.
-- Bot details → Voice chat: voice, speed and language change the next voice session (Apple voice also changes speed immediately for new sentences).
-- Voice speed (compare with 0.8.5): time from sending until the first word, gap between sentences, how soon it replies after you stop talking. Try Apple, Groq, OpenAI, ElevenLabs. Speed slider at 0.75× and 1.5× should sound clean on Apple and cloud voices.
-- Windows: Settings → Voice has a Speaking speed slider; replies begin sooner; no dictation yet.
+## 0.8.6 (continued): palette, message actions, dictation, permissions, voice, Teach a task
+- Ctrl/⌘K and Ctrl/⌘F open the palette on Mac and Windows; typing filters Bots (shows the last message); up/down/return choose; Escape closes it. New group chat and Computers appear on Mac only (hidden while viewing another computer).
+- Bot row menu: Pin, Move to new section, Mark as unread (dot clears on opening), Rename, Copy conversation ID, Hide from sidebar (still found in the palette), Delete (asks first).
+- Hover a message (Mac, Windows): React shows six emoji, Reply quotes it in the box, More has Copy text, Copy as Markdown, Retry (last Bot message), Delete. iPhone: long-press shows the same; reaction and delete go through the computer, so update the computer first.
+- Create a Bot (Mac, Windows, iPhone): Create stays disabled until a name is typed; 14 shapes, 10 colours, optional description. From iPhone, check the shape and colour arrive on the computer.
+- Mic in the message box: Mac and iPhone ask for Microphone and Speech Recognition on first use and write words into the box while you talk; denying shows a one-line note. Windows: needs a Groq/OpenAI/ElevenLabs key under Settings → Voice; tap to start, tap to stop, the text appears after a moment.
+- Settings → Permissions (Mac): Use my rules; add an Always ask rule for Calendar, then ask a Bot to add an event and confirm the dialog appears even if the app toggle says not to ask; add an Allow rule for Notes and confirm no dialog; confirm deleting, sending and saved logins still ask. Windows: add an Always ask rule for a site and confirm a harmless click there asks.
+- Bot details: the Voice chat card (voice, speed, language) is per Bot (compare two Bots). Routines list Pause/Resume/Delete. Providers & models is collapsed on Mac unless the Bot has no provider.
+- Teach a task (Mac): + menu → Teach a task; switch to another app and click around; come back, add a typed step and a "secret" step; Stop; name and save; check the Bot’s memory shows numbered steps with the secret hidden.
+- Connect apps (Mac, Windows): avatar stack when something is connected, chips filter, View all on a category jumps to it.
+- Voice speed (compare with 0.8.5): time to first word, gap between sentences, how soon it answers after you stop talking. Try Apple, Groq, OpenAI, ElevenLabs. Speed 0.75× and 1.5× should sound clean.

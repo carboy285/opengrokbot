@@ -2,6 +2,8 @@ import { preview } from './seed.js';
 import { createVoice } from './voice.js';
 import { renderApiKeys } from './api-keys.js';
 import { renderSecureLogins } from './secure-logins.js';
+import { encodeWav } from './voice-core.mjs';
+import * as catalog from './catalog.js';
 
 const $ = selector => document.querySelector(selector);
 const node = (tag, className = '', text = '') => { const value = document.createElement(tag); value.className = className; value.textContent = text; return value; };
@@ -68,10 +70,10 @@ async function persist(next) {
   try { await result(bridge.save(next)); workspace = next; return true; }
   catch (error) { toast(error.message); return false; }
 }
-function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});render(); }
+function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});if(bot?.unread){bot.unread=false;bridge.organizeBot?.(id,{unread:null}).catch?.(()=>{});}render(); }
 function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
-  const matches=bot=>(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
+  const matches=bot=>(!bot.hidden||!!search)&&(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
   const primary=$('#primary-bot');primary.replaceChildren();
   const matching=orderedBots().filter(x=>matches(x));const hero=(matching.find(x=>x.isMain)||matching.find(x=>isPinned(x)));
   for(const bot of hero?[hero]:[]){const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}`),avatar(bot,true),node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
@@ -80,7 +82,7 @@ function render() {
   for(const bot of visible){
     const row=button('',()=>selectBot(bot.id),`bot-row ${bot.id===selected?'selected':''}`);row.draggable=true;
     const preview=entries(bot).at(-1)?.text||bot.purpose;
-    append(row,avatar(bot),append(node('span','details'),append(node('strong','',bot.name),...(isPinned(bot)?[node('i','pin','⚲')]:[])),node('small','',running.has(bot.id)?'Working…':preview)));
+    append(row,avatar(bot),append(node('span','details'),append(node('strong','',bot.name),...(isPinned(bot)?[node('i','pin','⚲')]:[]),...(bot.unread&&bot.id!==selected?[Object.assign(node('i','unread-dot'),{title:'Unread'})]:[])),node('small','',running.has(bot.id)?'Working…':preview)));
     row.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});
     wireBotDrag(row,bot);list.append(row);
   }
@@ -131,11 +133,12 @@ function renderMessages(bot){
  const previousScroll=chatViewport.scrollTop;
  if(chatScroll.bot!==bot.id){chatScroll.bot=bot.id;chatScroll.follow=true;chatScroll.userUntil=0;messages.replaceChildren();messages.dataset.bot=bot.id;}
  for(const el of messages.querySelectorAll('[data-extra]'))el.remove();
- const live=new Set();let index=0;
+ const live=new Set();let index=0;const lastEntryID=entries(bot).at(-1)?.id;
  for(const entry of entries(bot)){
   live.add(entry.id);let row=messages.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`);
   if(!row){row=node('div',entry.kind==='activity'||entry.delivery==='scheduled'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));}
   const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==(entry.state||'')){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state',entry.delivery==='scheduled'?'Routine started':'Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
+  if(entry.kind!=='activity'&&entry.delivery!=='scheduled'){const key=`${entry.reaction||''}|${entry.state||''}|${running.has(bot.id)}|${entry.id===lastEntryID}`;if(row.toolsKey!==key||!body.querySelector(':scope>.message-tools')){body.querySelector(':scope>.message-tools')?.remove();row.toolsKey=key;body.append(messageTools(bot,entry,entry.id===lastEntryID));}}
   if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
  }
  for(const row of messages.querySelectorAll('[data-entry]'))if(!live.has(row.dataset.entry))row.remove();
@@ -167,14 +170,18 @@ function renderInspector(){
  const tabs=node('nav','inspector-tabs');tabs.setAttribute('aria-label','Bot details tabs');
  for(const name of ['Details','Library','Computer']){const tab=button(name,()=>{inspectorTab=name;renderInspector();},name===inspectorTab?'active':'');tab.setAttribute('aria-current',String(name===inspectorTab));tabs.append(tab);}
  const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
+ let providersMark;
  if(inspectorTab==='Details'){
   append(body,node('h3','','Linux VM'),node('p','muted','Runs in VirtualBox on this PC.'),button('Set up or open Linux VM',()=>showBotVM(bot)));
   append(body,node('h3','','Knowledge'),node('p','muted','Text, Markdown and CSV files this Bot can search instead of needing them attached to every message.'),button('Add knowledge files…',async()=>{try{const added=await result(bridge.knowledgeAdd(bot.id));if(added)toast(`Added ${added} file${added===1?'':'s'} to ${bot.name}’s Knowledge. Ask it to search them.`);}catch(error){toast(error.message);}}));
   append(body,node('h3','','Local browser'),node('p','muted','Its own browser profile, in a window on this PC.'),button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(error){toast(error.message);}}));
   append(body,node('h3','','Routines'),node('p','muted','Ask the Bot to run a task once, on a repeat, or when another Bot messages it. The app must be running; missed runs catch up once.'));
-  for(const task of bot.schedules||[]){const history=node('details'),summary=node('summary','','Run history');history.append(summary);for(const run of task.history||[])history.append(node('p','muted',`${run.date} · ${run.status}`));if(task.history?.length)body.append(history);append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}${task.lastRun?' · Last run: '+task.lastRun+' · '+(task.lastResult||'outcome unavailable'):''}`),button('Cancel task',async()=>{await result(bridge.cancelTask(bot.id,task.id));}));}
+  for(const task of bot.schedules||[]){const history=node('details'),summary=node('summary','','Run history');history.append(summary);for(const run of task.history||[])history.append(node('p','muted',`${run.date} · ${run.status}`));if(task.history?.length)body.append(history);append(body,node('p','',`${task.name} · ${task.enabled?(task.nextRun||'Incoming Bot message'):'Paused'} · ${task.recurrence} · ${task.timezone}${task.lastRun?' · Last run: '+task.lastRun+' · '+(task.lastResult||'outcome unavailable'):''}`),append(node('div','row-actions'),...(bridge.pauseTask?[button(task.enabled?'Pause':'Resume',async()=>{try{await result(bridge.pauseTask(bot.id,task.id,!task.enabled));}catch(error){toast(error.message);}})]:[]),button('Delete',async()=>{try{await result(bridge.cancelTask(bot.id,task.id));}catch(error){toast(error.message);}})));}
+  if(!(bot.schedules||[]).length)body.append(node('p','muted','No routines yet. You can also ask in chat to add one.'));
+  append(body,node('h3','','Voice chat'),voiceCard(bot));
   if(bot.memberIDs){body.append(node('h3','','Group members'));for(const member of workspace.bots.filter(x=>bot.memberIDs.includes(x.id)))body.append(button(member.name,()=>selectBot(member.id)));body.append(node('p','muted','Each member answers with its own provider and model.'));}
   else{
+   providersMark=body.childNodes.length;
    append(body,node('h3','','Providers & models'),node('p','muted','Pick the provider and model that answer for this Bot. Access follows each CLI’s account.'));
    if(config.providers.length>1){const select=node('select','field');select.setAttribute('aria-label','Active provider');for(const choice of config.providers){const option=node('option','',setup.providers.find(x=>x.id===choice.provider)?.name||choice.provider);option.value=choice.provider;select.append(option);}select.value=config.activeProvider||config.providers[0].provider;select.disabled=busy;select.addEventListener('change',()=>configureBot(bot,{...config,activeProvider:select.value}));append(body,node('label','','Active provider'),select);}
    for(const provider of setup.providers){
@@ -194,9 +201,10 @@ function renderInspector(){
    }
    body.append(node('p','muted','Only the active provider and model answer for this Bot.'));
   }
+  let providersBox;if(providersMark!==undefined){providersBox=node('details','providers-box');providersBox.open=localStorage.getItem('providersOpen')!=='0'||!config.providers.length;providersBox.addEventListener('toggle',()=>localStorage.setItem('providersOpen',providersBox.open?'1':'0'));providersBox.append(node('summary','','Providers & models'),...[...body.childNodes].slice(providersMark));}
   if(!bot.isMain)body.append(node('p','',bot.purpose));
   for(const [title,memory] of [['This Bot’s memory',bot.memory],['Shared memory',workspace.sharedMemory]])if(memory?.length){body.append(node('h3','',title));for(const fact of memory)body.append(node('p','memory-fact',fact));}
-  body.append(button(isPinned(bot)?'Unpin Bot':'Pin to top',()=>organize(bot,{isPinned:!isPinned(bot)})));body.append(button('Organize Bot…',()=>showBotActions(bot)));
+  body.append(button(isPinned(bot)?'Unpin Bot':'Pin to top',()=>organize(bot,{isPinned:!isPinned(bot)})));body.append(button('Organize Bot…',()=>showBotActions(bot)));if(providersBox)body.append(providersBox);
  }else if(inspectorTab==='Computer'){
   const choice=config.providers.find(x=>x.provider===config.activeProvider)||config.providers[0],provider=setup.providers.find(x=>x.id===choice?.provider);
   append(body,node('h3','','Runs on this device'),node('p','',provider?.name||'Choose an AI CLI'),node('p','muted',choice?.model||'CLI default model'),node('p','muted',busy?'Working…':'Each Bot keeps its own working folder.'),button('AI CLI setup',()=>showConnection()),button('Open working folder',()=>bridge.openBotFolder(bot.id)));
@@ -257,25 +265,6 @@ async function showConnection(detail='') {
   try{setup=await result(bridge.scanCLIs());provider=setup.installed.find(x=>x.id===setup.selected)?.provider||'codex';}catch(error){toast(error.message);}
   await draw();
 }
-function showNewBot() {
-  const content = panel('Create a Bot');
-  const form = node('form', 'new-bot');
-  let color = 'purple';
-  const face = avatar(color);
-  const name = node('input', 'field'); name.placeholder = 'Give your Bot a name'; name.maxLength = 200; name.required = true; name.setAttribute('aria-label', 'Bot name');
-  const purpose = node('textarea', 'field'); purpose.placeholder = 'A short description'; purpose.rows = 3; purpose.maxLength = 2000; purpose.setAttribute('aria-label', 'Bot description');
-  const choices = node('div', 'colors');
-  for (const option of ['purple', 'pink', 'ochre', 'white']) {
-    const control = button('', () => { color = option; face.className = `avatar ${color}`; for (const other of choices.children) other.classList.remove('active'); control.classList.add('active'); }, `color-choice ${color === option ? 'active' : ''}`);
-    control.style.backgroundColor = { purple: '#9355ff', pink: '#fa2a99', ochre: '#9c6c37', white: '#fff' }[option]; control.setAttribute('aria-label', `${option} avatar`); choices.append(control);
-  }
-  const create = button('Create Bot', () => {}, 'pill primary'); create.type = 'submit'; create.disabled = true;
-  name.addEventListener('input', () => create.disabled = !name.value.trim());
-  append(form, face, node('label', 'muted', 'Name'), name, node('label', 'muted', 'What should it help with?'), purpose, choices, create);
-  form.addEventListener('submit', async event => { event.preventDefault(); if (!name.value.trim()) return; if(workspace.bots.some(bot=>bot.name.toLowerCase()===name.value.trim().toLowerCase())){toast('A Bot with this name already exists.');return;} const next = structuredClone(workspace); const bot = { id: crypto.randomUUID(), name: name.value.trim(), purpose: purpose.value, color }; next.bots.push(bot); if (await persist(next)) { selectBot(bot.id); dialog.close(); } });
-  append(content, form, node('p', 'panel-footnote', 'Creates a separate conversation with your selected AI CLI.'));
-  name.focus();
-}
 const toolChoices=[['github','GitHub'],['gmail','Gmail'],['googledrive','Google Drive'],['googlecalendar','Google Calendar'],['slack','Slack'],['notion','Notion'],['linear','Linear'],['figma','Figma']];
 async function renderComposio(content){
   const body=node('div','composio-settings');content.append(body);
@@ -300,7 +289,7 @@ async function renderComposio(content){
     }
   };await draw();
 }
-async function showApps(){const content=panel('Connect Apps');try{if(bridge.composioRefresh)await result(bridge.composioRefresh());}catch(error){toast(error.message);}await renderComposio(content);}
+async function showApps(){const content=panel('Connect Apps');await renderCatalog(content);}
 function unavailable(title, detail) { return append(node('div', 'unavailable'), node('h2', '', title), node('p', '', detail), button('View connection status', () => showConnection())); }
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
@@ -313,12 +302,12 @@ function showSettings(tab = 'General') {
     append(promo, append(node('div'), node('h3','','A free app for your AI CLIs'), node('p','','Choose Codex, Claude Code, Grok Build, OpenCode, or Gemini CLI on this computer. Optionally connect tools with Composio.'), button('Set up AI and tools', () => showConnection(), 'pill primary')), append(node('div','brand-tile'), node('span','','⬡'), node('span','','✧'), avatar(), node('span','','𝕏')));
     const profile = node('input'); profile.value = localStorage.getItem('profile') || 'Local workspace'; profile.setAttribute('aria-label','Local display name'); profile.addEventListener('change', () => localStorage.setItem('profile',profile.value));
     const account = append(node('div','settings-card'), append(node('div','setting-row'), node('span','profile-icon',(localStorage.getItem('profile')||'You').slice(0,2).toUpperCase()), append(node('div','profile-text'),profile,node('small','','Uses your CLI account')),button('Connection status', () => showConnection())));
-    const appearance = node('div','settings-card'); const select = node('select'); select.setAttribute('aria-label','Theme');
+    const appearance = node('div','settings-card'); const select = node('select'); select.setAttribute('aria-label','Theme'); const accentSelect = node('select'); accentSelect.setAttribute('aria-label','Accent'); for (const [value,label] of [['bot','Bot color'],['neutral','Neutral']]) { const option=node('option','',label); option.value=value; accentSelect.append(option); } accentSelect.value=localStorage.getItem('accentStyle')==='neutral'?'neutral':'bot'; accentSelect.addEventListener('change',()=>{localStorage.setItem('accentStyle',accentSelect.value);applyAccent();});
     for (const [value,label] of [['system','Follow System'],['dark','Dark'],['light','Light']]) { const option=node('option','',label); option.value=value; select.append(option); } select.value=localStorage.getItem('appearance') || 'dark'; select.addEventListener('change',()=>applyTheme(select.value));
-    append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),node('span','muted','Bot color')),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
+    append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),accentSelect),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
     append(page,promo,node('p','settings-label','Account'),account,node('p','settings-label','Appearance'),appearance,button('Reset conversations…',()=>confirmReset()));
   } else if (tab === 'Computer') { page.append(button('View another computer on this account',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}})); page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderSharing(page); page.append(node('p','muted','Each Bot has its own visible local browser with separate cookies and login storage. Open it from Bot details. No cloud browser account is required.')); }
-  else if (tab === 'Permissions') page.append(unavailable('CLI tool permissions', 'Codex runs with read-only workspace access. Other CLIs retain their own permissions. The app does not add approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
+  else if (tab === 'Permissions') renderPermissions(page);
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
@@ -383,11 +372,6 @@ async function renderVault(page) {
 }
 function showDeleteSecret(item) { const content=panel('Delete secure note?'); append(content,node('p','','This removes the encrypted note from this device.'),button('Delete secure note',async()=>{try {await result(bridge.vaultDelete(item.id));showSettings('Vault');}catch(error){toast(error.message);}}),button('Cancel',()=>showSettings('Vault'))); }
 function confirmReset() { const content=panel('Reset conversations?'); append(content,node('p','','This removes local conversations and additional Bots. Your CLI login, Composio setup, and vault notes are kept.'),button('Reset conversations',async()=>{if(await persist(structuredClone(preview))){selected=workspace.bots[0].id;drafts.clear();render();dialog.close();}}),button('Cancel',()=>showSettings())); }
-function showBotActions(bot){
- const content=panel(bot.name),folder=node('input','field');folder.value=bot.folder||'';folder.maxLength=80;folder.placeholder='Folder · blank for Unfiled';folder.setAttribute('aria-label','Bot folder');
- append(content,button(isPinned(bot)?'Unpin Bot':'Pin to top',async()=>{await organize(bot,{isPinned:!isPinned(bot)});dialog.close();}),folder,button('Save folder',async()=>{await organize(bot,{folder:folder.value.trim()});dialog.close();}),button('Change avatar',()=>showAvatarPicker(bot)),button('Export conversation…',()=>exportConversation(bot)));
- if(!bot.isMain)content.append(button('Delete Bot…',()=>{const confirm=panel(`Delete ${bot.name}?`);append(confirm,node('p','','This removes this Bot and its local conversations.'),button('Delete Bot',async()=>{const next=structuredClone(workspace);next.bots=next.bots.filter(x=>x.id!==bot.id);next.entries=next.entries.filter(x=>x.botID!==bot.id);if(await persist(next)){if(selected===bot.id)selected=workspace.bots[0]?.id;render();dialog.close();}}),button('Cancel',()=>dialog.close()));}));
-}
 function showAvatarPicker(bot){
  const content=panel('Bot avatar');let draft=structuredClone(bot.appearance||{shape:'hexagon',color:bot.color}),preview=avatar({...bot,appearance:draft});preview.classList.add('avatar-preview');content.append(preview);const refresh=()=>{const next=avatar({...bot,appearance:draft});next.classList.add('avatar-preview');preview.replaceWith(next);preview=next;};
  const shapes=node('div','avatar-grid');for(const shape of avatarShapes){const choice=append(button('',()=>{draft.shape=shape;delete draft.imageData;refresh();}),avatar({appearance:{shape,color:draft.color}}));choice.setAttribute('aria-label',shape);shapes.append(choice);}content.append(shapes);
@@ -418,7 +402,7 @@ const voice = createVoice({
 $('#voice-button').addEventListener('click', () => { if (!window.desktop) { toast('Voice mode is available in the installed app.'); return; } if (!setup.installed.length) { showConnection(); return; } voice.start(); });
 $('#composer').addEventListener('submit',event=>{event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||(!text&&!(pendingFiles.get(bot.id)||[]).length)||running.has(bot.id))return;if(!window.desktop||!setup.installed.length){showConnection();return;}submitMessage(bot,text,pendingSends.get(bot.id)?.text===text?pendingSends.get(bot.id).id:undefined);});
 $('#draft').addEventListener('input',()=>{ drafts.set(selected,$('#draft').value);persistDrafts(); $('#draft').style.height='auto';$('#draft').style.height=Math.min(180,$('#draft').scrollHeight)+'px'; });
-$('#search-button').addEventListener('click',()=>{const slot=$('#search-slot');if(slot.firstChild){slot.replaceChildren();search='';render();return;}const field=node('input','search-input');field.placeholder='Search Bots';field.setAttribute('aria-label','Search Bots');field.addEventListener('input',()=>{search=field.value;render();});slot.append(field);field.focus();});
+$('#search-button').addEventListener('click',openPalette);
 $('#new-button').addEventListener('click',showNewBot); $('#profile-button').addEventListener('click',()=>showSettings()); $('#apps-button').addEventListener('click',showApps); $('#status-button').addEventListener('click',()=>showConnection()); $('#attachment-button').addEventListener('click',()=>{const content=panel('Conversation actions');const bot=currentBot();append(content,button('Attach files…',()=>{dialog.close();attachFiles(bot);}),button('Export conversation…',()=>exportConversation()),node('p','muted','Tip: press Ctrl+V in the message box to paste an image.'));});
 for(const control of document.querySelectorAll('[data-window]')) control.addEventListener('click',async()=>{if(control.dataset.window==='close'&&bridge.saveDrafts){clearTimeout(draftTimer);try{await result(bridge.saveDrafts(Object.fromEntries(drafts)));}catch(error){toast(error.message);return;}}window.desktop?.windowAction(control.dataset.window);});
 window.addEventListener('blur',()=>{focusGeneration++;for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
@@ -437,7 +421,7 @@ if(window.desktop&&!setup.complete)showConnection();
 
 bridge.loadDrafts?.().then(response=>{if(response.ok){for(const[id,text]of Object.entries(response.value||{}))if(!drafts.has(id))drafts.set(id,text);render();}}).catch(()=>{});
 if(bridge.checkUpdates&&Date.now()-Number(localStorage.getItem('lastUpdateCheck')||0)>86400000){localStorage.setItem('lastUpdateCheck',String(Date.now()));bridge.checkUpdates().then(response=>{if(response.ok&&response.value.available){toast(`${response.value.version} is available. Open Settings → Updates to download it.`);$('#profile-button').classList.add('update-available');}}).catch(()=>{});}
-document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||event.altKey||dialog.open)return;if(event.key.toLowerCase()==='k'){event.preventDefault();const content=panel('Switch Bot');const field=node('input','field'),results=node('div','switcher-results');field.placeholder='Find a Bot…';field.setAttribute('aria-label','Find a Bot');const draw=()=>{results.replaceChildren();for(const bot of orderedBots().filter(x=>x.name.toLowerCase().includes(field.value.toLowerCase())))results.append(button(bot.name,()=>{dialog.close();selectBot(bot.id);}));};field.addEventListener('input',draw);append(content,field,results);draw();field.focus();}});
+document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||event.altKey||dialog.open)return;if(event.key.toLowerCase()==='k'){event.preventDefault();openPalette();}});
 
 
 
@@ -453,3 +437,272 @@ async function showBotVM(bot){
   if(state.hasCredentials)controls.append(button('Copy guest login',async()=>{try{const login=await result(bridge.vmCredentials(bot.id));await navigator.clipboard.writeText('Username: '+login.username+'\nPassword: '+login.password);info.textContent='Guest login copied.';}catch(error){info.textContent=error.message;}}));
  };try{await draw();}catch(error){info.textContent=error.message;}
 }
+
+// ---- 0.8.6: palette, message actions, Create Bot, dictation, permissions, voice card ----
+const toB64 = bytes => { let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(binary); };
+
+function showShortcuts() {
+  const content = panel('Keyboard shortcuts');
+  for (const [keys, what] of [['Ctrl+K or Ctrl+F', 'Search Bots and actions'], ['Ctrl+N', 'New Bot'], ['Ctrl+,', 'Settings'], ['Enter', 'Send the message (Shift+Enter for a new line)'], ['Esc', 'Close a panel, the palette or Bot details']])
+    content.append(append(node('div', 'setting-row'), node('strong', '', keys), node('span', 'muted', what)));
+}
+
+function openPalette() {
+  if ($('#palette')) { $('#palette input')?.focus(); return; }
+  const back = node('div', 'palette-backdrop'); back.id = 'palette';
+  const box = node('div', 'palette-box'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Search Bots and actions');
+  const field = node('input', 'palette-field'); field.placeholder = 'Search Bots and actions'; field.setAttribute('aria-label', 'Search Bots and actions'); field.autocomplete = 'off';
+  const list = node('div', 'palette-list'); list.setAttribute('role', 'listbox');
+  const actions = [['New Bot', 'Create a Bot', '＋', () => showNewBot()], ['Settings…', 'Preferences', '⚙', () => showSettings()], ['Permissions…', 'What Bots may do without asking', '♧', () => showSettings('Permissions')], ['Connect apps', 'Add your tools', '⬡', () => showApps()], ['Keyboard shortcuts', 'See every shortcut', '⌨', () => showShortcuts()]];
+  let items = [], index = 0;
+  const close = () => { back.remove(); $('#draft')?.focus(); };
+  const choose = position => { const item = items[position]; if (!item) return; close(); item.run(); };
+  const draw = () => {
+    list.replaceChildren();
+    items.forEach((item, position) => {
+      const row = button('', () => choose(position), `palette-row ${position === index ? 'active' : ''}`); row.setAttribute('role', 'option'); row.setAttribute('aria-selected', String(position === index));
+      append(row, item.bot ? avatar(item.bot) : node('span', 'palette-icon', item.icon), append(node('span', 'details'), node('strong', '', item.title), node('small', '', item.sub)));
+      list.append(row);
+    });
+    if (!items.length) list.append(node('p', 'empty', `Nothing matches “${field.value}”.`));
+    list.children[index]?.scrollIntoView?.({ block: 'nearest' });
+  };
+  const compute = () => {
+    const query = field.value.trim().toLowerCase(); items = [];
+    for (const bot of recentBots(orderedBots())) {
+      const last = entries(bot).at(-1)?.text || '';
+      if (query && !`${bot.name} ${bot.purpose} ${last}`.toLowerCase().includes(query)) continue;
+      items.push({ title: bot.name, sub: (bot.hidden ? 'Hidden · ' : '') + (last || bot.purpose).replace(/\s+/g, ' ').slice(0, 90), bot, run: () => { if (bot.hidden) organize(bot, { hidden: null }); selectBot(bot.id); } });
+      if (items.length >= 8) break;
+    }
+    for (const [title, sub, icon, run] of actions) if (!query || `${title} ${sub}`.toLowerCase().includes(query)) items.push({ title, sub, icon, run });
+    index = Math.min(index, Math.max(items.length - 1, 0)); draw();
+  };
+  field.addEventListener('input', () => { index = 0; compute(); });
+  field.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); index = Math.min(index + 1, items.length - 1); draw(); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); index = Math.max(index - 1, 0); draw(); }
+    else if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); choose(index); }
+    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+  });
+  back.addEventListener('mousedown', event => { if (event.target === back) close(); });
+  append(box, field, list); back.append(box); document.body.append(back); compute(); field.focus();
+}
+
+// Hover actions under each message: react, reply, more.
+const reactionChoices = ['👍', '👎', '❤️', '😂', '🎉', '🤔'];
+async function reactTo(entry, emoji) {
+  try {
+    if (bridge.reactEntry) await result(bridge.reactEntry(entry.id, emoji || ''));
+    else { const next = structuredClone(workspace); const item = next.entries.find(x => x.id === entry.id); if (!item) return; if (emoji) item.reaction = emoji; else delete item.reaction; if (!await persist(next)) return; }
+    render();
+  } catch (error) { toast(error.message); }
+}
+async function deleteMessage(entry) {
+  try {
+    if (bridge.deleteEntry) await result(bridge.deleteEntry(entry.id));
+    else { const next = structuredClone(workspace); next.entries = next.entries.filter(x => x.id !== entry.id); if (!await persist(next)) return; }
+    render();
+  } catch (error) { toast(error.message); }
+}
+function replyTo(bot, entry) {
+  const quoted = entry.text.split('\n').filter(Boolean).slice(0, 3).map(line => '> ' + line.slice(0, 240)).join('\n');
+  const draft = $('#draft'); draft.value = quoted + '\n\n' + draft.value; drafts.set(bot.id, draft.value); persistDrafts();
+  draft.focus(); draft.setSelectionRange(draft.value.length, draft.value.length);
+}
+function messageTools(bot, entry, isLast) {
+  const tools = node('div', 'message-tools');
+  if (entry.reaction) tools.append(Object.assign(node('span', 'reaction-pill', entry.reaction), { title: 'Reaction' }));
+  const bar = node('span', 'tool-bar');
+  const react = button('☺', () => {
+    const open = tools.querySelector('.reaction-pop'); if (open) { open.remove(); return; }
+    const pop = node('span', 'reaction-pop'); pop.setAttribute('role', 'menu');
+    for (const emoji of reactionChoices) pop.append(button(entry.reaction === emoji ? `${emoji} ✕` : emoji, () => { pop.remove(); reactTo(entry, entry.reaction === emoji ? '' : emoji); }, 'tool'));
+    tools.append(pop);
+  }, 'tool'); react.setAttribute('aria-label', 'React to message'); react.title = 'React';
+  const reply = button('↩', () => replyTo(bot, entry), 'tool'); reply.setAttribute('aria-label', 'Reply to message'); reply.title = 'Reply';
+  const more = button('…', () => showMessageMenu(bot, entry, isLast), 'tool'); more.setAttribute('aria-label', 'More message actions'); more.title = 'More';
+  bar.append(react, reply, more); tools.append(bar); return tools;
+}
+function showMessageMenu(bot, entry, isLast) {
+  const content = panel('Message');
+  const copy = async text => { try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch { toast('It could not be copied.'); } dialog.close(); };
+  append(content, button('Copy text', () => copy(entry.text)), button('Copy as Markdown', () => copy((entry.kind === 'user' ? '**You:** ' : '') + entry.text)));
+  if (entry.kind === 'bot' && isLast && !running.has(bot.id)) content.append(button('Retry', async () => { dialog.close(); try { await result(bridge.retry(bot.id)); } catch (error) { toast(error.message); } }));
+  if (entry.state !== 'streaming') content.append(button('Delete message', () => {
+    const confirm = panel('Delete this message?');
+    append(confirm, node('p', '', 'It is removed from this conversation on this computer.'), button('Delete message', async () => { dialog.close(); await deleteMessage(entry); }, 'pill primary'), button('Cancel', () => dialog.close()));
+  }));
+}
+
+// Bot row menu: pin, section, unread, rename, ID, hide, delete.
+function showBotActions(bot) {
+  const content = panel(bot.name);
+  const done = () => dialog.close();
+  const ask = (title, placeholder, initial, action) => {
+    const inner = panel(title); const input = node('input', 'field'); input.value = initial; input.placeholder = placeholder; input.maxLength = 80; input.setAttribute('aria-label', title);
+    const save = async () => { const value = input.value.trim(); if (!value) return; await action(value); };
+    input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); save(); } });
+    append(inner, input, button('Save', save, 'pill primary')); input.focus(); input.select();
+  };
+  append(content,
+    button(isPinned(bot) ? 'Unpin' : 'Pin', async () => { await organize(bot, { isPinned: !isPinned(bot) }); done(); }),
+    button('Move to new section…', () => ask('New section', 'Section name', '', async name => { await organize(bot, { folder: name }); done(); })),
+    ...(bot.folder ? [button('Remove from section', async () => { await organize(bot, { folder: '' }); done(); })] : []),
+    button(bot.unread ? 'Mark as read' : 'Mark as unread', async () => { await organize(bot, { unread: bot.unread ? null : true }); done(); }),
+    button('Rename Bot…', () => ask('Rename Bot', 'Bot name', bot.name, async name => { await organize(bot, { name }); done(); })),
+    button('Copy conversation ID', async () => { try { await navigator.clipboard.writeText(bot.id); toast('Conversation ID copied.'); } catch { toast('The ID could not be copied.'); } done(); }),
+    ...(bot.isMain ? [] : [button('Hide from sidebar', async () => { await organize(bot, { hidden: true }); done(); })]),
+    button('Change avatar', () => showAvatarPicker(bot)),
+    button('Export conversation…', () => exportConversation(bot)));
+  if (!bot.isMain) content.append(button('Delete Bot…', () => {
+    const confirm = panel(`Delete ${bot.name}?`);
+    append(confirm, node('p', '', 'This removes this Bot and its local conversations.'), button('Delete Bot', async () => { const next = structuredClone(workspace); next.bots = next.bots.filter(x => x.id !== bot.id); next.entries = next.entries.filter(x => x.botID !== bot.id); if (await persist(next)) { if (selected === bot.id) selected = workspace.bots[0]?.id; render(); dialog.close(); } }, 'pill danger'), button('Cancel', () => dialog.close()));
+  }, 'pill danger'));
+}
+
+// Create a Bot: live preview, name, 14 shapes, 10 colours; description and templates are optional.
+function showNewBot() {
+  const content = panel('Create a Bot');
+  const colors = ['purple', 'pink', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'gray', 'black'];
+  let shape = 'hexagon', color = 'purple';
+  const form = node('form', 'new-bot');
+  const preview = node('div', 'new-bot-preview');
+  const name = node('input', 'field'); name.placeholder = 'Name your Bot'; name.maxLength = 200; name.required = true; name.setAttribute('aria-label', 'Bot name');
+  const shapes = node('div', 'shape-grid'), dots = node('div', 'colors color-grid');
+  const purpose = node('textarea', 'field'); purpose.placeholder = 'What should it help with? (optional)'; purpose.rows = 3; purpose.maxLength = 2000; purpose.setAttribute('aria-label', 'Bot description');
+  const more = node('details', 'new-bot-more'); append(more, node('summary', '', 'Add a description'), purpose);
+  const create = button('Create', () => {}, 'pill primary'); create.type = 'submit'; create.disabled = true;
+  const redraw = () => {
+    preview.replaceChildren(avatar({ appearance: { shape, color } }));
+    shapes.replaceChildren(...avatarShapes.map(option => { const choice = button('', () => { shape = option; redraw(); }, `shape-choice ${shape === option ? 'active' : ''}`); choice.append(avatar({ appearance: { shape: option, color } })); choice.setAttribute('aria-label', `${option} shape`); choice.setAttribute('aria-pressed', String(shape === option)); return choice; }));
+    dots.replaceChildren(...colors.map(option => { const dot = button('', () => { color = option; redraw(); }, `color-choice ${color === option ? 'active' : ''}`); dot.style.backgroundColor = avatarColors[option]; dot.setAttribute('aria-label', `${option} color`); dot.setAttribute('aria-pressed', String(color === option)); return dot; }));
+  };
+  redraw();
+  name.addEventListener('input', () => create.disabled = !name.value.trim());
+  append(form, preview, name, shapes, dots, more, append(node('div', 'panel-bottom'), button('Cancel', () => dialog.close()), create));
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); const clean = name.value.trim(); if (!clean) return;
+    if (workspace.bots.some(bot => bot.name.toLowerCase() === clean.toLowerCase())) { toast('A Bot with this name already exists.'); return; }
+    const next = structuredClone(workspace); const bot = { id: crypto.randomUUID(), name: clean, purpose: purpose.value, color, appearance: { shape, color } }; next.bots.push(bot);
+    if (await persist(next)) { selectBot(bot.id); dialog.close(); }
+  });
+  append(content, form, node('p', 'panel-footnote', 'Creates a separate conversation with your selected AI CLI.')); name.focus();
+}
+
+// Dictation: tap the mic, talk, tap again. Windows has no built-in recognizer here, so the recording goes to the speech-to-text provider you chose under Settings → Voice.
+let dictating = null;
+async function toggleDictation() {
+  if (dictating) { await stopDictation(); return; }
+  if (!currentBot()) return;
+  let voiceSettings;
+  try { voiceSettings = await result(bridge.voiceSettings()); } catch (error) { toast(error.message); return; }
+  if (!voiceSettings.keys?.[voiceSettings.transcriber]) { toast('Dictation on Windows uses your speech-to-text provider. Add a free Groq key under Settings → Voice first. Nothing is recorded until then.'); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const context = new AudioContext(), source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(4096, 1, 1), chunks = [];
+    processor.onaudioprocess = event => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    source.connect(processor); processor.connect(context.destination);
+    dictating = { stream, context, source, processor, chunks, timer: setTimeout(() => stopDictation(), 60000) };
+    $('#mic-button').classList.add('recording'); $('#mic-button').setAttribute('aria-label', 'Stop dictation'); toast('Listening… tap the mic again to stop. The audio goes to your speech-to-text provider.');
+  } catch { toast('The microphone could not be opened. Allow microphone access for OpenGrokBot in Windows Settings → Privacy → Microphone.'); }
+}
+async function stopDictation() {
+  const session = dictating; if (!session) return; dictating = null; clearTimeout(session.timer);
+  $('#mic-button').classList.remove('recording'); $('#mic-button').setAttribute('aria-label', 'Dictate a message');
+  session.processor.disconnect(); session.source.disconnect(); session.stream.getTracks().forEach(track => track.stop());
+  const rate = session.context.sampleRate; await session.context.close();
+  const total = session.chunks.reduce((sum, chunk) => sum + chunk.length, 0); if (total < rate * 0.3) { toast('Nothing was heard.'); return; }
+  const samples = new Float32Array(total); let offset = 0; for (const chunk of session.chunks) { samples.set(chunk, offset); offset += chunk.length; }
+  toast('Transcribing…');
+  try {
+    const text = await result(bridge.voiceTranscribe(toB64(encodeWav(samples, rate))));
+    if (!text) { toast('Nothing was heard.'); return; }
+    const draft = $('#draft'); draft.value = (draft.value.trim() ? draft.value.trimEnd() + ' ' : '') + text; const bot = currentBot(); if (bot) { drafts.set(bot.id, draft.value); persistDrafts(); } draft.focus();
+  } catch (error) { toast(error.message); }
+}
+$('#mic-button')?.addEventListener('click', toggleDictation);
+
+// Settings → Permissions: always-ask rules, plus what always asks.
+async function renderPermissions(page) {
+  let config;
+  try { config = await result(bridge.approvalRules()); } catch (error) { page.append(node('p', 'muted', error.message || 'Rules are available in the installed Windows app.')); return; }
+  const save = async () => { try { config = { ...await result(bridge.setApprovalRules({ enabled: config.enabled, rules: config.rules })), tools: config.tools }; } catch (error) { toast(error.message); } draw(); };
+  const draw = () => {
+    page.replaceChildren(append(node('header', 'panel-head'), node('h1', '', 'Permissions'), button('×', () => dialog.close(), 'close-panel')));
+    const toggle = node('input'); toggle.type = 'checkbox'; toggle.checked = config.enabled; toggle.setAttribute('aria-label', 'Use my rules'); toggle.addEventListener('change', () => { config.enabled = toggle.checked; save(); });
+    append(page, append(node('label', 'setting-row'), toggle, append(node('span', 'details'), node('strong', '', 'Use my rules'), node('small', 'muted', 'Checked before any approval dialog. Turn off to use only the built-in behaviour.'))));
+    page.append(node('p', 'settings-label', 'Always ask'));
+    for (const rule of config.rules) page.append(append(node('div', 'setting-row'), append(node('span', 'details'), node('strong', '', config.tools.find(x => x.id === rule.tool)?.title || rule.tool), node('small', 'muted', rule.pattern ? `Only when the page address contains “${rule.pattern}”` : 'On any page')), button('Remove', () => { config.rules = config.rules.filter(x => x.id !== rule.id); save(); })));
+    if (!config.rules.length) page.append(node('p', 'muted', 'No rules. Add one to make a Bot ask before every click on a website, even a harmless one.'));
+    const tool = node('select', 'field'); for (const item of config.tools) { const option = node('option', '', item.title); option.value = item.id; tool.append(option); } tool.setAttribute('aria-label', 'Action');
+    const pattern = node('input', 'field'); pattern.placeholder = 'Only when the page address contains… (optional)'; pattern.maxLength = 120; pattern.setAttribute('aria-label', 'Page address contains');
+    page.append(append(node('div', 'rule-add'), tool, pattern, button('Add rule', () => { config.rules = [...config.rules, { kind: 'ask', tool: tool.value, pattern: pattern.value.trim() }]; save(); }, 'pill primary')));
+    page.append(node('p', 'settings-label', 'Allow without asking'), node('p', 'muted', 'Nothing on Windows can be allowed without asking yet, because Bots here do not write to calendars, reminders, contacts or notes. This list will appear here when they can.'));
+    page.append(node('p', 'settings-label', 'Always asks, and cannot be changed'));
+    for (const [title, detail] of [['Clicks that send, buy, post or delete', 'You see what will be clicked and on which page.'], ['Typing and submitting a form', 'You see the field and the text first.'], ['Saved logins and passwords', 'Signing in always asks. Passwords are typed by the app, never shown to the Bot.'], ['Unattended routines', 'A routine that runs while you are away skips anything that needs approval.']])
+      page.append(append(node('div', 'setting-row'), append(node('span', 'details'), node('strong', '', title), node('small', 'muted', detail)), node('span', 'muted', '🔒')));
+    page.append(node('p', 'muted', 'Codex runs with read-only workspace access. Other CLIs keep their own permissions, and the app adds no approval bypass flags. Composio tools follow your CLI’s MCP permission settings.'));
+  };
+  draw();
+}
+
+// Bot details → Voice chat: this Bot's own voice, speed and language.
+const voiceLanguages = [['auto', 'Auto-detect'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['es-ES', 'Spanish'], ['fr-FR', 'French'], ['de-DE', 'German'], ['it-IT', 'Italian'], ['pt-BR', 'Portuguese (Brazil)'], ['ja-JP', 'Japanese'], ['ko-KR', 'Korean'], ['zh-CN', 'Chinese (Simplified)']];
+function voiceCard(bot) {
+  const card = node('div', 'voice-card-settings'), own = { ...(bot.voice || {}) };
+  const save = async () => { const clean = {}; if (own.speaker) clean.speaker = own.speaker; if (own.speed && own.speed !== 1) clean.speed = Math.min(Math.max(own.speed, 0.75), 1.5); if (own.language && own.language !== '') clean.language = own.language; await organize(bot, { voice: Object.keys(clean).length ? clean : null }); };
+  const speaker = node('select', 'field'); speaker.setAttribute('aria-label', 'Voice');
+  for (const [value, label] of [['', 'App default'], ['apple', 'Windows voice (free)'], ['groq', 'Groq'], ['openAI', 'OpenAI'], ['elevenLabs', 'ElevenLabs'], ['gemini', 'Google AI Studio (Gemini)'], ['nvidiaCloud', 'NVIDIA Cloud'], ['nvidiaNIM', 'NVIDIA NIM']]) { const option = node('option', '', label); option.value = value; speaker.append(option); }
+  speaker.value = own.speaker || ''; speaker.addEventListener('change', () => { own.speaker = speaker.value || undefined; save(); });
+  const speed = node('input'); speed.type = 'range'; speed.min = '0.75'; speed.max = '1.5'; speed.step = '0.05'; speed.value = String(own.speed || 1); speed.setAttribute('aria-label', 'Speaking speed');
+  const speedLabel = node('span', 'muted', `${Number(speed.value).toFixed(2).replace(/0$/, '')}×`);
+  speed.addEventListener('input', () => { speedLabel.textContent = `${Number(speed.value).toFixed(2).replace(/0$/, '')}×`; }); speed.addEventListener('change', () => { own.speed = Number(speed.value); save(); });
+  const language = node('select', 'field'); language.setAttribute('aria-label', 'Language');
+  for (const [value, label] of [['', 'App default'], ...voiceLanguages]) { const option = node('option', '', label); option.value = value; language.append(option); }
+  language.value = own.language || ''; language.addEventListener('change', () => { own.language = language.value || undefined; save(); });
+  append(card, append(node('label', 'setting-row'), node('span', '', 'Voice'), speaker), append(node('label', 'setting-row'), node('span', '', 'Speed'), speed, speedLabel), append(node('label', 'setting-row'), node('span', '', 'Language'), language),
+    node('p', 'muted', 'Only for this Bot. Anything left on App default follows Settings → Voice. Language sets the Windows voice; cloud voices pick their own.'));
+  return card;
+}
+
+// Connect Apps: avatar stack, search, category chips, recommended grid and category sections with View all.
+async function renderCatalog(content) {
+  let status = { configured: false, toolkits: [] };
+  try { if (bridge.composioRefresh && window.desktop) await result(bridge.composioRefresh()); status = await result(bridge.composioStatus()); } catch (error) { toast(error.message); }
+  const chosen = new Set(), connected = new Set(status.toolkits.filter(x => x.connected || x.noAuth).map(x => x.slug)), enabled = new Set(status.toolkits.filter(x => x.enabled).map(x => x.slug));
+  let query = '', category = null;
+  const header = node('div', 'apps-head'), stack = node('span', 'avatar-stack');
+  for (const slug of [...connected].slice(0, 4)) stack.append(Object.assign(node('i', '', (catalog.find(slug)?.name || slug)[0].toUpperCase()), { title: catalog.find(slug)?.name || slug }));
+  if (connected.size) append(header, stack, node('span', 'muted', `${connected.size} connected`));
+  const search = node('input', 'search-input'); search.placeholder = 'Search across apps'; search.setAttribute('aria-label', 'Search apps');
+  const chips = node('div', 'category-chips'), body = node('div', 'apps-body'), setup = node('div', 'apps-setup');
+  const key = node('input', 'field'); key.type = 'password'; key.placeholder = 'Composio project API key'; key.autocomplete = 'off'; key.setAttribute('aria-label', 'Composio project API key');
+  const link = button('Connect project', async () => { link.disabled = true; try { const value = key.value; key.value = ''; await result(bridge.composioConnect(value, [...chosen])); await showApps(); } catch (error) { toast(error.message); link.disabled = false; } }, 'pill primary');
+  const card = app => {
+    const row = node('div', 'app-card'); const action = status.configured
+      ? (enabled.has(app.slug) ? (connected.has(app.slug) ? node('span', 'muted', 'Connected ✓') : button('Connect', async () => { try { await result(bridge.composioLink(app.slug)); toast('Finish authorizing in your browser, then reopen Connect apps.'); } catch (error) { toast(error.message); } })) : node('span', 'muted', 'Not in project'))
+      : (() => { const toggle = button(chosen.has(app.slug) ? 'Added ✓' : 'Add', () => { if (chosen.has(app.slug)) chosen.delete(app.slug); else chosen.add(app.slug); link.disabled = !chosen.size; draw(); }); toggle.setAttribute('aria-pressed', String(chosen.has(app.slug))); return toggle; })();
+    return append(row, node('span', 'app-initial', app.name[0]), append(node('span', 'details'), node('strong', '', app.name), node('small', 'muted', app.category)), action);
+  };
+  const section = (title, apps, limit, viewAll) => {
+    if (!apps.length) return; const wrap = node('section', 'app-section'), head = node('div', 'app-section-head', ''); head.append(node('strong', 'muted', title));
+    if (limit && viewAll && apps.length > limit) head.append(button(`View all (${apps.length})`, () => { category = viewAll; draw(); }, 'link-button'));
+    append(wrap, head, append(node('div', 'catalog-grid'), ...(limit ? apps.slice(0, limit) : apps).map(card))); body.append(wrap);
+  };
+  const draw = () => {
+    chips.replaceChildren(...[['All', null], ...catalog.categories.map(x => [x, x])].map(([label, value]) => { const chip = button(label, () => { category = value; draw(); }, `chip ${category === value ? 'active' : ''}`); chip.setAttribute('aria-pressed', String(category === value)); return chip; }));
+    body.replaceChildren();
+    if (query.trim() || category) { const results = catalog.filter(query, category); if (!results.length) body.append(node('p', 'muted', 'No apps match your search.')); else section(category && !query.trim() ? category : 'Results', results); }
+    else { section('Recommended for you', catalog.recommended.map(catalog.find).filter(Boolean)); for (const name of catalog.categories) section(name, catalog.filter('', name), 4, name); }
+  };
+  search.addEventListener('input', () => { query = search.value; draw(); });
+  if (!status.configured && window.desktop) append(setup, node('p', 'muted', 'Use your own Composio project to connect apps to your CLI. This is optional. Add the apps you want, paste your project key, then connect.'), key, append(node('div', 'panel-bottom'), button('Get a project key ↗', () => bridge.openDocs('https://platform.composio.dev')), link), node('p', 'muted', 'The project key and tool session are encrypted with Windows device storage. Composio has its own pricing and usage limits.')), link.disabled = true;
+  else if (!window.desktop) append(setup, node('p', 'muted', 'Open the installed desktop app to store your project key securely.'));
+  else append(setup, node('p', 'muted', 'Apps are chosen when the project is connected. To change them, remove the project below and connect again.'), button('Remove project from this device', async () => { try { await result(bridge.composioRemove()); await showApps(); } catch (error) { toast(error.message); } }), button('Manage or revoke accounts in Composio ↗', () => bridge.openDocs('https://platform.composio.dev')));
+  append(content, header, search, chips, setup, body); draw();
+}
+
+// Accent: Bot colour or neutral.
+function applyAccent() { document.documentElement.dataset.accent = localStorage.getItem('accentStyle') === 'neutral' ? 'neutral' : 'bot'; }
+applyAccent();

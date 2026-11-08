@@ -151,7 +151,7 @@ async function knowledgeSearch(directory, query, pdfPages) {
 }
 
 /** `browsers` is the LocalBrowsers instance; `approve(title, detail)` resolves true/false; `logins` is a login store. */
-function create({ browsers, approve, logins, directory, pdfPages, onePassword }) {
+function create({ browsers, approve, logins, directory, pdfPages, onePassword, rules }) {
   async function browserAction(action, { botID, botName, unattended }) {
     const request = parseRequest(action);
     if (!request) return 'That browser action was not understood. Use browser_click with text, browser_type with name (the field) and text, browser_scroll with direction up, down, top or bottom, or browser_back.';
@@ -160,7 +160,9 @@ function create({ browsers, approve, logins, directory, pdfPages, onePassword })
       if (request.kind === 'click') {
         const info = await browsers.inspectClick(botID, request.target);
         if (!info.ok) return failed(info);
-        if (clickNeedsApproval(info)) {
+        // A written "Always ask" rule for this site forces the dialog even for clicks that would normally go through.
+        const askRule = rules ? await rules('browser_click', browsers.pageHost?.(botID) || '') === 'ask' : false;
+        if (askRule || clickNeedsApproval(info)) {
           if (unattended) return `Clicking “${info.label}” needs the human to approve it, so it was skipped in this unattended run.`;
           if (!await approve(`Let ${botName} click “${info.label}”?`, 'This looks like something that sends, buys, posts or changes something. Approve only if you want it done.')) return `The human declined to click “${info.label}”.`;
         }

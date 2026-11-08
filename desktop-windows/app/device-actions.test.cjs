@@ -56,6 +56,18 @@ test('a risky click asks first, declining stops it, and unattended runs skip it'
   assert.equal(clicked, 1); assert.equal(asked.length, 2);
 });
 
+test('an always-ask rule for a site forces approval of an ordinary click there, and only there', async () => {
+  const asked = []; let clicked = 0;
+  const rules = async (tool, target) => (tool === 'browser_click' && target.includes('shop.example') ? 'ask' : 'noRule');
+  const make = host => da.create({ rules, browsers: fakeBrowsers({ pageHost: () => host, click: async () => { clicked++; } }), approve: async (t) => { asked.push(t); return false; }, logins: da.createLoginStore(memoryStore()), directory: () => os.tmpdir() });
+  const ctx = { botID: 'b', botName: 'Fantasy', unattended: false };
+  assert.match(await make('www.shop.example').run({ action: 'browser_click', text: 'Scores' }, ctx), /declined/);
+  assert.equal(asked.length, 1); assert.equal(clicked, 0);
+  assert.match(await make('news.example').run({ action: 'browser_click', text: 'Scores' }, ctx), /^Clicked/);
+  assert.equal(asked.length, 1); assert.equal(clicked, 1, 'No rule for that site, so the harmless click goes through');
+  assert.match(await make('www.shop.example').run({ action: 'browser_click', text: 'Scores' }, { ...ctx, unattended: true }), /unattended/);
+});
+
 test('harmless actions run without prompting and results summarize for the chat', async () => {
   let asked = 0;
   const devices = da.create({ browsers: fakeBrowsers(), approve: async () => { asked++; return true; }, logins: da.createLoginStore(memoryStore()), directory: () => os.tmpdir() });

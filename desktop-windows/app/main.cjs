@@ -4,6 +4,7 @@ const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { validateWorkspace, previewWorkspace, migrateWorkspace } = require('./workspace.cjs');
+const ruleSet = require('./approval-rules.cjs');
 
 if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userData', process.env.OPENGROKBOT_TEST_DATA_DIR);
 
@@ -216,7 +217,9 @@ async function readOnePassword(item){
  const out=await new Promise((resolve,reject)=>execFile('op',['item','get',item.trim(),'--format','json'],{timeout:45000,windowsHide:true,maxBuffer:262144},(error,stdout)=>error?reject(new Error(error.code==='ENOENT'?'1Password’s command-line tool (op) is not installed. Install it from 1password.com/downloads/command-line and turn on the desktop app integration.':'1Password did not return the login. Unlock 1Password, approve the prompt, and check the item name.')):resolve(stdout)));
  const credentials=deviceActions.parseOnePassword(out);if(!credentials)throw new Error('1Password did not return a username and password for that item.');return credentials;
 }
-const devices=deviceActions.create({browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
+let approvalRules=null;
+const getApprovalRules=async()=>approvalRules??=ruleSet.sanitize(await loadJSON('approval-rules.json',{}));
+const devices=deviceActions.create({rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
 const mirror = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,status=>{if(mirrorWindow&&!mirrorWindow.isDestroyed())mirrorWindow.webContents.send('mirror:changed',status);});
 function openMirror(){
  if(mirrorWindow&&!mirrorWindow.isDestroyed()){mirrorWindow.show();mirrorWindow.focus();return;}
@@ -302,9 +305,14 @@ async function remoteCommand(command){
  if(command.action==='send'){if(!bot||typeof command.text!=='string'||!command.text.trim()||command.text.length>100000)throw new Error('Invalid message');let text=command.text;if(Array.isArray(command.attachments)&&command.attachments.length){let names;try{names=await attachments.saveRemoteImages(botDirectory(bot.id),command.attachments);}catch{throw new PublicError('The images could not be accepted. Send up to 3 JPEG or PNG images.');}text=attachments.attachmentMessage(text,names);}await startChat(bot.id,text,undefined,command.requestID);return;}
  if(command.action==='stop'){if(bot)stoppedBots.add(bot.id);if(!bot)throw new Error('Unknown Bot');for(const run of active.get(bot.id)||[])run.cancel();return;}
  if(command.action==='retry'){if(!bot)throw new Error('Unknown Bot');const message=state.teamMessages?.findLast(x=>x.to===bot.id&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(bot.id);return;}
+ if(command.action==='react'){await setReaction(command.taskID,command.text??'');return;}
+ if(command.action==='delete_entry'){await removeEntry(command.taskID);return;}
  if(command.action==='create_bot'){
-  if(typeof command.name!=='string'||!command.name.trim()||command.name.length>200||typeof command.purpose!=='string'||command.purpose.length>2000||!['white','purple','pink','ochre'].includes(command.color)||state.bots.length>=100||state.bots.some(x=>x.name.toLowerCase()===command.name.trim().toLowerCase()))throw new Error('Invalid Bot');
-  state.bots.push({id:randomUUID(),name:command.name.trim(),purpose:command.purpose,color:command.color});
+  // Older phones send one of four colours; newer ones also send a shape and one of ten colours.
+  const legacy=['white','purple','pink','ochre'],looks=command.appearance,shapes=['circle','cloud','square','sparkle','flower','heart','clover','droplet','capsule','triangle','pebble','star','hexagon','fruit'],colors=['purple','pink','red','orange','amber','green','teal','blue','gray','black'];
+  const good=looks&&typeof looks==='object'&&shapes.includes(looks.shape)&&colors.includes(looks.color);
+  if(typeof command.name!=='string'||!command.name.trim()||command.name.length>200||typeof command.purpose!=='string'||command.purpose.length>2000||!(legacy.includes(command.color)||good)||state.bots.length>=100||state.bots.some(x=>x.name.toLowerCase()===command.name.trim().toLowerCase()))throw new Error('Invalid Bot');
+  state.bots.push({id:randomUUID(),name:command.name.trim(),purpose:command.purpose,color:legacy.includes(command.color)?command.color:'purple',...(good?{appearance:{shape:looks.shape,color:looks.color}}:{})});
  }else if(command.action==='delete_bot'){
   if(!bot||bot.isMain||active.has(bot.id)||pendingBots.has(bot.id))throw new Error('Stop the Bot first');state.bots=state.bots.filter(x=>x.id!==bot.id);state.entries=state.entries.filter(x=>x.botID!==bot.id);state.teamMessages=state.teamMessages?.filter(x=>x.from!==bot.id&&x.to!==bot.id);for(const member of state.bots)if(member.memberIDs)member.memberIDs=member.memberIDs.filter(x=>x!==bot.id);
  }else if(command.action==='cancel_task'){if(!bot||!bot.schedules?.some(x=>x.id.toLowerCase()===String(command.taskID).toLowerCase()))throw new Error('Unknown scheduled task');bot.schedules=bot.schedules.filter(x=>x.id.toLowerCase()!==String(command.taskID).toLowerCase());
@@ -314,7 +322,25 @@ async function remoteCommand(command){
  }else throw new Error('Unsupported command');
  await atomicJSON('preview-workspace.json',state);notify();
 }
+/** One emoji per message; an empty string clears it. */
+async function setReaction(id,emoji){
+ await ensureState();const entry=state.entries.find(x=>x.id===id);
+ if(!entry||typeof emoji!=='string'||[...emoji].length>8)throw new PublicError('That message could not be updated.');
+ if(emoji)entry.reaction=emoji;else delete entry.reaction;
+ await atomicJSON('preview-workspace.json',state);notify();
+}
+async function removeEntry(id){
+ await ensureState();const entry=state.entries.find(x=>x.id===id);
+ if(!entry||entry.state==='streaming')throw new PublicError('That message could not be deleted.');
+ state.entries=state.entries.filter(x=>x.id!==id);
+ await atomicJSON('preview-workspace.json',state);notify();
+}
 function configureIPC() {
+ handle('rules:get',async()=>({...await getApprovalRules(),tools:ruleSet.TOOLS.map(([id,title])=>({id,title}))}));
+ handle('rules:set',async value=>{approvalRules=ruleSet.sanitize(value);await atomicJSON('approval-rules.json',approvalRules);return approvalRules;});
+ handle('tasks:pause',async(botID,id,enabled)=>{await ensureState();const bot=state.bots.find(x=>x.id===botID),task=bot?.schedules?.find(x=>x.id===id);if(!task)throw new PublicError('Unknown scheduled task');task.enabled=enabled===true;await atomicJSON('preview-workspace.json',state);notify();return true;});
+ handle('entry:react',async(id,emoji)=>{await setReaction(id,emoji);return true;});
+ handle('entry:delete',async id=>{await removeEntry(id);return true;});
  handle('bot:touch',async id=>{await ensureState();const bot=state.bots.find(bot=>bot.id===id);if(!bot)throw new PublicError('Choose a Bot.');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();});
  handle('vm:commands',async(id,enabled)=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');try{return await localVMs.setCommands(id,enabled);}catch(error){throw new PublicError(error.message);}});
  handle('vm:status',async id=>{await ensureState();if(!state.bots.some(bot=>bot.id===id))throw new PublicError('Choose a Bot.');return localVMs.status(id);});
@@ -344,7 +370,9 @@ function configureIPC() {
  handle('updates:open',async url=>{if(!updates.trusted(url))throw new PublicError('Use the official project release page.');await shell.openExternal(url);});
  handle('bot:organize',async(id,changes)=>{
   await ensureState();const bot=state.bots.find(x=>x.id===id);if(!bot||!changes||typeof changes!=='object')throw new PublicError('Choose a Bot.');
-  const next={...bot,...Object.fromEntries(['isPinned','folder','sortOrder','appearance','color'].filter(key=>Object.hasOwn(changes,key)).map(key=>[key,changes[key]]))};
+  if(Object.hasOwn(changes,'name')){const name=String(changes.name??'').trim();if(!name||name.length>200||state.bots.some(x=>x.id!==id&&x.name.toLowerCase()===name.toLowerCase()))throw new PublicError('Use a name no other Bot has.');changes={...changes,name};}
+  const next={...bot,...Object.fromEntries(['isPinned','folder','sortOrder','appearance','color','name','hidden','unread','voice'].filter(key=>Object.hasOwn(changes,key)).map(key=>[key,changes[key]===null?undefined:changes[key]]))};
+  for(const key of ['hidden','unread','voice'])if(next[key]===undefined)delete next[key];
   validateWorkspace({...state,bots:state.bots.map(x=>x.id===id?next:x)});state.bots=state.bots.map(x=>x.id===id?next:x);await atomicJSON('preview-workspace.json',state);notify();if(Object.hasOwn(changes,'isPinned'))await cloud.queuePin(id,changes.isPinned);return state;
  });
  handle('bots:reorder',async ids=>{await ensureState();if(!Array.isArray(ids)||ids.length!==state.bots.length||new Set(ids).size!==ids.length||ids.some(id=>!state.bots.some(x=>x.id===id)))throw new PublicError('Use the current Bot list.');for(const bot of state.bots)bot.sortOrder=ids.indexOf(bot.id);await atomicJSON('preview-workspace.json',state);notify();return state;});
@@ -522,10 +550,12 @@ function configureIPC() {
     if (typeof wav !== 'string' || wav.length > 13_500_000) throw new Error('Invalid audio');
     try { return await voice.transcribe({ provider: settings.transcriber, key: await voiceKey(settings.transcriber), wav: Buffer.from(wav, 'base64') }); } catch (error) { voiceFailure(error); }
   });
-  handle('voice:speak', async text => {
+  handle('voice:speak', async (text, provider) => {
     const settings = await voiceSettings();
-    if (settings.speaker === 'system') throw new PublicError('Using the Windows voice.');
-    try { return (await voice.synthesize({ provider: settings.speaker, key: await voiceKey(settings.speaker), text, voiceID: settings.voiceID, groqVoice: settings.groqVoice, nimBase: settings.nimURL, nimVoice: settings.nimVoice, geminiModel: settings.geminiModel, geminiVoice: settings.geminiVoice, geminiBase: settings.geminiBase, nvcServer: settings.nvcServer, nvcFunction: settings.nvcFunction, nvcVoice: settings.nvcVoice })).toString('base64'); } catch (error) { voiceFailure(error); }
+    // A Bot's own voice may name a different provider than the app-wide one; unknown names fall back to the saved one.
+    const speaker = ['groq', 'openAI', 'elevenLabs', 'gemini', 'nvidiaCloud', 'nvidiaNIM'].includes(provider) ? provider : provider === 'system' ? 'system' : settings.speaker;
+    if (speaker === 'system') throw new PublicError('Using the Windows voice.');
+    try { return (await voice.synthesize({ provider: speaker, key: await voiceKey(speaker), text, voiceID: settings.voiceID, groqVoice: settings.groqVoice, nimBase: settings.nimURL, nimVoice: settings.nimVoice, geminiModel: settings.geminiModel, geminiVoice: settings.geminiVoice, geminiBase: settings.geminiBase, nvcServer: settings.nvcServer, nvcFunction: settings.nvcFunction, nvcVoice: settings.nvcVoice })).toString('base64'); } catch (error) { voiceFailure(error); }
   });
   handle('vault:save', async (title, value) => {
     requireVault();

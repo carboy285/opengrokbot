@@ -24,6 +24,11 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     const bot = currentBot();
     if (!bot) return;
     const settings = await result(bridge.voiceSettings());
+    // This Bot's own voice choices win over the app-wide ones. 'apple' is the built-in voice (the Windows voice here).
+    const own = bot.voice || {};
+    if (own.speaker) settings.speaker = own.speaker === 'apple' ? 'system' : own.speaker;
+    if (own.speed) settings.speed = own.speed;
+    settings.language = own.language && own.language !== 'auto' ? own.language : (navigator.language || 'en-US');
     if (!settings.keys[settings.transcriber]) {
       toast('Voice needs a listening key. Add a free Groq key in Settings → Voice.');
       openSettings?.(); return;
@@ -117,7 +122,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     // Start fetching audio for a piece right away, so the next sentence is ready when the current one ends.
     function fetchPiece(text) {
       if (!cloudSpeaker()) return { text, audio: null };
-      const audio = result(bridge.voiceSpeak(text)).then(encoded => Uint8Array.from(atob(encoded), c => c.charCodeAt(0)));
+      const audio = result(bridge.voiceSpeak(text, settings.speaker)).then(encoded => Uint8Array.from(atob(encoded), c => c.charCodeAt(0)));
       audio.catch(() => {});
       return { text, audio };
     }
@@ -145,7 +150,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     function speakSystem(text) {
       return new Promise(done => {
         const synth = window.speechSynthesis, voices = synth.getVoices();
-        const language = (navigator.language || 'en-US').slice(0, 2);
+        const language = (settings.language || navigator.language || 'en-US').slice(0, 2);
         const voice = voices.find(v => v.lang.startsWith(language) && /natural|online/i.test(v.name)) || voices.find(v => v.lang.startsWith(language));
         const parts = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
         let finished = false; const finish = () => { if (!finished) { finished = true; state.cancelSpeech = null; done(); } };

@@ -1,0 +1,46 @@
+// Generated from GrokBotMac/Composio/ComposioCatalog.swift: the apps a Composio project can be given.
+export const categories = ["Productivity", "Communication", "Code", "Design", "Business", "Social"];
+export const recommended = ["gmail", "googlecalendar", "googledrive", "notion", "slack", "github"];
+export const apps = [
+  { slug: "gmail", name: "Gmail", category: "Communication", verified: true },
+  { slug: "slack", name: "Slack", category: "Communication", verified: true },
+  { slug: "outlook", name: "Outlook", category: "Communication" },
+  { slug: "discord", name: "Discord", category: "Communication" },
+  { slug: "zoom", name: "Zoom", category: "Communication" },
+  { slug: "googlecalendar", name: "Google Calendar", category: "Productivity", verified: true },
+  { slug: "googledrive", name: "Google Drive", category: "Productivity", verified: true },
+  { slug: "notion", name: "Notion", category: "Productivity", verified: true },
+  { slug: "googledocs", name: "Google Docs", category: "Productivity" },
+  { slug: "googlesheets", name: "Google Sheets", category: "Productivity" },
+  { slug: "asana", name: "Asana", category: "Productivity" },
+  { slug: "trello", name: "Trello", category: "Productivity" },
+  { slug: "todoist", name: "Todoist", category: "Productivity" },
+  { slug: "clickup", name: "ClickUp", category: "Productivity" },
+  { slug: "airtable", name: "Airtable", category: "Productivity" },
+  { slug: "dropbox", name: "Dropbox", category: "Productivity" },
+  { slug: "calendly", name: "Calendly", category: "Productivity" },
+  { slug: "github", name: "GitHub", category: "Code", verified: true },
+  { slug: "linear", name: "Linear", category: "Code", verified: true },
+  { slug: "gitlab", name: "GitLab", category: "Code" },
+  { slug: "bitbucket", name: "Bitbucket", category: "Code" },
+  { slug: "jira", name: "Jira", category: "Code" },
+  { slug: "sentry", name: "Sentry", category: "Code" },
+  { slug: "vercel", name: "Vercel", category: "Code" },
+  { slug: "supabase", name: "Supabase", category: "Code" },
+  { slug: "datadog", name: "Datadog", category: "Code" },
+  { slug: "figma", name: "Figma", category: "Design", verified: true },
+  { slug: "canva", name: "Canva", category: "Design" },
+  { slug: "miro", name: "Miro", category: "Design" },
+  { slug: "hubspot", name: "HubSpot", category: "Business" },
+  { slug: "salesforce", name: "Salesforce", category: "Business" },
+  { slug: "stripe", name: "Stripe", category: "Business" },
+  { slug: "shopify", name: "Shopify", category: "Business" },
+  { slug: "zendesk", name: "Zendesk", category: "Business" },
+  { slug: "mailchimp", name: "Mailchimp", category: "Business" },
+  { slug: "twitter", name: "X (Twitter)", category: "Social" },
+  { slug: "reddit", name: "Reddit", category: "Social" },
+  { slug: "youtube", name: "YouTube", category: "Social" },
+  { slug: "linkedin", name: "LinkedIn", category: "Social" }
+];
+export const find = slug => apps.find(app => app.slug === slug);
+export const filter = (query, category) => { const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean); return apps.filter(app => (!category || app.category === category) && words.every(word => app.name.toLowerCase().includes(word) || app.slug.includes(word) || app.category.toLowerCase().includes(word))); };
