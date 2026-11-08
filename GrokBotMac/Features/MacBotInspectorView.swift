@@ -15,7 +15,7 @@ struct MacBotInspectorView: View {
     @State private var files: [URL] = []
     @State private var fileError: String?
     @State private var editingAvatar = false
-    @State private var showProviders = false
+    @AppStorage("providersOpen") private var showProviders = true
     @State private var folderDraft = ""
     @State private var editingDetails = false
     @State private var nameDraft = ""
@@ -90,7 +90,7 @@ struct MacBotInspectorView: View {
             Button("Delete \(task.name)", role: .destructive) { _ = app.removeSchedule(task.id, botID: bot.id); routineToDelete = nil }
         } message: { _ in Text("Future runs will be removed from this Bot.") }
         .onChange(of: desktop.runningBots) { _, running in if !running.contains(bot.id), tab == .library { refreshFiles() } }
-        .onAppear { folderDraft = bot.folder ?? ""; showProviders = desktop.needsProvider(bot) }
+        .onAppear { folderDraft = bot.folder ?? ""; if desktop.needsProvider(bot) { showProviders = true } }
         .onChange(of: bot.id) { _, _ in editingAvatar = false; editingDetails = false; creatingRoutine = false; editingRoutine = nil; folderDraft = bot.folder ?? "" }
     }
 
