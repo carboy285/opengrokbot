@@ -102,3 +102,10 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Other AI CLIs (Codex, Gemini, OpenCode, Grok): ask the same question; they follow their own permission settings, so they may still refuse. Report what they say.
 - Prompt check: a Bot with no connected apps should not mention Composio.
 
+## 0.8.9: one shared VM and hand-over
+- Settings → Computer → Shared VM (Mac) / “Shared VM for all Bots…” (Windows): set up the VM once. Ask two different Bots to run /bin/uname -a: both run in the same VM.
+- On another computer choose that VM under “Shared VM on another computer” (the sharing computer needs guest commands and “Let my other computers use this VM” on). Both Bots there should run commands in it; the old per-Bot VM cards are gone.
+- Hand-over: ask a Bot to “open a website in the VM and ask me to log in”. A pop-up “<Bot> needs you in the VM” appears with the reason. Open VM opens the console (on the sharing computer when it is remote). Press “I’m done — continue”: the Bot continues and checks the VM. Try Cancel task too: the Bot should stop and ask what you want.
+- Remote VM: the screen preview may stay empty (needs remote VM viewing on the sharing computer, and Screen Recording on a Mac). Clicking inside the VM is only possible on the computer that has it. Report how that feels.
+- Two Bots asking at once: the second request waits until the first is answered.
+

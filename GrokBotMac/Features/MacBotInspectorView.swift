@@ -133,8 +133,10 @@ struct MacBotInspectorView: View {
                     do { _ = try LocalBotBrowsers.shared.open(bot, reveal: true) } catch { app.errorMessage = error.localizedDescription }
                 }.buttonStyle(InspectorButtonStyle())
             }
-            MacBotVMControls(bot: bot)
-            if bot.memberIDs == nil { MacRemoteVMCard(bot: bot) }
+            InspectorCard(title: "Linux VM", footer: "One VM is shared by all Bots. Set it up, or choose one on another computer, under Settings → Computer.") {
+                Text("This Bot uses the shared VM when it needs Linux.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                Button("Shared VM settings…") { desktop.settingsTab = .computer; desktop.panel = .settings }.buttonStyle(InspectorButtonStyle())
+            }
             MacVoiceCard(bot: bot)
             routinesCard
             InspectorCard(title: "Shared memory", footer: "Every Bot can see these. Remove anything that is out of date.") {

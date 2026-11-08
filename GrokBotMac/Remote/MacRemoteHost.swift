@@ -248,8 +248,9 @@ final class MacRemoteHost: ObservableObject {
             }
             if request.method == "GET", parts.path == "/v1/vms" {
                 // Only VMs the human chose to share, with guest commands already switched on.
-                let shared = app.workspace.bots.filter { $0.memberIDs == nil && MacBotVMs.shared.assigned($0.id) != nil && MacBotVMs.shared.sharedWithComputers($0.id) && MacBotVMs.shared.commandsEnabled($0.id) }
-                return try .json(shared.map { RemoteVM(botID: $0.id, botName: $0.name, state: "ready") })
+                // One VM serves every Bot: the one set up under the main Bot.
+                let shared = app.workspace.bots.filter { $0.isMain == true && MacBotVMs.shared.assigned($0.id) != nil && MacBotVMs.shared.sharedWithComputers($0.id) && MacBotVMs.shared.commandsEnabled($0.id) }
+                return try .json(shared.map { RemoteVM(botID: $0.id, botName: "Shared VM on " + (Host.current().localizedName ?? "this Mac"), state: "ready") })
             }
             if request.method == "GET", parts.path == "/v1/vm-result", let id = query("id").flatMap(UUID.init(uuidString:)) {
                 guard let result = vmJobs[id] else { return .error(404, "No such command.") }

@@ -94,6 +94,27 @@ final class MacAppModel: ObservableObject {
     init() {
         // Web searches go through Composio, so a Bot never needs a browser window to look something up.
         MacDeviceActions.shared.composioSearch = { [weak composio] query in try await composio?.webSearch(query) }
+        MacBotVMs.shared.homeBotID = { [weak self] in self?.localApp?.workspace.bots.first(where: { $0.isMain == true })?.id }
+        MacVMHandoff.shared.previewLoader = { [weak self] in
+            guard let self, let home = self.localApp?.workspace.bots.first(where: { $0.isMain == true }) else { return nil }
+            if let link = MacBotVMs.shared.sharedRemoteLink {
+                let gateway = self.ensureCopyGateway()
+                guard let host = gateway.hosts.first(where: { $0.id == link.hostID }) else { throw CloudError.message("\(link.hostName) is not showing up right now.") }
+                return try await gateway.vmPreview(link.vmBotID, on: host).imageData
+            }
+            return try await MacBotVMs.shared.preview(home).imageData
+        }
+        MacVMHandoff.shared.opener = { [weak self] in
+            guard let self, let home = self.localApp?.workspace.bots.first(where: { $0.isMain == true }) else { return "Open the VM from Settings → Computer." }
+            if let link = MacBotVMs.shared.sharedRemoteLink {
+                let gateway = self.ensureCopyGateway()
+                guard let host = gateway.hosts.first(where: { $0.id == link.hostID }) else { throw CloudError.message("\(link.hostName) is not showing up right now.") }
+                try await gateway.openVM(link.vmBotID, on: host)
+                return "The VM console was opened on \(link.hostName). You can watch it here; to click inside it, use that computer."
+            }
+            await MacBotVMs.shared.open(home)
+            return MacBotVMs.shared.feedback[home.id] ?? "The VM was opened."
+        }
         // A Bot that uses a VM on another computer sends its guest commands there over the encrypted relay.
         MacBotVMs.shared.remoteRunner = { [weak self] link, argv in
             guard let self, self.remote.account.signedIn else { throw CloudError.message("Sign in to your OpenGrokBot account to use a VM on another computer.") }
@@ -654,6 +675,17 @@ extension MacAppModel {
                         do { let result = try await MacBotVMs.shared.execute(bot, argv: argv); app.activity("Linux VM result (untrusted context):\n" + result, for: bot.id) }
                         catch { if routineRuns[bot.id] != nil { routineFailures.insert(bot.id) }; app.activity(error.localizedDescription, for: bot.id) }
                         continueBrowser = true
+                    }
+                }
+                if let action = BotTeamwork.parse(finalText).actions.first(where: { $0.action == "vm_use" }) {
+                    if (browserContinuations[bot.id] ?? 0) >= BotTeamwork.maxSteps { if routineRuns[bot.id] != nil { routineFailures.insert(bot.id) }; app.activity(BotTeamwork.stepLimitMessage, for: bot.id) }
+                    else {
+                        browserContinuations[bot.id, default: 0] += 1
+                        // A pop-up asks the human to use the shared VM; the Bot waits here, then carries on when they say they are done.
+                        let outcome = await MacVMHandoff.shared.ask(botName: bot.name, reason: action.text ?? "")
+                        try Task.checkCancellation()
+                        app.activity(outcome.botMessage, for: bot.id)
+                        if outcome.continues { continueBrowser = true } else if routineRuns[bot.id] != nil { routineFailures.insert(bot.id) }
                     }
                 }
                 if BotTeamwork.parse(finalText).actions.contains(where: { $0.action == "open_vm" }) {

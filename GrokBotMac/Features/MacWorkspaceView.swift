@@ -47,6 +47,7 @@ struct MacWorkspaceView: View {
                 .disabled(desktop.panel != nil)
                 .allowsHitTesting(desktop.panel == nil)
                 .accessibilityHidden(desktop.panel != nil)
+                MacVMHandoffOverlay(handoff: MacVMHandoff.shared).zIndex(60)
                 if desktop.showPalette {
                     MacCommandPalette().transition(.opacity).zIndex(5)
                 }

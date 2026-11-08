@@ -272,6 +272,40 @@ final class MacConnectionsTests: XCTestCase {
         do { _ = try await vms.executeLocal(mine, argv: ["/bin/echo"]); XCTFail("There is no VM here") } catch {}
     }
 
+    func testOneSharedVMServesEveryBotAndTheHumanCanTakeOver() async throws {
+        let vms = MacBotVMs.shared
+        let first = Bot(id: UUID(), name: "Fantasy", purpose: "Help", color: "white", symbol: "sparkles")
+        let second = Bot(id: UUID(), name: "School", purpose: "Help", color: "pink", symbol: "sparkles")
+        defer { vms.setSharedRemoteLink(nil); vms.remoteRunner = nil; vms.homeBotID = nil }
+        XCTAssertNil(vms.sharedRemoteLink)
+        let link = MacBotVMs.RemoteLink(hostID: UUID(), hostName: "Bens-Windows-PC", vmBotID: UUID(), vmName: "Shared VM")
+        vms.setSharedRemoteLink(link)
+        XCTAssertEqual(vms.remoteLink(first.id), link); XCTAssertEqual(vms.remoteLink(second.id), link, "Every Bot sees the same shared VM")
+        var hosts: [UUID] = []
+        vms.remoteRunner = { given, _ in hosts.append(given.vmBotID); return "ok" }
+        _ = try await vms.execute(first, argv: ["/bin/true"]); _ = try await vms.execute(second, argv: ["/bin/true"])
+        XCTAssertEqual(hosts, [link.vmBotID, link.vmBotID])
+        vms.setSharedRemoteLink(nil)
+        vms.homeBotID = { UUID() }
+        do { _ = try await vms.execute(second, argv: ["/bin/true"]); XCTFail("No local VM is set up") } catch {}
+
+        let handoff = MacVMHandoff()
+        let waiting = Task { await handoff.ask(botName: "Fantasy", reason: "Sign in to the site") }
+        for _ in 0..<100 where handoff.request == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(handoff.request?.botName, "Fantasy"); XCTAssertEqual(handoff.request?.reason, "Sign in to the site")
+        let queued = Task { await handoff.ask(botName: "School", reason: "") }
+        handoff.finish(.done)
+        let done = await waiting.value
+        XCTAssertEqual(done, .done); XCTAssertTrue(done.continues)
+        for _ in 0..<100 where handoff.request?.botName != "School" { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(handoff.request?.botName, "School", "A second Bot's request waits its turn")
+        XCTAssertEqual(handoff.request?.reason, "It needs you to use the VM.")
+        handoff.finish(.cancelled)
+        let cancelled = await queued.value
+        XCTAssertFalse(cancelled.continues); XCTAssertTrue(cancelled.botMessage.contains("Do not continue"))
+        XCTAssertNil(handoff.request)
+    }
+
     func testVMCommandsAndResultsSurviveTheRelayEncoding() throws {
         let id = UUID(), vm = UUID()
         let sent = RemoteCommand(requestID: id, action: "vm_exec", botID: vm, argv: ["/bin/ls", "/home"])

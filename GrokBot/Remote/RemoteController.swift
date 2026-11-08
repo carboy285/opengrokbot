@@ -275,6 +275,17 @@ final class RemoteController: ObservableObject {
         let response = try await client.fetch(peer, target: "/v1/vms")
         return try CloudCoding.decoder().decode([RemoteVM].self, from: response.body)
     }
+    /// A picture of a shared VM's screen on another computer (it must have remote VM viewing turned on).
+    func vmPreview(vm: UUID, on host: CloudDevice? = nil) async throws -> RemoteBrowserPreview {
+        guard let peer = host ?? connection else { throw CloudError.message("Choose a computer first.") }
+        let response = try await client.fetch(peer, target: "/v1/vm?bot=" + vm.uuidString)
+        return try CloudCoding.decoder().decode(RemoteBrowserPreview.self, from: response.body)
+    }
+    /// Opens a shared VM's console on the computer that has it, so the human can use it there.
+    func openVM(vm: UUID, on host: CloudDevice? = nil) async throws {
+        guard let peer = host ?? connection else { throw CloudError.message("Choose a computer first.") }
+        _ = try await client.fetch(peer, target: "/v1/command", command: RemoteCommand(action: "open_vm", botID: vm))
+    }
     /// Runs a command inside a VM another computer is sharing and returns what it printed. The computer is asked to start the command, then
     /// asked for the result every couple of seconds, because the relay answers within seconds but a command inside a VM may take a minute.
     func runVMCommand(_ argv: [String], vm: UUID, on host: CloudDevice? = nil) async throws -> String {

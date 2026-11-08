@@ -67,6 +67,8 @@ final class MacGateway: ObservableObject {
     func hostSettings() async throws -> RemoteHostSettings { try await remote.hostSettings() }
     func setAPIKey(_ key: String, for provider: CLIProvider) async throws { try await remote.setAPIKey(key, for: provider) }
 
+    func vmPreview(_ vm: UUID, on host: CloudDevice) async throws -> RemoteBrowserPreview { try await remote.vmPreview(vm: vm, on: host) }
+    func openVM(_ vm: UUID, on host: CloudDevice) async throws { try await remote.openVM(vm: vm, on: host) }
     func vms(on host: CloudDevice) async throws -> [RemoteVM] { try await remote.vmList(on: host) }
     func runVM(_ argv: [String], vm: UUID, on host: CloudDevice) async throws -> String { try await remote.runVMCommand(argv, vm: vm, on: host) }
 

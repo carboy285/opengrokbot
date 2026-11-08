@@ -21,8 +21,19 @@ final class MacBotVMs: ObservableObject {
     }
     /// Set by the app: runs a command in a VM on another computer on this account.
     var remoteRunner: (@MainActor (RemoteLink, [String]) async throws -> String)?
+    /// All Bots share one VM. Its local home is the main Bot's VM; the app tells us which Bot that is.
+    var homeBotID: (@MainActor () -> UUID?)?
+    /// The one VM on another computer that every Bot uses, if the human chose one.
+    var sharedRemoteLink: RemoteLink? {
+        preferences.data(forKey: "vm-shared-remote").flatMap { try? JSONDecoder().decode(RemoteLink.self, from: $0) }
+    }
+    func setSharedRemoteLink(_ link: RemoteLink?) {
+        if let link, let data = try? JSONEncoder().encode(link) { preferences.set(data, forKey: "vm-shared-remote") } else { preferences.removeObject(forKey: "vm-shared-remote") }
+        objectWillChange.send()
+    }
+    /// The VM a Bot uses: the shared one on another computer if set, else a Bot-specific link from older versions.
     func remoteLink(_ id: UUID) -> RemoteLink? {
-        preferences.data(forKey: "bot-vm-remote-" + id.uuidString).flatMap { try? JSONDecoder().decode(RemoteLink.self, from: $0) }
+        sharedRemoteLink ?? preferences.data(forKey: "bot-vm-remote-" + id.uuidString).flatMap { try? JSONDecoder().decode(RemoteLink.self, from: $0) }
     }
     func setRemoteLink(_ link: RemoteLink?, for id: UUID) {
         if let link, let data = try? JSONEncoder().encode(link) { preferences.set(data, forKey: "bot-vm-remote-" + id.uuidString) } else { preferences.removeObject(forKey: "bot-vm-remote-" + id.uuidString) }
@@ -38,15 +49,17 @@ final class MacBotVMs: ObservableObject {
 
     /// Runs a Bot's guest command in the VM it uses: one on another computer if it is set up that way, otherwise its own.
     func execute(_ bot: Bot, argv: [String]) async throws -> String {
-        guard let link = remoteLink(bot.id) else { return try await executeLocal(bot, argv: argv) }
+        guard let link = remoteLink(bot.id) else { return try await executeLocal(botID: homeBotID?() ?? bot.id, argv: argv) }
         try Self.checkCommand(argv)
         guard let remoteRunner else { throw CloudError.message("Sign in to your OpenGrokBot account to use a VM on another computer.") }
         return "Linux guest on \(link.hostName) (\(link.vmName)):\n" + (try await remoteRunner(link, argv))
     }
 
     /// Runs a guest command in this Mac's own VM for the Bot. This is also what a command from another computer uses, so it never forwards again.
-    func executeLocal(_ bot: Bot, argv: [String]) async throws -> String {
-        guard commandsEnabled(bot.id), let id = assigned(bot.id), UUID(uuidString: id) != nil else { throw CloudError.message("Set up this Bot’s VM and enable Bot commands in its VM settings first.") }
+    func executeLocal(_ bot: Bot, argv: [String]) async throws -> String { try await executeLocal(botID: bot.id, argv: argv) }
+
+    func executeLocal(botID: UUID, argv: [String]) async throws -> String {
+        guard commandsEnabled(botID), let id = assigned(botID), UUID(uuidString: id) != nil else { throw CloudError.message("Set up this Bot’s VM and enable Bot commands in its VM settings first.") }
         try Self.checkCommand(argv)
         let result = await Task.detached { CLIInstallationScanner.capture(path: "/Applications/UTM.app/Contents/MacOS/utmctl", arguments: ["exec",id,"--cmd"] + argv, timeout: 65, limit: 16000) }.value
         guard result.exit >= 0 else { throw CloudError.message("Guest command did not finish. Install/start qemu-guest-agent in the Linux template and check UTM. A timed-out guest process may still be running.") }
@@ -117,7 +130,7 @@ struct MacBotVMControls: View {
     let bot: Bot
     @ObservedObject private var vms = MacBotVMs.shared
     var body: some View {
-        InspectorCard(title: "Linux VM", footer: "The AI CLI stays on this Mac. Guest commands run inside Linux through UTM’s guest agent; no AI agent is installed in the guest.") {
+        InspectorCard(title: "Shared Linux VM on this Mac", footer: "Every Bot uses this one VM. The AI CLI stays on this Mac. Guest commands run inside Linux through UTM’s guest agent; no AI agent is installed in the guest.") {
             Text("Runs in UTM on this Mac. Install UTM and a Linux template, then set up the VM. It starts with 2 CPU cores and 4 GB RAM; disk size comes from the template.")
                 .font(.system(size: 13)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
             if vms.assigned(bot.id) == nil {
@@ -141,7 +154,22 @@ struct MacBotVMControls: View {
     }
 }
 
-/// Lets this Bot use a Linux VM that another computer on the account is sharing, instead of a VM of its own.
+/// Settings → Computer: the one VM every Bot shares, here or on another computer.
+struct MacSharedVMSettings: View {
+    let main: Bot
+    @ObservedObject private var vms = MacBotVMs.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Shared VM").font(.system(size: 18, weight: .semibold))
+            Text("All your Bots use one Linux VM. Set it up on this Mac, or choose one that another computer is sharing. A Bot can still browse and search the web on its own; the VM is there when it needs Linux. When a Bot needs you in the VM (to sign in, for example), a pop-up appears and the Bot waits until you say you are done.")
+                .font(.system(size: 13)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            MacRemoteVMCard(bot: main)
+            if vms.sharedRemoteLink == nil { MacBotVMControls(bot: main) }
+        }
+    }
+}
+
+/// Lets every Bot use a Linux VM that another computer on the account is sharing, instead of a VM of its own.
 struct MacRemoteVMCard: View {
     let bot: Bot
     @EnvironmentObject private var desktop: MacAppModel
@@ -152,10 +180,10 @@ struct MacRemoteVMCard: View {
     @State private var note: String?
 
     var body: some View {
-        InspectorCard(title: "VM on another computer", footer: "The VM keeps running on the other computer. Commands travel over your encrypted account connection, and the other computer must have turned sharing on for that VM. The first time, approve this Mac there if it asks.") {
-            if let link = vms.remoteLink(bot.id) {
-                Text("Using “\(link.vmName)” on \(link.hostName). This Bot’s guest commands run there.").font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
-                Button("Stop using it") { vms.setRemoteLink(nil, for: bot.id); note = nil }.buttonStyle(InspectorButtonStyle())
+        InspectorCard(title: "Shared VM on another computer", footer: "Every Bot uses this one VM. It keeps running on the other computer. Commands travel over your encrypted account connection, and the other computer must have turned sharing on for that VM. The first time, approve this Mac there if it asks.") {
+            if let link = vms.sharedRemoteLink {
+                Text("Every Bot uses “\(link.vmName)” on \(link.hostName).").font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
+                Button("Stop using it") { vms.setSharedRemoteLink(nil); note = nil }.buttonStyle(InspectorButtonStyle())
             } else {
                 let computers = desktop.computers()
                 if computers.isEmpty {
@@ -168,7 +196,7 @@ struct MacRemoteVMCard: View {
                     ForEach(available) { vm in
                         Button("Use “\(vm.botName)”", systemImage: "externaldrive.connected.to.line.below") {
                             guard let host else { return }
-                            vms.setRemoteLink(MacBotVMs.RemoteLink(hostID: host.id, hostName: host.name, vmBotID: vm.botID, vmName: vm.botName), for: bot.id)
+                            vms.setSharedRemoteLink(MacBotVMs.RemoteLink(hostID: host.id, hostName: host.name, vmBotID: vm.botID, vmName: vm.botName))
                         }.buttonStyle(InspectorButtonStyle())
                     }
                 }

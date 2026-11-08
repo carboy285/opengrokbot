@@ -288,7 +288,7 @@ final class AppModel: ObservableObject {
             func target(_ name: String) -> Bot? { value.bots.first { $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame || $0.name.caseInsensitiveCompare(name) == .orderedSame } }
             for action in parsed.actions {
                 switch action.action {
-                case "browse_web", "open_vm", "vm_exec": break // Executed by the desktop after successful CLI completion.
+                case "browse_web", "open_vm", "vm_exec", "vm_use": break // Executed by the desktop after successful CLI completion.
                 case let name where name.hasPrefix("apple_") || name.hasPrefix("browser_") || ["secure_login", "search_web", "search_knowledge", "read_knowledge"].contains(name): break // Mac-only tools, executed by the Mac app after successful CLI completion.
                 case "schedule_task":
                     guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, !(value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).contains(where: { $0.name == action.name && $0.enabled }),

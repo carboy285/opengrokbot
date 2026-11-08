@@ -69,3 +69,13 @@ test('a Bot is told which connected apps it has and how to reach them, and nothi
   assert.doesNotMatch(team.instructions(bot, state, false), /Connected apps \(through Composio\)/);
   assert.equal(team.connectedAppsNote([]), '');
 });
+
+test('Bots are told how to ask the human to use the shared VM, and vm_use is left to the desktop to run',()=>{
+ const state=previewWorkspace(),bot=state.bots[0];
+ const prompt=team.instructions(bot,state,false);
+ assert.match(prompt,/vm_use/);assert.match(prompt,/All Bots share one VM/);
+ const reply=block({action:'vm_use',text:'Sign in to the site'});
+ const parsed=team.parse(reply);
+ assert.ok(parsed.actions.some(x=>x.action==='vm_use'&&x.text==='Sign in to the site'));
+});
+

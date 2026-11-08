@@ -177,7 +177,7 @@ function renderInspector(){
  const body=node('div','inspector-body');append(pane,controls,profile,tabs,body);
  let providersMark;
  if(inspectorTab==='Details'){
-  append(body,node('h3','','Linux VM'),node('p','muted','Runs in VirtualBox on this PC.'),button('Set up or open Linux VM',()=>showBotVM(bot)));
+  append(body,node('h3','','Linux VM'),node('p','muted','All Bots share one VM (set up once, here or on another computer).'),button('Shared Linux VM settings…',()=>showBotVM(workspace.bots.find(x=>x.isMain)||bot)));
   append(body,node('h3','','Knowledge'),node('p','muted','Text, Markdown and CSV files this Bot can search instead of needing them attached to every message.'),button('Add knowledge files…',async()=>{try{const added=await result(bridge.knowledgeAdd(bot.id));if(added)toast(`Added ${added} file${added===1?'':'s'} to ${bot.name}’s Knowledge. Ask it to search them.`);}catch(error){toast(error.message);}}));
   append(body,node('h3','','Local browser'),node('p','muted','Its own browser profile, in a window on this PC.'),button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(error){toast(error.message);}}));
   append(body,node('h3','','Routines'),node('p','muted','Ask the Bot to run a task once, on a repeat, or when another Bot messages it. The app must be running; missed runs catch up once.'));
@@ -311,7 +311,7 @@ function showSettings(tab = 'General') {
     for (const [value,label] of [['system','Follow System'],['dark','Dark'],['light','Light']]) { const option=node('option','',label); option.value=value; select.append(option); } select.value=localStorage.getItem('appearance') || 'dark'; select.addEventListener('change',()=>applyTheme(select.value));
     append(appearance, append(node('div','setting-row'),node('label','','Theme'),select),append(node('div','setting-row'),node('label','','Accent'),accentSelect),append(node('div','setting-row'),node('label','','Language'),node('span','muted','English')));
     append(page,promo,node('p','settings-label','Account'),account,node('p','settings-label','Appearance'),appearance,button('Reset conversations…',()=>confirmReset()));
-  } else if (tab === 'Computer') { page.append(button('View another computer on this account',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}})); page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderSharing(page); page.append(node('p','muted','Each Bot has its own visible local browser with separate cookies and login storage. Open it from Bot details. No cloud browser account is required.')); }
+  } else if (tab === 'Computer') { page.append(button('Shared VM for all Bots…',()=>showBotVM(workspace.bots.find(x=>x.isMain)||currentBot()))); page.append(button('View another computer on this account',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}})); page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderSharing(page); page.append(node('p','muted','Each Bot has its own visible local browser with separate cookies and login storage. Open it from Bot details. No cloud browser account is required.')); }
   else if (tab === 'Permissions') renderPermissions(page);
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
@@ -433,7 +433,7 @@ document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||
 if(window.desktop&&bridge.checkUpdates){result(bridge.checkUpdates()).then(update=>{if(update?.available&&!$('.update-button')){const pill=button('↓',()=>showSettings('Updates'),'update-button');pill.setAttribute('aria-label','Update available');pill.title='Update available';$('.sidebar footer .footer-actions').append(pill);}}).catch(()=>{});}
 
 async function showBotVM(bot){
- const content=panel(bot.name+' · Linux VM');append(content,node('p','muted','Install VirtualBox 7.2+, then download an Ubuntu 24.04 desktop ISO (x64) or supply a prepared Linux OVA. Setup creates a VM for this Bot: 2 CPU cores, 4 GB RAM and a 32 GB disk for ISO installs. OVA imports keep their disk size.'));
+ const content=panel('Shared Linux VM');append(content,node('p','muted','Install VirtualBox 7.2+, then download an Ubuntu 24.04 desktop ISO (x64) or supply a prepared Linux OVA. Setup creates a VM for this Bot: 2 CPU cores, 4 GB RAM and a 32 GB disk for ISO installs. OVA imports keep their disk size.'));
  append(content,button('Download VirtualBox',()=>bridge.openDocs('https://www.virtualbox.org/wiki/Downloads')),button('Download Ubuntu Linux',()=>bridge.openDocs('https://releases.ubuntu.com/24.04/')));
  const info=node('p','muted','Loading VM settings…'),controls=node('div');append(content,info,controls,node('p','muted','The console opens locally in VirtualBox. The AI CLI remains on the host. Optional Bot commands run inside Linux through Guest Additions; no separate guest AI agent is installed. ISO installation takes time inside the console. Copy guest login after setup.'));
  const draw=async()=>{const state=await result(bridge.vmStatus(bot.id));info.textContent=state.assigned?'VM: '+state.name+' · '+state.state:state.installed?'VirtualBox found. Choose a Linux guest image to set up.':'Install VirtualBox, then reopen this panel.';controls.replaceChildren();
@@ -447,12 +447,12 @@ async function showBotVM(bot){
 
 // Use a Linux VM that another computer on this account is sharing, instead of one on this PC.
 async function showRemoteVM(bot,content){
- const box=node('div','remote-vm'),status=node('p','muted','');append(box,node('h3','','VM on another computer'),status);content.append(box);
+ const box=node('div','remote-vm'),status=node('p','muted','');append(box,node('h3','','Or use a shared VM on another computer'),status);content.append(box);
  if(!bridge.vmRemoteGet){status.textContent='Open the installed desktop app to use a VM on another computer.';return;}
  const draw=async()=>{
-  box.replaceChildren(node('h3','','VM on another computer'),status);
+  box.replaceChildren(node('h3','','Or use a shared VM on another computer'),status);
   let link=null;try{link=await result(bridge.vmRemoteGet(bot.id));}catch(error){status.textContent=error.message;return;}
-  if(link){status.textContent=`Using “${link.vmName}” on ${link.hostName}. This Bot’s guest commands run there.`;box.append(button('Stop using it',async()=>{try{await result(bridge.vmRemoteSet(bot.id,null));await draw();}catch(error){status.textContent=error.message;}}));return;}
+  if(link){status.textContent=`Every Bot uses “${link.vmName}” on ${link.hostName}.`;box.append(button('Stop using it',async()=>{try{await result(bridge.vmRemoteSet(bot.id,null));await draw();}catch(error){status.textContent=error.message;}}));return;}
   status.textContent='The VM keeps running on the other computer. Commands travel over your encrypted account connection, and that computer must have turned sharing on for the VM. The first time, approve this PC there if it asks.';
   const pick=button('Choose a computer…',async()=>{pick.disabled=true;status.textContent='Looking for your other computers…';try{const hosts=await result(bridge.vmRemoteHosts());if(!hosts.length){status.textContent='No other computer is signed in to your account with OpenGrokBot open.';pick.disabled=false;return;}status.textContent='Choose a computer:';for(const host of hosts){box.append(button(host.name+(host.online?'':' (offline)'),async()=>{status.textContent='Asking '+host.name+' for its shared VMs…';try{const list=await result(bridge.vmRemoteList(host.id));if(!list.length){status.textContent=host.name+' is not sharing any VM. On that computer, open a Bot’s Linux VM settings, turn on guest commands, then “Let my other computers use this VM”.';return;}status.textContent='Choose a VM on '+host.name+':';for(const vm of list)box.append(button('Use “'+vm.botName+'”',async()=>{try{await result(bridge.vmRemoteSet(bot.id,{hostID:host.id,hostName:host.name,vmBotID:vm.botID,vmName:vm.botName}));await draw();}catch(error){status.textContent=error.message;}}));}catch(error){status.textContent=error.message;}}));}}catch(error){status.textContent=error.message;pick.disabled=false;}});
   box.append(pick);
@@ -747,3 +747,25 @@ function addAllowToggle(setup) {
   setup.append(append(node('label', 'setting-row'), allow, append(node('span', 'details'), node('strong', '', 'Let Claude Code use connected apps without asking'),
     node('small', 'muted', 'Claude Code works in the background and cannot ask you before using an app, so it refuses unless this is on. It lets only your connected apps (Composio) run without a question, for example reading Google Drive or sending an email from Gmail. Leave it off if you read pages or files you do not trust. Other AI CLIs follow their own settings.'))));
 }
+
+// When a Bot needs the human in the shared VM, a pop-up opens and the Bot waits until the human says they are done.
+let handoffTimer = null;
+function renderVMHandoff(request) {
+  clearInterval(handoffTimer); handoffTimer = null; $('#vm-handoff')?.remove();
+  if (!request) return;
+  const back = node('div', 'palette-backdrop'); back.id = 'vm-handoff';
+  const box = node('div', 'palette-box handoff-box'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', `${request.botName} needs you in the VM`);
+  const shot = node('div', 'handoff-shot'), note = node('p', 'muted', '');
+  const refresh = async () => { try { const preview = await result(bridge.vmHandoffPreview()); if (preview?.imageData) { const img = node('img'); img.alt = 'The VM screen'; img.src = 'data:image/jpeg;base64,' + preview.imageData; shot.replaceChildren(img); note.textContent = ''; } } catch (error) { note.textContent = error.message; } };
+  const finish = outcome => { clearInterval(handoffTimer); handoffTimer = null; back.remove(); bridge.vmHandoffDone(request.id, outcome); };
+  shot.append(node('p', 'muted', 'The VM screen appears here when it can be shown. Use Open VM to work in it.'));
+  append(box, node('h2', '', `${request.botName} needs you in the VM`), node('p', 'muted', request.reason), shot, note,
+    append(node('div', 'panel-bottom'),
+      button('Open VM', async () => { try { note.textContent = await result(bridge.vmHandoffOpen()); } catch (error) { note.textContent = error.message; } }),
+      button('Cancel task', () => finish('cancelled')),
+      button('I’m done — continue', () => finish('done'), 'pill primary')));
+  back.append(box); document.body.append(back);
+  bridge.vmHandoffOpen().then(response => { if (response?.ok) note.textContent = response.value; else if (response?.error) note.textContent = response.error; }).catch(() => {});
+  refresh(); handoffTimer = setInterval(refresh, 2000);
+}
+bridge.onVMHandoff?.(renderVMHandoff);

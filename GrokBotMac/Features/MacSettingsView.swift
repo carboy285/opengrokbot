@@ -127,7 +127,8 @@ struct MacSettingsView: View {
             MacRemoteAccessView(remote: desktop.remote)
             Text("Bot browsers run locally, with a separate visible browser and cookie/login profile for each Bot. Open Bot details → Open local browser. No browser provider account is needed.").font(.callout).foregroundStyle(.secondary)
             Button("Permissions: what Bots may do without asking…") { desktop.panel = .permissions }
-            Button("Computers: look at another computer or copy Bots between them…") { desktop.copyingBot = nil; desktop.copyNotice = nil; desktop.panel = .computers }
+            if let main = app.workspace.bots.first(where: { $0.isMain == true }) { MacSharedVMSettings(main: main) }
+            Button("Computers: look at another or copy Bots between them…") { desktop.copyingBot = nil; desktop.copyNotice = nil; desktop.panel = .computers }
             section("Always on") {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Keep this Mac awake while Bots have scheduled routines", isOn: $keepAwakeForRoutines).toggleStyle(.switch)
