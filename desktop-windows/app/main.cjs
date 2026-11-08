@@ -83,11 +83,12 @@ function saveSettings(){return atomicJSON('settings.json',settings);}
 function selectedCLI(){return installed.find(x=>x.id===settings?.selected);}
 function setupStatus(){return {providers:cli.providers.map(({package,...info})=>info),installed,selected:settings.selected,complete:!!settings.complete,health:settings.providerHealth||{}};}
 function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
-// A streaming reply changes many times a second and each message carries the whole workspace, so updates are sent at most about twelve times a second.
+// Every change is sent at once, except streamed reply text: that changes many times a second and each message carries the whole
+// workspace, so streamed text is sent at most about twelve times a second. Any other change sends immediately and includes the latest text.
 let notifyTimer=null,lastNotify=0;
 function sendNotify(){clearTimeout(notifyTimer);notifyTimer=null;lastNotify=Date.now();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
-// The first change after a quiet moment goes out at once (so "a reply is running" is never late); a burst after it is batched.
-function notify(){revision=randomUUID();if(notifyTimer)return;const wait=80-(Date.now()-lastNotify);if(wait<=0)sendNotify();else notifyTimer=setTimeout(sendNotify,wait);}
+function notify(){revision=randomUUID();sendNotify();}
+function notifyStreaming(){revision=randomUUID();if(notifyTimer)return;const wait=80-(Date.now()-lastNotify);if(wait<=0)sendNotify();else notifyTimer=setTimeout(sendNotify,wait);}
 async function cliKeyEnv(provider){
  try{const keys=await loadJSON('cli-keys.encrypted.json',{});if(!keys[provider]||!safeStorage.isEncryptionAvailable())return {};return providerKeys.environmentFor(provider,safeStorage.decryptString(Buffer.from(keys[provider],'base64')));}catch{return {};}
 }
@@ -136,7 +137,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
    const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,env:await cliKeyEnv(installation.provider),onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
-    if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notify();}
+    if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notifyStreaming();}
    }});
    runs.add(run);
    run.done.then(async()=>{if(scheduledTask&&!routineRuns.has(botID))routineRuns.set(botID,{id:scheduledTask.id,runID:requestID,failed:false});settings.providerHealth||={};settings.providerHealth[installation.provider]={state:'ready',detail:'Last message succeeded',at:new Date().toISOString()};teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');
