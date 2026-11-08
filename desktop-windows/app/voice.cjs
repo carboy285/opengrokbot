@@ -168,7 +168,7 @@ async function synthesize({ provider, key, text, voiceID, groqVoice, nimBase, ni
   } else {
     const id = String(voiceID || '21m00Tcm4TlvDq8ikWAM');
     if (!/^[A-Za-z0-9]{8,40}$/.test(id)) throw new VoiceError('The ElevenLabs voice ID looks invalid.');
-    url = `https://api.elevenlabs.io/v1/text-to-speech/${id}?output_format=mp3_44100_64`; headers = { 'xi-api-key': key, 'Content-Type': 'application/json' };
+    url = `https://api.elevenlabs.io/v1/text-to-speech/${id}?output_format=mp3_22050_32`; headers = { 'xi-api-key': key, 'Content-Type': 'application/json' };
     body = JSON.stringify({ text, model_id: 'eleven_flash_v2_5' });
   }
   let response;

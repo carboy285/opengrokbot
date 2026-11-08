@@ -66,8 +66,8 @@ struct GrokBotMacApp: App {
                 Button("Settings…") { desktop.openSettings() }.keyboardShortcut(",")
             }
             CommandGroup(after: .textEditing) {
-                Button("Search Bots") { desktop.showSearch.toggle() }.keyboardShortcut("f")
-                Button("Switch Bot…") { desktop.showSearch = true }.keyboardShortcut("k")
+                Button("Search Bots") { desktop.showPalette.toggle() }.keyboardShortcut("f")
+                Button("Search Bots and Actions…") { desktop.showPalette = true }.keyboardShortcut("k")
                 Button("Next Bot") { desktop.cycleBot(1, app: app) }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Previous Bot") { desktop.cycleBot(-1, app: app) }.keyboardShortcut("[", modifiers: [.command, .shift])
                 Button("Export Conversation…") {

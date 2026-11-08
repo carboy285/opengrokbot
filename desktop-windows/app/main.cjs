@@ -455,7 +455,7 @@ function configureIPC() {
     const values = await loadJSON('vault.json', []);
     return values.map(({ id, title }) => ({ id, title }));
   });
-  const voiceDefaults = { transcriber: 'groq', speaker: 'system', voiceID: '21m00Tcm4TlvDq8ikWAM', talkOver: true, groqVoice: 'autumn', nimURL: 'http://localhost:9000', nimVoice: 'Magpie-Multilingual.EN-US.Aria', geminiModel: 'gemini-2.5-flash-preview-tts', geminiVoice: 'Kore', geminiBase: 'https://generativelanguage.googleapis.com', nvcServer: 'grpc.nvcf.nvidia.com:443', nvcFunction: '877104f7-e885-42b9-8de8-f6e4c6303969', nvcVoice: 'Magpie-Multilingual.EN-US.Aria' };
+  const voiceDefaults = { transcriber: 'groq', speaker: 'system', voiceID: '21m00Tcm4TlvDq8ikWAM', talkOver: true, speed: 1, groqVoice: 'autumn', nimURL: 'http://localhost:9000', nimVoice: 'Magpie-Multilingual.EN-US.Aria', geminiModel: 'gemini-2.5-flash-preview-tts', geminiVoice: 'Kore', geminiBase: 'https://generativelanguage.googleapis.com', nvcServer: 'grpc.nvcf.nvidia.com:443', nvcFunction: '877104f7-e885-42b9-8de8-f6e4c6303969', nvcVoice: 'Magpie-Multilingual.EN-US.Aria' };
   const voiceKey = async provider => { const keys = await loadJSON('voice-keys.encrypted.json', {}); if (!keys[provider]) return ''; requireVault(); return safeStorage.decryptString(Buffer.from(keys[provider], 'base64')); };
   const voiceSettings = async () => {
     const saved = await loadJSON('voice-settings.json', {}), keys = await loadJSON('voice-keys.encrypted.json', {});
@@ -478,6 +478,7 @@ function configureIPC() {
     if (patch.nimVoice !== undefined) { if (typeof patch.nimVoice !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(patch.nimVoice)) throw new PublicError('That NVIDIA NIM voice name looks invalid.'); next.nimVoice = patch.nimVoice; }
     if (patch.voiceID !== undefined) { if (typeof patch.voiceID !== 'string' || !/^[A-Za-z0-9]{8,40}$/.test(patch.voiceID)) throw new PublicError('That ElevenLabs voice ID looks invalid.'); next.voiceID = patch.voiceID; }
     if (patch.talkOver !== undefined) next.talkOver = patch.talkOver === true;
+    if (patch.speed !== undefined) { const speed = Number(patch.speed); if (!Number.isFinite(speed)) throw new Error('Invalid speed'); next.speed = Math.min(Math.max(speed, 0.75), 1.5); }
     await atomicJSON('voice-settings.json', next);
   });
   handle('sharing:get', async () => { await ensureState(); return !!settings.shareKeys; });

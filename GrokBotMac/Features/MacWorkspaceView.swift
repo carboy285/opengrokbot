@@ -6,10 +6,12 @@ struct MacWorkspaceView: View {
     @EnvironmentObject private var desktop: MacAppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var deleting: Bot?
+    @State private var renaming: Bot?
+    @State private var renameDraft = ""
     @State private var folderFilter: String? = nil
     private var sidebarBots: [Bot] { app.visibleBots.filter { folderFilter == nil || ($0.folder ?? "") == folderFilter } }
     private func pinned(_ bot: Bot) -> Bool { desktop.gateway?.isPinned(bot) ?? bot.isPinned ?? (bot.isMain == true) }
-    private func touch(_ bot: Bot) { if let gateway = desktop.gateway { gateway.touch(bot.id) } else { _ = app.touchBot(bot.id) } }
+    private func touch(_ bot: Bot) { if let gateway = desktop.gateway { gateway.touch(bot.id) } else { _ = app.touchBot(bot.id); _ = app.setUnread(false, for: bot.id) } }
     @FocusState private var searchFocused: Bool
     @AppStorage("profileName") private var profileName = "You"
 
@@ -49,13 +51,16 @@ struct MacWorkspaceView: View {
                 .disabled(desktop.panel != nil)
                 .allowsHitTesting(desktop.panel == nil)
                 .accessibilityHidden(desktop.panel != nil)
+                if desktop.showPalette {
+                    MacCommandPalette().transition(.opacity).zIndex(5)
+                }
                 if let panel = desktop.panel {
                     Color.black.opacity(0.64)
                         .ignoresSafeArea()
                         .onTapGesture { desktop.panel = nil }
                         .accessibilityHidden(true)
                     panelView(panel)
-                        .frame(width: min(1180, geometry.size.width - 80), height: min(850, geometry.size.height - 80))
+                        .frame(width: min(panelSize(panel).width, geometry.size.width - 80), height: min(panelSize(panel).height, geometry.size.height - 80))
                         .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 22))
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.13), lineWidth: 1))
                         .shadow(color: .black.opacity(0.4), radius: 40, y: 16)
@@ -67,7 +72,12 @@ struct MacWorkspaceView: View {
             .animation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 1), value: desktop.panel)
             .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1), value: desktop.showBotInspector)
             .background(MacTheme.canvas)
-            .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
+            .onExitCommand { if desktop.showPalette { desktop.showPalette = false } else if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
+        }
+        .alert("Rename Bot", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Name", text: $renameDraft)
+            Button("Save") { if let bot = renaming, !app.renameBot(bot, to: renameDraft) { app.errorMessage = "Use a name no other Bot has." }; renaming = nil }
+            Button("Cancel", role: .cancel) { renaming = nil }
         }
         .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
         .onChange(of: desktop.showSearch) { _, visible in searchFocused = visible }
@@ -92,10 +102,7 @@ struct MacWorkspaceView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Spacer()
-                MacCircleButton(symbol: "magnifyingglass", label: "Search Bots") {
-                    desktop.showSearch.toggle()
-                    searchFocused = desktop.showSearch
-                }
+                MacCircleButton(symbol: "magnifyingglass", label: "Search Bots") { desktop.showPalette = true }
                 MacCircleButton(symbol: "plus", label: "New Bot") { desktop.panel = .newBot }
             }.padding(.horizontal, 18).padding(.top, 12)
             if let gateway = desktop.gateway {
@@ -107,13 +114,6 @@ struct MacWorkspaceView: View {
                         Text("Back to this Mac").font(.system(size: 12)).underline()
                     }.font(.system(size: 13)).padding(.horizontal, 14).padding(.vertical, 9).background(MacTheme.raised, in: Capsule())
                 }.buttonStyle(.plain).padding(.horizontal, 18).padding(.top, 12).help("Stop viewing \(gateway.hostName) and return to this Mac’s own Bots")
-            }
-            if desktop.showSearch {
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundStyle(MacTheme.secondary)
-                    TextField("Search Bots", text: $app.search).textFieldStyle(.plain).focused($searchFocused)
-                    if !app.search.isEmpty { Button { app.search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
-                }.padding(10).background(MacTheme.panel, in: Capsule()).padding(.horizontal, 18).padding(.top, 14)
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -137,6 +137,7 @@ struct MacWorkspaceView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(spacing: 6) {
                                         Text(bot.name).font(.system(size: 16, weight: .medium)).lineLimit(1).help(bot.name)
+                                        if bot.unread == true { Circle().fill(Color(hex: 0x2F7BFF)).frame(width: 8, height: 8).accessibilityLabel("Unread") }
                                         if pinned(bot) { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(MacTheme.secondary).accessibilityLabel("Pinned") }
                                     }
                                     Text(app.latest(for: bot)).font(.system(size: 13)).foregroundStyle(MacTheme.secondary).lineLimit(1)
@@ -188,38 +189,48 @@ struct MacWorkspaceView: View {
         }.background(MacTheme.sidebar)
     }
 
-    /// The same right-click menu for pinned cards and list rows.
+    /// The same right-click menu for the hero card and every list row.
     @ViewBuilder
     private func botMenu(_ bot: Bot) -> some View {
-        organizationActions(bot)
-        Button("Export Conversation…") { desktop.exportConversation(bot, app: app) }
-        if bot.isMain != true { Button("Delete Bot…", role: .destructive) { deleting = bot } }
-    }
-
-    @ViewBuilder
-    private func organizationActions(_ bot: Bot) -> some View {
-        Button(pinned(bot) ? "Unpin Bot" : "Pin to top") {
+        Button(pinned(bot) ? "Unpin" : "Pin to top") {
             if let gateway = desktop.gateway { gateway.setPinned(bot, !pinned(bot)) } else { desktop.remote.setPinned(bot, pinned: !pinned(bot)) }
         }
         if desktop.gateway == nil {
-            Button("Bot details") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
             Menu("Move to section") {
-                Button("Unfiled") { _ = app.organize(bot, folder: "") }
+                Button("No section") { _ = app.organize(bot, folder: "") }
                 ForEach(Array(Set(app.workspace.bots.compactMap(\.folder).filter { !$0.isEmpty })).sorted(), id: \.self) { folder in
                     Button(folder) { _ = app.organize(bot, folder: folder) }
                 }
                 Button("New section…") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
             }
+            Button(bot.unread == true ? "Mark as read" : "Mark as unread") { _ = app.setUnread(bot.unread != true, for: bot.id) }
+            Button("Rename Bot…") { renameDraft = bot.name; renaming = bot }
+            Button("Bot details") { desktop.selectedID = bot.id; desktop.showBotInspector = true }
         }
+        Button("Copy conversation ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(bot.id.uuidString, forType: .string) }
+        if desktop.gateway == nil, bot.isMain != true { Button("Hide from sidebar") { _ = app.setHidden(true, for: bot) } }
         if bot.memberIDs == nil {
             Button("Copy to another computer…") { desktop.copyingBot = bot.id; desktop.copyNotice = nil; desktop.panel = .computers }
         }
+        Divider()
+        Button("Export Conversation…") { desktop.exportConversation(bot, app: app) }
+        if bot.isMain != true { Button("Delete Bot…", role: .destructive) { deleting = bot } }
     }
 
     private func appChip(_ name: String, color: Color) -> some View {
         Text(name).font(.system(size: 11, weight: .heavy)).foregroundStyle(.black)
             .frame(width: 18, height: 18).background(color, in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(MacTheme.panel, lineWidth: 1))
+    }
+
+    /// Small dialogs stay small; the big screens (settings, apps, computers) keep the wide panel.
+    private func panelSize(_ panel: MacPanel) -> CGSize {
+        switch panel {
+        case .newBot: CGSize(width: 520, height: 700)
+        case .newGroup: CGSize(width: 520, height: 640)
+        case .shortcuts: CGSize(width: 520, height: 640)
+        default: CGSize(width: 1180, height: 850)
+        }
     }
 
     @ViewBuilder private func panelView(_ panel: MacPanel) -> some View {
@@ -229,6 +240,9 @@ struct MacWorkspaceView: View {
         case .apple: MacAppleConnectionsView()
         case .computers: MacComputersView()
         case .remoteSettings: MacRemoteSettingsView()
+        case .newGroup: MacNewGroupView()
+        case .shortcuts: MacShortcutsView()
+        case .permissions: MacPermissionsView()
         case .newBot: MacNewBotView()
         case .integration: MacIntegrationView()
         case .setup: MacSetupView()

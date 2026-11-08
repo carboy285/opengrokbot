@@ -89,8 +89,8 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
         await sendText(bot, text);
         // Speak finished sentences while the reply is still being written.
         let offset = 0, started = false;
-        for (let waited = 0; state.alive && waited < 180000; waited += 100) {
-          await new Promise(done => setTimeout(done, 100));
+        for (let waited = 0; state.alive && waited < 180000; waited += 40) {
+          await new Promise(done => setTimeout(done, 40));
           const reply = latestReply(bot);
           if (!reply || reply.id === before) continue;
           if (started && state.mode !== 'speaking') { if (!reply.finished) bridge.stop?.(bot.id); return; }
@@ -123,12 +123,12 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     }
     async function drain() {
       draining = true;
-      let ready = queue.length ? fetchPiece(queue.shift()) : null;
-      while (state.alive && state.mode === 'speaking' && ready) {
-        const current = ready;
-        ready = queue.length ? fetchPiece(queue.shift()) : null;
-        await speakPiece(current);
-        if (!ready && queue.length) ready = fetchPiece(queue.shift());
+      // Up to three pieces are fetched at once, in order, so the next sentence is ready before the current one ends.
+      const pipeline = [];
+      while (state.alive && state.mode === 'speaking') {
+        while (pipeline.length < 3 && queue.length) pipeline.push(fetchPiece(queue.shift()));
+        if (!pipeline.length) break;
+        await speakPiece(pipeline.shift());
       }
       draining = false;
       if (state.alive && state.mode === 'speaking' && streamDone && !queue.length) resume();
@@ -141,6 +141,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
       if (state.mode === 'speaking') await playAudio(bytes);
     }
 
+    const speechSpeed = () => Math.min(Math.max(Number(settings.speed) || 1, 0.75), 1.5);
     function speakSystem(text) {
       return new Promise(done => {
         const synth = window.speechSynthesis, voices = synth.getVoices();
@@ -150,7 +151,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
         let finished = false; const finish = () => { if (!finished) { finished = true; state.cancelSpeech = null; done(); } };
         state.cancelSpeech = () => { synth.cancel(); finish(); };
         parts.forEach((part, index) => {
-          const utterance = new SpeechSynthesisUtterance(part.trim()); if (voice) utterance.voice = voice;
+          const utterance = new SpeechSynthesisUtterance(part.trim()); if (voice) utterance.voice = voice; utterance.rate = speechSpeed();
           if (index === parts.length - 1) { utterance.onend = finish; utterance.onerror = finish; }
           synth.speak(utterance);
         });
@@ -160,7 +161,7 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     function playAudio(bytes) {
       return new Promise(done => {
         const url = URL.createObjectURL(new Blob([bytes], { type: bytes[0] === 0x52 && bytes[1] === 0x49 ? 'audio/wav' : 'audio/mpeg' }));
-        const player = new Audio(url);
+        const player = new Audio(url); player.playbackRate = speechSpeed();
         const finish = () => { URL.revokeObjectURL(url); state.cancelSpeech = null; done(); };
         state.cancelSpeech = () => { player.pause(); finish(); };
         player.onended = finish; player.onerror = finish;
@@ -239,6 +240,9 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, se
     );
     const talk = el('input'); talk.type = 'checkbox'; talk.checked = settings.talkOver; talk.addEventListener('change', () => save({ talkOver: talk.checked }));
     form.append(row('Allow talking over replies', talk));
+    const pace = el('input'); pace.type = 'range'; pace.min = '0.75'; pace.max = '1.5'; pace.step = '0.05'; pace.value = String(settings.speed || 1);
+    pace.addEventListener('change', () => save({ speed: Number(pace.value) }));
+    form.append(row('Speaking speed', pace));
     for (const [id, title] of [['groq', 'Groq'], ['openAI', 'OpenAI'], ['elevenLabs', 'ElevenLabs'], ['gemini', 'Google AI Studio'], ['nvidiaCloud', 'NVIDIA Cloud (nvapi- key)'], ['nvidiaNIM', 'NVIDIA NIM (only if your server needs one)']]) {
       const input = el('input'); input.type = 'password'; input.autocomplete = 'off'; input.placeholder = settings.keys[id] ? 'Saved — paste a new key to replace' : 'Paste API key';
       const keep = el('button', '', 'Save key'); keep.type = 'button';

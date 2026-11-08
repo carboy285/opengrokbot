@@ -133,6 +133,7 @@ struct MacBotInspectorView: View {
                 }.buttonStyle(InspectorButtonStyle())
             }
             MacBotVMControls(bot: bot)
+            MacVoiceCard()
             routinesCard
             InspectorCard(title: "Shared memory", footer: "Every Bot can see these. Remove anything that is out of date.") {
                 ForEach(app.workspace.sharedMemory ?? [], id: \.self) { item in

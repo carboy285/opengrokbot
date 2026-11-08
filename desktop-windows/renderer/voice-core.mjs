@@ -24,8 +24,13 @@ export function nextChunk(text, offset, final, eager = false) {
   }
   if (end === offset && eager) {
     // Nothing has been spoken yet: start at the first natural pause instead of waiting for a whole sentence.
-    for (let j = offset + 24; j < chars.length - 1; j++) {
+    for (let j = offset + 14; j < chars.length - 1; j++) {
       if (',;:—'.includes(chars[j]) && /\s/.test(chars[j + 1])) { end = j + 1; break; }
+    }
+    // No pause yet but a good run of words: start at the last complete word instead of waiting.
+    if (end === offset && chars.length - offset >= 48) {
+      const space = chars.lastIndexOf(' ', chars.length - 2);
+      if (space - offset >= 30) end = space + 1;
     }
   }
   if (end <= offset) return { chunk: '', next: offset };
@@ -88,7 +93,7 @@ export function rms(samples) {
 
 /** Voice-activity detector. Time is measured in samples, so it behaves the same at any sample rate. */
 export class Vad {
-  constructor({ sampleRate, speechThreshold = 0.012, bargeThreshold = 0.08, silenceMs = 700, bargeMs = 400, maxSeconds = 60 }) {
+  constructor({ sampleRate, speechThreshold = 0.012, bargeThreshold = 0.08, silenceMs = 500, bargeMs = 400, maxSeconds = 60 }) {
     Object.assign(this, { sampleRate, speechThreshold, bargeThreshold, silenceMs, bargeMs, maxSeconds });
     this.reset();
   }

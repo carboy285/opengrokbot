@@ -48,6 +48,18 @@ enum VoiceSettings {
         get { VoiceProvider(rawValue: UserDefaults.standard.string(forKey: "voiceSpeaker") ?? "") ?? .apple }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "voiceSpeaker") }
     }
+    /// How fast replies are spoken: 0.75x to 1.5x. Applies to the built-in voice and to cloud audio.
+    static var speed: Double {
+        get { let value = UserDefaults.standard.double(forKey: "voiceSpeed"); return value == 0 ? 1.0 : min(max(value, 0.75), 1.5) }
+        set { UserDefaults.standard.set(min(max(newValue, 0.75), 1.5), forKey: "voiceSpeed") }
+    }
+    /// "auto" follows the system language; otherwise a BCP 47 code such as en-US. Used for listening and the built-in voice.
+    static let languages: [(code: String, name: String)] = [("auto", "Auto-detect"), ("en-US", "English (US)"), ("en-GB", "English (UK)"), ("es-ES", "Spanish"), ("fr-FR", "French"), ("de-DE", "German"), ("it-IT", "Italian"), ("pt-BR", "Portuguese (Brazil)"), ("ja-JP", "Japanese"), ("ko-KR", "Korean"), ("zh-CN", "Chinese (Simplified)")]
+    static var language: String {
+        get { let value = UserDefaults.standard.string(forKey: "voiceLanguage") ?? "auto"; return languages.contains { $0.code == value } ? value : "auto" }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceLanguage") }
+    }
+    static var locale: Locale { language == "auto" ? Locale.current : Locale(identifier: language) }
     static let groqVoices = ["autumn", "diana", "hannah", "austin", "daniel", "troy"]
     static var groqVoice: String {
         get { UserDefaults.standard.string(forKey: "voiceGroqVoice").flatMap { groqVoices.contains($0) ? $0 : nil } ?? "autumn" }
@@ -166,11 +178,13 @@ enum VoiceText {
         }
         if end == offset, eager {
             // Nothing has been spoken yet: start at the first natural pause instead of waiting for a whole sentence.
-            var j = offset + 24
+            var j = offset + 14
             while j < chars.count - 1 {
                 if ",;:—".contains(chars[j]) && chars[j + 1].isWhitespace { end = j + 1; break }
                 j += 1
             }
+            // No pause yet but a good run of words: start at the last complete word instead of waiting.
+            if end == offset, chars.count - offset >= 48, let space = chars[offset..<(chars.count - 1)].lastIndex(of: " "), space - offset >= 30 { end = space + 1 }
         }
         guard end > offset else { return ("", offset) }
         let candidate = String(chars[..<end])
@@ -296,7 +310,8 @@ final class VoiceSession: ObservableObject {
             message = "Allow microphone and speech recognition for OpenGrokBot in system settings."; return false
         }
         if transcriber == .apple {
-            recognizer = SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+            recognizer = SFSpeechRecognizer(locale: VoiceSettings.locale) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+            Task.detached { await VoiceCloud.warmUp(VoiceSettings.speaker) }
             guard recognizer?.isAvailable == true else { message = "Speech recognition isn’t available right now."; return false }
         }
         do { try startEngine() } catch { message = "The microphone could not be started: \(error.localizedDescription)"; return false }
@@ -416,7 +431,7 @@ final class VoiceSession: ObservableObject {
             bargeSeconds = 0
             if inSpeech {
                 utterance.append(contentsOf: samples)
-                if Date().timeIntervalSince(lastVoice) > 0.7 { finishCloudUtterance() }
+                if Date().timeIntervalSince(lastVoice) > 0.5 { finishCloudUtterance() }
             }
         }
         if !inSpeech {
@@ -479,7 +494,9 @@ final class VoiceSession: ObservableObject {
 
     private func armSilenceTimer(_ text: String) {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.9, repeats: false) { [weak self] _ in
+        // A finished sentence is a likely stopping point, so commit sooner; otherwise give a short pause.
+        let finished = text.trimmingCharacters(in: .whitespaces).last.map { ".?!".contains($0) } ?? false
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: finished ? 0.4 : 0.6, repeats: false) { [weak self] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.commit(text) } }
         }
     }
@@ -540,13 +557,14 @@ final class VoiceSession: ObservableObject {
 
     private func drain() async {
         draining = true
-        var ready: Fetch? = speechQueue.isEmpty ? nil : fetch(speechQueue.removeFirst())
-        while state == .speaking, active, let current = ready {
-            ready = speechQueue.isEmpty ? nil : fetch(speechQueue.removeFirst())
-            await speakPiece(current)
-            if ready == nil, !speechQueue.isEmpty { ready = fetch(speechQueue.removeFirst()) }
+        // Up to three pieces are fetched at once, in order, so the next sentence is ready before the current one ends.
+        var pipeline: [Fetch] = []
+        while state == .speaking, active {
+            while pipeline.count < 3, !speechQueue.isEmpty { pipeline.append(fetch(speechQueue.removeFirst())) }
+            guard !pipeline.isEmpty else { break }
+            await speakPiece(pipeline.removeFirst())
         }
-        ready?.audio?.cancel()
+        for item in pipeline { item.audio?.cancel() }
         draining = false
         if state == .speaking, active, streamFinished, speechQueue.isEmpty { resumeListening() }
     }
@@ -581,7 +599,9 @@ final class VoiceSession: ObservableObject {
 
     private func speakWithApple(_ text: String) async {
         let utterance = AVSpeechUtterance(string: text)
-        let language = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
+        let language = VoiceSettings.locale.identifier.replacingOccurrences(of: "_", with: "-")
+        utterance.rate = min(max(AVSpeechUtteranceDefaultSpeechRate * Float(VoiceSettings.speed), AVSpeechUtteranceMinimumSpeechRate), AVSpeechUtteranceMaximumSpeechRate)
+        utterance.preUtteranceDelay = 0
         let matching = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(String(language.prefix(2))) }
         utterance.voice = matching.max { $0.quality.rawValue < $1.quality.rawValue } ?? AVSpeechSynthesisVoice(language: language)
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
@@ -598,6 +618,7 @@ final class VoiceSession: ObservableObject {
             speechDone = c
             playerDelegate.finished = { [weak self] in DispatchQueue.main.async { MainActor.assumeIsolated { self?.finishSpeechWait() } } }
             audio.delegate = playerDelegate
+            audio.enableRate = true; audio.rate = Float(VoiceSettings.speed)
             player = audio
             if !audio.play() { finishSpeechWait() }
         }
@@ -684,7 +705,7 @@ final class VoiceConversation: ObservableObject {
             // Speak finished sentences while the reply is still being written.
             var offset = 0, started = false, waited = 0.0
             while running, !Task.isCancelled, waited < 180 {
-                try? await Task.sleep(nanoseconds: 100_000_000); waited += 0.1
+                try? await Task.sleep(nanoseconds: 40_000_000); waited += 0.04
                 guard let reply = latestReply?(), reply.id != previous else { continue }
                 if started, session.state != .speaking {
                     // You talked over the Bot: stop generating so your next message can be sent.

@@ -748,6 +748,9 @@
 				"D42190AB321F4E1303BCF0FF",
 				"1BC4BA355E16ACC96C4605D6",
 				"5B1865B379D5FA54681B5596",
+				"FE1C7B669A4161933CFE6FE0",
+				"9F13FFFDCCF3892629CC3766",
+				"3907F1EAD878397106E05AA2",
 				"B98F7D03644893B8ED261EA8",
 				"AEBD5BA110DB4E9179F023C7",
 				"07428903E1EE9FF3C61F376B",
@@ -977,6 +980,36 @@
 		"5A7C5FBC54E845C9F3F0A30A" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "5B1865B379D5FA54681B5596";
+		};
+		"FE1C7B669A4161933CFE6FE0" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacPermissionsView.swift";
+			"sourceTree" = "<group>";
+		};
+		"3DAF4ECADF308E47F310714F" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "FE1C7B669A4161933CFE6FE0";
+		};
+		"9F13FFFDCCF3892629CC3766" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacDictation.swift";
+			"sourceTree" = "<group>";
+		};
+		"791804A6E2B4C76F217200D9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9F13FFFDCCF3892629CC3766";
+		};
+		"3907F1EAD878397106E05AA2" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacCommandPalette.swift";
+			"sourceTree" = "<group>";
+		};
+		"B3A3852DF49C0D7AD8CCC3D9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "3907F1EAD878397106E05AA2";
 		};
 		"B98F7D03644893B8ED261EA8" = {
 			"isa" = "PBXFileReference";
@@ -1249,6 +1282,9 @@
 				"A00D89FA4A8867714FD4EA32",
 				"11C6327260FC7C9DA9A9039B",
 				"5A7C5FBC54E845C9F3F0A30A",
+				"3DAF4ECADF308E47F310714F",
+				"791804A6E2B4C76F217200D9",
+				"B3A3852DF49C0D7AD8CCC3D9",
 				"2AF49F0CE55E8105C778CB5A",
 				"7049F9399F4EECB7966D89D3",
 				"49FC6E29783CECF11C6B3FE2",

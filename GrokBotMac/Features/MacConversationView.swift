@@ -12,6 +12,7 @@ struct MacConversationView: View {
     @State private var showActions = false
     @State private var voiceOn = false
     @StateObject private var voice = VoiceConversation()
+    @StateObject private var dictation = MacDictation()
     @State private var pasteMonitor: Any?
     @State private var scrollTask: Task<Void,Never>?
 
@@ -33,7 +34,7 @@ struct MacConversationView: View {
                 ScrollView {
                     LazyVStack(spacing: 25) {
                         ForEach(app.entries(for: bot)) { entry in
-                            MacMessageView(entry: entry).id(entry.id)
+                            MacMessageView(entry: entry, onReply: { reply(to: $0) }, onReact: reactHandler(), onDelete: deleteHandler(), onRetry: retryHandler(for: entry)).id(entry.id)
                         }
                         if app.entries(for: bot).isEmpty { emptyConversation.padding(.top, 120) }
                         Color.clear.frame(height: 1).id("bottom")
@@ -140,6 +141,15 @@ struct MacConversationView: View {
                     }
                     .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showBotInspector = false } }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
+                Button { dictation.toggle(current: draft.wrappedValue) { draft.wrappedValue = $0 } } label: {
+                    Image(systemName: dictation.listening ? "mic.fill" : "mic").font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(dictation.listening ? Color.red : MacTheme.secondary)
+                        .frame(width: 30, height: 36).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help(dictation.listening ? "Stop dictation" : "Dictate a message").accessibilityLabel(dictation.listening ? "Stop dictation" : "Dictate a message")
+                .popover(isPresented: Binding(get: { dictation.note != nil }, set: { if !$0 { dictation.note = nil } })) {
+                    Text(dictation.note ?? "").font(.callout).padding(14).frame(width: 280)
+                }
                 if desktop.runningBots.contains(bot.id) {
                     Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").foregroundStyle(ink).frame(width: 36, height: 36).background(tint, in: Circle()) }.buttonStyle(.plain).help("Stop response")
                 } else if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(desktop.attachments[bot.id] ?? []).isEmpty {
@@ -157,8 +167,8 @@ struct MacConversationView: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 5).frame(minHeight: 46).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
             .onAppear { installPasteMonitor() }
-            .onChange(of: bot.id) { _, _ in installPasteMonitor() }
-            .onDisappear { removePasteMonitor() }
+            .onChange(of: bot.id) { _, _ in installPasteMonitor(); dictation.stop() }
+            .onDisappear { removePasteMonitor(); dictation.stop() }
             HStack(spacing: 9) {
                 if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
                 if desktop.needsProvider(bot) {
@@ -278,7 +288,24 @@ struct MacConversationView: View {
         pasteMonitor = nil
     }
 
+    private func reply(to entry: Entry) {
+        let quote = String(entry.text.split(separator: "\n").prefix(3).joined(separator: " ").prefix(240))
+        draft.wrappedValue = "> " + quote + "\n\n" + draft.wrappedValue
+        composing = true
+    }
+    /// Reactions and deleting a message change this Mac's own chat only, so they are hidden while viewing another computer.
+    private func reactHandler() -> ((Entry, String?) -> Void)? {
+        desktop.gateway == nil ? { entry, emoji in _ = app.setReaction(emoji, for: entry.id) } : nil
+    }
+    private func deleteHandler() -> ((Entry) -> Void)? {
+        desktop.gateway == nil ? { entry in _ = app.deleteEntry(entry.id) } : nil
+    }
+    private func retryHandler(for entry: Entry) -> ((Entry) -> Void)? {
+        app.entries(for: bot).last(where: { $0.kind == .bot })?.id == entry.id ? { _ in desktop.retry(bot: bot, app: app) } : nil
+    }
+
     private func sendMessage() {
+        dictation.stop()
         followLatest = true
         guard !desktop.importingAttachments.contains(bot.id) else { return }
         let files = desktop.attachments[bot.id] ?? []
@@ -294,7 +321,41 @@ struct MacConversationView: View {
 
 struct MacMessageView: View {
     let entry: Entry
+    var onReply: ((Entry) -> Void)? = nil
+    var onReact: ((Entry, String?) -> Void)? = nil
+    var onDelete: ((Entry) -> Void)? = nil
+    var onRetry: ((Entry) -> Void)? = nil
     @State private var copied = false
+    @State private var hovering = false
+    @State private var reacting = false
+    private static let reactions = ["👍", "👎", "❤️", "😂", "🎉", "🤔"]
+
+    /// React, reply and more: shown under a message while the pointer is over it. The space is always reserved so nothing jumps.
+    private var actionRow: some View {
+        HStack(spacing: 6) {
+            if onReact != nil {
+                Button { reacting.toggle() } label: { Image(systemName: "face.smiling") }.help("React")
+                    .popover(isPresented: $reacting) {
+                        HStack(spacing: 6) {
+                            ForEach(Self.reactions, id: \.self) { emoji in
+                                Button { onReact?(entry, entry.reaction == emoji ? nil : emoji); reacting = false } label: { Text(emoji).font(.system(size: 20)) }.buttonStyle(.plain)
+                            }
+                        }.padding(10)
+                    }
+            }
+            if onReply != nil { Button { onReply?(entry) } label: { Image(systemName: "arrowshape.turn.up.left") }.help("Reply") }
+            Menu {
+                Button("Copy text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.text, forType: .string) }
+                Button("Copy as Markdown") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString((entry.kind == .user ? "**You:** " : "") + entry.text, forType: .string) }
+                if entry.kind == .bot, let onRetry { Button("Retry") { onRetry(entry) } }
+                if let onDelete { Divider(); Button("Delete message", role: .destructive) { onDelete(entry) } }
+            } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More")
+        }
+        .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+        .padding(.horizontal, 6).frame(height: 22)
+        .opacity(hovering && entry.state != .streaming ? 1 : 0)
+        .animation(.easeOut(duration: 0.1), value: hovering)
+    }
 
     var body: some View {
         if entry.kind == .activity || entry.delivery == "scheduled" {
@@ -323,8 +384,11 @@ struct MacMessageView: View {
                     }
                     .accessibilityIdentifier("conversation-message")
                     .accessibilityLabel("\(entry.kind == .user ? "You" : "AI reply"): \(entry.text)")
+                    if let reaction = entry.reaction { Text(reaction).font(.system(size: 14)).padding(.horizontal, 8).padding(.vertical, 3).background(MacTheme.raised, in: Capsule()).accessibilityLabel("Reaction \(reaction)") }
+                    actionRow
                     if entry.kind == .user { Text("Delivered").font(.caption2).foregroundStyle(.secondary) }
                 }
+                .onHover { hovering = $0 }
                 if entry.kind == .bot { Spacer(minLength: 90) }
             }.frame(maxWidth: .infinity)
         }

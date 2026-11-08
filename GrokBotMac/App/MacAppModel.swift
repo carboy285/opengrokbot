@@ -10,7 +10,7 @@ struct RecoverableDraft: Codable {
 }
 
 enum MacPanel: String, Identifiable {
-    case settings, apps, newBot, integration, setup, apple, computers, remoteSettings
+    case settings, apps, newBot, integration, setup, apple, computers, remoteSettings, newGroup, shortcuts, permissions
     var id: String { rawValue }
 }
 
@@ -42,6 +42,7 @@ final class MacAppModel: ObservableObject {
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
     @Published var showSearch = false
+    @Published var showPalette = false
     @Published var showMirror = false
     /// Non-nil while the main window is showing another computer on this account instead of this Mac.
     @Published var gateway: MacGateway?

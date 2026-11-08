@@ -186,6 +186,8 @@ struct VoiceSettingsView: View {
     @State private var transcriber = VoiceSettings.transcriber
     @State private var speaker = VoiceSettings.speaker
     @State private var talkOver = VoiceSettings.allowTalkOver
+    @State private var speed = VoiceSettings.speed
+    @State private var language = VoiceSettings.language
     @State private var voiceID = VoiceSettings.elevenLabsVoiceID
     @State private var groqVoice = VoiceSettings.groqVoice
     @State private var nimURL = VoiceSettings.nimBaseURL
@@ -205,6 +207,12 @@ struct VoiceSettingsView: View {
                     Picker("Listening", selection: $transcriber) { ForEach(VoiceProvider.transcribers) { Text($0.title).tag($0) } }
                     Picker("Speaking", selection: $speaker) { ForEach(VoiceProvider.speakers) { Text($0.title).tag($0) } }
                     Toggle("Allow talking over replies", isOn: $talkOver)
+                    Picker("Language", selection: $language) { ForEach(VoiceSettings.languages, id: \.code) { Text($0.name).tag($0.code) } }
+                    HStack {
+                        Text("Speaking speed")
+                        Slider(value: $speed, in: 0.75...1.5, step: 0.05)
+                        Text(String(format: "%.2g×", speed)).monospacedDigit().foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
+                    }
                 } footer: {
                     Text("Apple voices run on your device with no key. Cloud providers send audio or reply text to that provider and use your own account and free-tier quota. Groq and ElevenLabs voices are usually the quickest to start speaking. Without headphones, talking over a reply may pick up the Bot’s own voice.")
                 }
@@ -249,6 +257,7 @@ struct VoiceSettingsView: View {
 
     private func save() {
         VoiceSettings.transcriber = transcriber; VoiceSettings.speaker = speaker
+        VoiceSettings.speed = speed; VoiceSettings.language = language
         VoiceSettings.allowTalkOver = talkOver; VoiceSettings.elevenLabsVoiceID = voiceID
         VoiceSettings.groqVoice = groqVoice; VoiceSettings.nimBaseURL = nimURL; VoiceSettings.nimVoice = nimVoice
         VoiceSettings.geminiModel = geminiModel; VoiceSettings.geminiVoice = geminiVoice; VoiceSettings.geminiBaseURL = geminiBase

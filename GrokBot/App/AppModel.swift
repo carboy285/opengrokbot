@@ -15,7 +15,7 @@ final class AppModel: ObservableObject {
     var visibleBots: [Bot] {
         let matchingChats = search.isEmpty ? Set<UUID>() : Set(workspace.entries.filter { $0.text.localizedCaseInsensitiveContains(search) }.map(\.botID))
         return workspace.bots.enumerated().filter {
-            search.isEmpty || $0.element.name.localizedCaseInsensitiveContains(search) || $0.element.purpose.localizedCaseInsensitiveContains(search) || matchingChats.contains($0.element.id)
+            (search.isEmpty && $0.element.hidden != true) || (!search.isEmpty && ($0.element.name.localizedCaseInsensitiveContains(search) || $0.element.purpose.localizedCaseInsensitiveContains(search) || matchingChats.contains($0.element.id)))
         }.sorted { ($0.element.sortOrder ?? $0.offset) < ($1.element.sortOrder ?? $1.offset) }.map(\.element)
     }
 
@@ -136,6 +136,51 @@ final class AppModel: ObservableObject {
             value.entries.append(contentsOf: entries)
             value.entries.append(Entry(botID: bot.id, kind: .activity, text: note))
         }
+    }
+
+    /// A new group chat of 2 to 8 individual Bots.
+    @discardableResult
+    func addGroup(name: String, members: [UUID]) -> Bool {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let valid = members.filter { id in workspace.bots.contains { $0.id == id && $0.memberIDs == nil } }
+        guard previewEnabled, !clean.isEmpty, clean.count <= 200, (2...8).contains(Set(valid).count), workspace.bots.count < 100,
+              !workspace.bots.contains(where: { $0.name.caseInsensitiveCompare(clean) == .orderedSame }) else { return false }
+        var group = Bot(id: UUID(), name: clean, purpose: "Group conversation", color: "ochre", symbol: "person.3")
+        group.memberIDs = Array(Set(valid))
+        return commit { $0.bots.append(group) }
+    }
+
+    @discardableResult
+    func renameBot(_ bot: Bot, to name: String) -> Bool {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = workspace.bots.firstIndex(where: { $0.id == bot.id }), !clean.isEmpty, clean.count <= 200,
+              !workspace.bots.contains(where: { $0.id != bot.id && $0.name.caseInsensitiveCompare(clean) == .orderedSame }) else { return false }
+        return commit { $0.bots[index].name = clean }
+    }
+
+    @discardableResult
+    func setHidden(_ hidden: Bool, for bot: Bot) -> Bool {
+        guard let index = workspace.bots.firstIndex(where: { $0.id == bot.id }), bot.isMain != true || !hidden else { return false }
+        return commit { $0.bots[index].hidden = hidden ? true : nil }
+    }
+
+    @discardableResult
+    func setUnread(_ unread: Bool, for botID: UUID) -> Bool {
+        guard let index = workspace.bots.firstIndex(where: { $0.id == botID }), (workspace.bots[index].unread == true) != unread else { return false }
+        return commit { $0.bots[index].unread = unread ? true : nil }
+    }
+
+    /// One emoji reaction per message; nil clears it.
+    @discardableResult
+    func setReaction(_ emoji: String?, for entryID: UUID) -> Bool {
+        guard let index = workspace.entries.firstIndex(where: { $0.id == entryID }), (emoji?.count ?? 0) <= 8 else { return false }
+        return commit { $0.entries[index].reaction = emoji }
+    }
+
+    @discardableResult
+    func deleteEntry(_ id: UUID) -> Bool {
+        guard workspace.entries.contains(where: { $0.id == id && $0.state != .streaming }) else { return false }
+        return commit { $0.entries.removeAll { $0.id == id } }
     }
 
     func removeBot(_ bot: Bot) {

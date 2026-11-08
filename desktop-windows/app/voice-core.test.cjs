@@ -93,3 +93,12 @@ test('splitText keeps every word and respects the limit', async () => {
   assert.equal(maxSpeechLength('gemini'), Infinity);
   assert.equal(maxSpeechLength('openAI'), Infinity);
 });
+
+test('the first chunk can start at a word boundary after a long run without a pause', async () => {
+  const { nextChunk } = await load();
+  const text = 'so here is a long stretch of words without any pause at all and it keeps going';
+  const first = nextChunk(text, 0, false, true);
+  assert.ok(first.chunk.length >= 30 && text.startsWith(first.chunk) && first.chunk.endsWith(' '));
+  assert.equal(nextChunk('too short to start', 0, false, true).chunk, '');
+  assert.equal(nextChunk('I looked at the page you sent me earlier, and then I checked the results', 0, false, true).chunk, 'I looked at the page you sent me earlier,');
+});

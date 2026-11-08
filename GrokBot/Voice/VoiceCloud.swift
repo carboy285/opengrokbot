@@ -37,6 +37,31 @@ enum VoiceCloud {
         return (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// One shared session with a few open connections, so each spoken piece does not pay for a new TLS handshake.
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpMaximumConnectionsPerHost = 4
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 45
+        return URLSession(configuration: configuration)
+    }()
+
+    /// Opens a connection to the speech provider before the first reply so the first sentence starts sooner. Failures are ignored.
+    static func warmUp(_ provider: VoiceProvider) async {
+        let host: String
+        switch provider {
+        case .openAI: host = "https://api.openai.com"
+        case .groq: host = "https://api.groq.com"
+        case .elevenLabs: host = "https://api.elevenlabs.io"
+        case .gemini: host = VoiceSettings.geminiBaseURL
+        default: return
+        }
+        guard let url = URL(string: host), url.scheme == "https" else { return }
+        var request = URLRequest(url: url, timeoutInterval: 5)
+        request.httpMethod = "HEAD"
+        _ = try? await session.data(for: request)
+    }
+
     static func synthesize(text: String, provider: VoiceProvider, key: String) async throws -> Data {
         var request: URLRequest
         switch provider {
@@ -53,7 +78,7 @@ enum VoiceCloud {
             request.httpBody = try JSONSerialization.data(withJSONObject: ["model": "canopylabs/orpheus-v1-english", "voice": VoiceSettings.groqVoice, "input": text, "response_format": "wav"])
         case .elevenLabs:
             let id = VoiceSettings.elevenLabsVoiceID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
-            guard let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(id)?output_format=mp3_44100_64") else { throw Failure("The ElevenLabs voice ID looks invalid.") }
+            guard let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(id)?output_format=mp3_22050_32") else { throw Failure("The ElevenLabs voice ID looks invalid.") }
             request = URLRequest(url: url, timeoutInterval: 45)
             request.setValue(key, forHTTPHeaderField: "xi-api-key")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -105,7 +130,7 @@ enum VoiceCloud {
     }
 
     private static func perform(_ request: URLRequest, provider: VoiceProvider) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw Failure("No response from \(provider.title).") }
         guard (200..<300).contains(http.statusCode) else {
             switch http.statusCode {

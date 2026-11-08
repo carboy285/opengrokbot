@@ -74,3 +74,14 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Message box: 46 pt pill, plain +, round send/voice/stop button; + menu has Attach files, Paste image, Export conversation.
 - Settings → Accent = Neutral turns the send/voice/stop circles neutral; the copy icon next to the account email copies it.
 - Windows: same sidebar/footer/composer; no folder picker or "This computer" button in the header; Settings → Computer still has "View another computer".
+
+## 0.9.0 (continued): palette, message actions, dictation, permissions, voice speed
+- ⌘K and ⌘F open the palette; typing filters Bots; up/down/return choose; Escape closes it. New group chat is hidden while viewing another computer.
+- Bot row menu: Rename, Pin, Mark unread (dot appears, clears on opening), Hide (gone from list, still found by search), Delete.
+- Hover a message: Reply quotes it in the box, React puts an emoji pill under it (tap again to remove), Retry resends, Delete removes it.
+- New Bot: small dialog, shape grid and 10 colours, optional templates.
+- Mic in the message box: first use asks for Microphone and Speech Recognition; words appear while you talk; tap again or send to stop. If you deny access, a note explains where to allow it.
+- Settings → Permissions: Reminders/Calendar/Contacts/Notes can be set to Always ask or Allow without asking; delete, send, saved logins and unattended runs show as locked.
+- Bot details → Voice chat: voice, speed and language change the next voice session (Apple voice also changes speed immediately for new sentences).
+- Voice speed (compare with 0.8.5): time from sending until the first word, gap between sentences, how soon it replies after you stop talking. Try Apple, Groq, OpenAI, ElevenLabs. Speed slider at 0.75× and 1.5× should sound clean on Apple and cloud voices.
+- Windows: Settings → Voice has a Speaking speed slider; replies begin sooner; no dictation yet.

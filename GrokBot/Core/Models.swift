@@ -16,6 +16,10 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var sortOrder: Int? = nil
     var lastUsedAt: String? = nil
     var schedules: [BotSchedule]? = nil
+    /// Hidden from the sidebar (still reachable from search).
+    var hidden: Bool? = nil
+    /// Marked unread by the human; cleared when the Bot is opened.
+    var unread: Bool? = nil
 }
 
 struct BotAppearance: Codable, Hashable, Sendable {
@@ -45,6 +49,8 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var delivery: String? = nil
     /// Full text for the Bot's own context when `text` is only a short summary shown in the chat (for example a page the browser read).
     var detail: String? = nil
+    /// A single emoji reaction the human added to this message.
+    var reaction: String? = nil
     let date: Date
 
     init(botID: UUID, kind: Kind, text: String, id: UUID = UUID(), date: Date = Date()) {

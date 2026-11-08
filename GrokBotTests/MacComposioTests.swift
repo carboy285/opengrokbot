@@ -280,6 +280,31 @@ final class MacVoiceAndSummaryTests: XCTestCase {
         XCTAssertEqual(VoiceText.nextChunk("Short", from: 0, final: true).chunk, "Short")
     }
 
+    func testFirstSpokenChunkFallsBackToAWordBoundaryForALongRunWithoutPunctuation() {
+        let text = "so here is a long stretch of words without any pause at all and it keeps going"
+        let eager = VoiceText.nextChunk(text, from: 0, final: false, eager: true)
+        XCTAssertFalse(eager.chunk.isEmpty)
+        XCTAssertTrue(text.hasPrefix(eager.chunk))
+        XCTAssertTrue(eager.chunk.hasSuffix(" "))
+        XCTAssertEqual(VoiceText.nextChunk("too short to start", from: 0, final: false, eager: true).chunk, "")
+    }
+
+    func testVoiceSpeedAndLanguageAreClampedAndFallBackToSafeValues() {
+        let defaults = UserDefaults.standard
+        let savedSpeed = defaults.object(forKey: "voiceSpeed"), savedLanguage = defaults.object(forKey: "voiceLanguage")
+        defer { defaults.set(savedSpeed, forKey: "voiceSpeed"); defaults.set(savedLanguage, forKey: "voiceLanguage") }
+        VoiceSettings.speed = 9
+        XCTAssertEqual(VoiceSettings.speed, 1.5)
+        VoiceSettings.speed = 0.1
+        XCTAssertEqual(VoiceSettings.speed, 0.75)
+        defaults.removeObject(forKey: "voiceSpeed")
+        XCTAssertEqual(VoiceSettings.speed, 1.0)
+        defaults.set("not-a-language", forKey: "voiceLanguage")
+        XCTAssertEqual(VoiceSettings.language, "auto")
+        VoiceSettings.language = "es-ES"
+        XCTAssertEqual(VoiceSettings.locale.identifier, "es-ES")
+    }
+
     func testGroqAndNVIDIANIMCanSpeakButNIMCannotListen() {
         XCTAssertTrue(VoiceProvider.speakers.contains(.groq))
         XCTAssertTrue(VoiceProvider.speakers.contains(.nvidiaNIM))
