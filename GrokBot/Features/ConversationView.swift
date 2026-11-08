@@ -48,7 +48,7 @@ struct ConversationView: View {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     if model.entries(for: bot).isEmpty { emptyConversation }
                     ForEach(model.entries(for: bot)) { entry in
-                        MessageRow(entry: entry, actions: messageActions(for: entry)).equatable().id(entry.id)
+                        MessageRow(entry: entry, canRetry: canRetryMessage(entry), online: remote.online, actions: messageActions(for: entry)).equatable().id(entry.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }.padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 24)
@@ -252,11 +252,11 @@ struct ConversationView: View {
         }.padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 4)
     }
 
+    private func canRetryMessage(_ entry: Entry) -> Bool { model.entries(for: bot).last?.id == entry.id && !remote.running.contains(bot.id) }
+
     private func messageActions(for entry: Entry) -> MessageActions {
         let current = bot
-        let last = model.entries(for: bot).last
         return MessageActions(
-            canRetry: last?.id == entry.id && !remote.running.contains(bot.id), online: remote.online,
             reply: {
                 let quoted = entry.text.split(separator: "\n", omittingEmptySubsequences: true).prefix(3).map { "> " + String($0.prefix(240)) }.joined(separator: "\n")
                 draft.wrappedValue = quoted + "\n\n" + draft.wrappedValue
@@ -326,21 +326,20 @@ private struct ChatScrollMetrics: Equatable {
     var bottom: CGFloat
 }
 
-/// What the long-press menu on a message can do. Compared by `canRetry` and `online` only, so closures never defeat the row's equality check.
-private struct MessageActions: Equatable {
-    var canRetry = false
-    var online = true
+/// What the long-press menu on a message can do. These closures are never compared: the row's equality uses only plain values.
+private struct MessageActions: @unchecked Sendable {
     var reply: () -> Void = {}
     var react: (String?) -> Void = { _ in }
     var retry: () -> Void = {}
     var delete: () -> Void = {}
-    static func == (lhs: MessageActions, rhs: MessageActions) -> Bool { lhs.canRetry == rhs.canRetry && lhs.online == rhs.online }
 }
 
 private struct MessageRow: View, Equatable {
     let entry: Entry
+    var canRetry = false
+    var online = true
     var actions = MessageActions()
-    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.entry == rhs.entry && lhs.actions == rhs.actions }
+    nonisolated static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.entry == rhs.entry && lhs.canRetry == rhs.canRetry && lhs.online == rhs.online }
     private var formattedText: AttributedString {
         (try? AttributedString(markdown: entry.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(entry.text)
     }
@@ -384,10 +383,10 @@ private struct MessageRow: View, Equatable {
                         ForEach(["👍", "👎", "❤️", "😂", "🎉", "🤔"], id: \.self) { emoji in
                             Button(entry.reaction == emoji ? "\(emoji)  Remove" : emoji) { actions.react(entry.reaction == emoji ? nil : emoji) }
                         }
-                    }.disabled(!actions.online)
-                    if entry.kind == .bot, actions.canRetry { Button("Retry", systemImage: "arrow.clockwise") { actions.retry() }.disabled(!actions.online) }
+                    }.disabled(!online)
+                    if entry.kind == .bot, canRetry { Button("Retry", systemImage: "arrow.clockwise") { actions.retry() }.disabled(!online) }
                     ShareLink(item: entry.text) { Label("Share text", systemImage: "square.and.arrow.up") }
-                    if entry.state != .streaming { Button("Delete message", systemImage: "trash", role: .destructive) { actions.delete() }.disabled(!actions.online) }
+                    if entry.state != .streaming { Button("Delete message", systemImage: "trash", role: .destructive) { actions.delete() }.disabled(!online) }
                 }
                 if entry.kind == .bot { Spacer(minLength: 26) }
             }
