@@ -8,7 +8,8 @@ async function request(key,suffix,{method='GET',body,fetcher=fetch}={}){
   const text=await response.text();if(text.length>4000000)throw new Error('Composio returned an unsupported response.');
   try{return JSON.parse(text);}catch{throw new Error('Composio returned an unsupported response.');}
 }
-const searchToolkit=require('./composio-search.cjs').TOOLKIT;
+// Kept in step with TOOLKIT in composio-search.cjs. Not required from there: this file is unpacked next to the MCP helper, which must stay self-contained.
+const searchToolkit='composio_search';
 async function create(key,userID,toolkits,options={}){
   // Composio's own search toolkit is always added so Bots can look things up without opening a browser. It needs no sign-in.
   const withSearch=toolkits.includes(searchToolkit)?toolkits:[...toolkits,searchToolkit];

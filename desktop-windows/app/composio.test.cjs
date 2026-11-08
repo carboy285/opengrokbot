@@ -27,3 +27,10 @@ test('all five MCP provider configs omit capability URLs on disk and argv, then 
     const visit=async dir=>{for(const item of await fs.readdir(dir,{withFileTypes:true})){const file=path.join(dir,item.name);if(item.isDirectory())await visit(file);else assert.ok(!(await fs.readFile(file,'utf8')).includes(url));}};await visit(directory);await config.cleanup();
   }}finally{await fs.rm(directory,{recursive:true,force:true});}
 });
+test('composio.cjs only requires files that are unpacked next to the MCP helper, and its search toolkit name matches',async()=>{
+  const source=await fs.readFile(path.join(__dirname,'composio.cjs'),'utf8');
+  const local=[...source.matchAll(/require\(['"](\.\/[^'"]+)['"]\)/g)].map(match=>match[1]);
+  assert.deepEqual(local,[],'composio.cjs must stay self-contained: the packaged helper cannot load other app files');
+  assert.ok(source.includes("'"+require('./composio-search.cjs').TOOLKIT+"'"));
+});
+
