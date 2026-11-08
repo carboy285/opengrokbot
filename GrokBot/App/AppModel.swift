@@ -164,6 +164,19 @@ final class AppModel: ObservableObject {
         return commit { $0.bots[index].hidden = hidden ? true : nil }
     }
 
+    /// Saves this Bot's voice choices (nil or empty goes back to the app-wide settings). Speed is kept between 0.75 and 1.5.
+    @discardableResult
+    func setVoice(_ voice: BotVoice?, for botID: UUID) -> Bool {
+        guard let index = workspace.bots.firstIndex(where: { $0.id == botID }) else { return false }
+        var clean = voice
+        if let speed = clean?.speed { clean?.speed = min(max(speed, 0.75), 1.5) }
+        if let code = clean?.language, !VoiceSettings.languages.contains(where: { $0.code == code }) { clean?.language = nil }
+        if let name = clean?.speaker, VoiceProvider(rawValue: name) == nil { clean?.speaker = nil }
+        let value = (clean?.isEmpty ?? true) ? nil : clean
+        guard workspace.bots[index].voice != value else { return true }
+        return commit { $0.bots[index].voice = value }
+    }
+
     @discardableResult
     func setUnread(_ unread: Bool, for botID: UUID) -> Bool {
         guard let index = workspace.bots.firstIndex(where: { $0.id == botID }), (workspace.bots[index].unread == true) != unread else { return false }

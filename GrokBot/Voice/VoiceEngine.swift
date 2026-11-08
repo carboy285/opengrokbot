@@ -40,25 +40,46 @@ enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum VoiceSettings {
+    /// Voice choices that apply only while one Bot's voice chat is open. They never overwrite the saved app-wide settings.
+    struct SessionOverride: Sendable, Equatable {
+        var speaker: VoiceProvider?
+        var speed: Double?
+        var language: String?
+        init(speaker: VoiceProvider? = nil, speed: Double? = nil, language: String? = nil) { self.speaker = speaker; self.speed = speed; self.language = language }
+        init(_ voice: BotVoice?) {
+            speaker = voice?.speaker.flatMap { VoiceProvider(rawValue: $0) }; speed = voice?.speed; language = voice?.language
+        }
+    }
+    private final class OverrideBox: @unchecked Sendable {
+        private let lock = NSLock(); private var stored: SessionOverride?
+        var value: SessionOverride? { get { lock.lock(); defer { lock.unlock() }; return stored } set { lock.lock(); stored = newValue; lock.unlock() } }
+    }
+    private static let overrideBox = OverrideBox()
+    static var sessionOverride: SessionOverride? { get { overrideBox.value } set { overrideBox.value = newValue } }
+
     static var transcriber: VoiceProvider {
         get { VoiceProvider(rawValue: UserDefaults.standard.string(forKey: "voiceTranscriber") ?? "") ?? .apple }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "voiceTranscriber") }
     }
     static var speaker: VoiceProvider {
-        get { VoiceProvider(rawValue: UserDefaults.standard.string(forKey: "voiceSpeaker") ?? "") ?? .apple }
+        get { sessionOverride?.speaker ?? storedSpeaker }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "voiceSpeaker") }
     }
+    /// The app-wide choice, ignoring any Bot's own voice. The settings screens show and save this one.
+    static var storedSpeaker: VoiceProvider { VoiceProvider(rawValue: UserDefaults.standard.string(forKey: "voiceSpeaker") ?? "") ?? .apple }
     /// How fast replies are spoken: 0.75x to 1.5x. Applies to the built-in voice and to cloud audio.
     static var speed: Double {
-        get { let value = UserDefaults.standard.double(forKey: "voiceSpeed"); return value == 0 ? 1.0 : min(max(value, 0.75), 1.5) }
+        get { min(max(sessionOverride?.speed ?? storedSpeed, 0.75), 1.5) }
         set { UserDefaults.standard.set(min(max(newValue, 0.75), 1.5), forKey: "voiceSpeed") }
     }
+    static var storedSpeed: Double { let value = UserDefaults.standard.double(forKey: "voiceSpeed"); return value == 0 ? 1.0 : min(max(value, 0.75), 1.5) }
     /// "auto" follows the system language; otherwise a BCP 47 code such as en-US. Used for listening and the built-in voice.
     static let languages: [(code: String, name: String)] = [("auto", "Auto-detect"), ("en-US", "English (US)"), ("en-GB", "English (UK)"), ("es-ES", "Spanish"), ("fr-FR", "French"), ("de-DE", "German"), ("it-IT", "Italian"), ("pt-BR", "Portuguese (Brazil)"), ("ja-JP", "Japanese"), ("ko-KR", "Korean"), ("zh-CN", "Chinese (Simplified)")]
     static var language: String {
-        get { let value = UserDefaults.standard.string(forKey: "voiceLanguage") ?? "auto"; return languages.contains { $0.code == value } ? value : "auto" }
+        get { let value = sessionOverride?.language ?? storedLanguage; return languages.contains { $0.code == value } ? value : "auto" }
         set { UserDefaults.standard.set(newValue, forKey: "voiceLanguage") }
     }
+    static var storedLanguage: String { let value = UserDefaults.standard.string(forKey: "voiceLanguage") ?? "auto"; return languages.contains { $0.code == value } ? value : "auto" }
     static var locale: Locale { language == "auto" ? Locale.current : Locale(identifier: language) }
     static let groqVoices = ["autumn", "diana", "hannah", "austin", "daniel", "troy"]
     static var groqVoice: String {
@@ -681,7 +702,8 @@ final class VoiceConversation: ObservableObject {
 
     private var stopReply: (() -> Void)?
 
-    func start(send: @escaping (String) async -> Bool, latestReply: @escaping () -> VoiceReply?, stopReply: (() -> Void)? = nil) async {
+    func start(botVoice: BotVoice? = nil, send: @escaping (String) async -> Bool, latestReply: @escaping () -> VoiceReply?, stopReply: (() -> Void)? = nil) async {
+        VoiceSettings.sessionOverride = botVoice.map { VoiceSettings.SessionOverride($0) }
         self.send = send; self.latestReply = latestReply; self.stopReply = stopReply
         session.onUtterance = { [weak self] text in self?.handle(text) }
         running = await session.begin()
@@ -691,6 +713,7 @@ final class VoiceConversation: ObservableObject {
         running = false; waiting?.cancel(); waiting = nil
         session.onUtterance = nil
         session.end()
+        VoiceSettings.sessionOverride = nil
     }
 
     private func handle(_ text: String) {

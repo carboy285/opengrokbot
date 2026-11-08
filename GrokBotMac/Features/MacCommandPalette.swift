@@ -68,7 +68,7 @@ struct MacCommandPalette: View {
                         ForEach(Array(list.enumerated()), id: \.element.id) { position, item in
                             Button { run(position) } label: {
                                 HStack(spacing: 12) {
-                                    if let bot = item.bot { MacBotAvatar(color: bot.color, size: 30, appearance: bot.appearance) }
+                                    if let bot = item.bot { MacBotAvatar(color: bot.color, size: 36, appearance: bot.appearance) }
                                     else { Image(systemName: item.symbol).font(.system(size: 14)).frame(width: 30, height: 30).background(MacTheme.panel, in: Circle()) }
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(item.title).font(.system(size: 15, weight: .medium)).lineLimit(1)

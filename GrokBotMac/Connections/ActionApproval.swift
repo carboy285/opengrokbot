@@ -42,7 +42,9 @@ final class MacApproval {
         return true
     }
 
-    func approve(title: String, detail: String, authenticate: Bool = false) async -> Bool {
+    /// `tool` and `target` let the human's rules answer without a dialog. A Touch ID request is never answered by a rule.
+    func approve(title: String, detail: String, authenticate: Bool = false, tool: String? = nil, target: String = "") async -> Bool {
+        if !authenticate, let tool, ApprovalRules.shared.decide(tool: tool, target: target) == .allow { return true }
         if let handler { return await handler(title, detail, authenticate) }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()

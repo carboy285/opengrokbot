@@ -136,7 +136,9 @@ final class MacDeviceActions {
     /// Returns nil when the change may go ahead. Adds and edits in a service the human marked as not asking go straight through;
     /// everything else (and every delete or send) needs the human to approve, which is impossible in an unattended run.
     private func gate(_ service: AppleService, always: Bool = false, title: String, detail: String, unattended: Bool) async -> String? {
-        if !always, apple.autoApproves(service) { return nil }
+        // Written rules come first: "Always ask" forces the dialog even where the app toggle says not to ask.
+        let rule = always ? ApprovalDecision.noRule : ApprovalRules.shared.decide(tool: service.rawValue, target: detail)
+        if !always, rule == .allow || (rule == .noRule && apple.autoApproves(service)) { return nil }
         guard !unattended else { return "This change needs the human to approve it, so it was skipped in this unattended run." }
         guard await approval.approve(title: title, detail: detail) else { return "The human declined this change." }
         return nil
@@ -289,9 +291,14 @@ final class MacDeviceActions {
             case .click(let target):
                 session.working = "\(bot.name) is looking for “\(target)”…"; await session.waitIfPaused()
                 let info = try await session.inspectClick(target)
-                if BrowserRisk.clickNeedsApproval(label: info.label, tag: info.tag, submitsForm: info.submits) {
-                    guard !unattended else { return "Clicking “\(info.label)” needs the human to approve it, so it was skipped in this unattended run." }
-                    guard await approval.approve(title: "Let \(bot.name) click “\(info.label)”?", detail: "Page: \(session.web.url?.host ?? "the current page")\n\nThis looks like something that sends, buys, posts or changes something. Approve only if you want it done.") else { return "The human declined to click “\(info.label)”." }
+                let site = session.web.url?.host ?? ""
+                let clickRule = ApprovalRules.shared.decide(tool: "browser_click", target: site)
+                if clickRule == .ask || BrowserRisk.clickNeedsApproval(label: info.label, tag: info.tag, submitsForm: info.submits) {
+                    // A written "Always ask" rule for this site forces the dialog even for clicks that would normally go through.
+                    do {
+                        guard !unattended else { return "Clicking “\(info.label)” needs the human to approve it, so it was skipped in this unattended run." }
+                        guard await approval.approve(title: "Let \(bot.name) click “\(info.label)”?", detail: "Page: \(site.isEmpty ? "the current page" : site)\n\nThis looks like something that sends, buys, posts or changes something. Approve only if you want it done.") else { return "The human declined to click “\(info.label)”." }
+                    }
                 }
                 session.working = "\(bot.name) is clicking “\(info.label)”…"; await session.waitIfPaused()
                 try await session.performClick(target)

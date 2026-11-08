@@ -15,6 +15,7 @@ struct MacBotInspectorView: View {
     @State private var files: [URL] = []
     @State private var fileError: String?
     @State private var editingAvatar = false
+    @State private var showProviders = false
     @State private var folderDraft = ""
     @State private var editingDetails = false
     @State private var nameDraft = ""
@@ -89,7 +90,7 @@ struct MacBotInspectorView: View {
             Button("Delete \(task.name)", role: .destructive) { _ = app.removeSchedule(task.id, botID: bot.id); routineToDelete = nil }
         } message: { _ in Text("Future runs will be removed from this Bot.") }
         .onChange(of: desktop.runningBots) { _, running in if !running.contains(bot.id), tab == .library { refreshFiles() } }
-        .onAppear { folderDraft = bot.folder ?? "" }
+        .onAppear { folderDraft = bot.folder ?? ""; showProviders = desktop.needsProvider(bot) }
         .onChange(of: bot.id) { _, _ in editingAvatar = false; editingDetails = false; creatingRoutine = false; editingRoutine = nil; folderDraft = bot.folder ?? "" }
     }
 
@@ -125,7 +126,7 @@ struct MacBotInspectorView: View {
                         }.buttonStyle(.plain)
                     }
                 }
-            } else { MacBotProviderSettingsView(bot: bot) }
+            }
             memoryCard
             InspectorCard(title: "Browser", footer: "Its own browser profile, in a window on this Mac.") {
                 Button("Open local browser", systemImage: "globe") {
@@ -133,7 +134,7 @@ struct MacBotInspectorView: View {
                 }.buttonStyle(InspectorButtonStyle())
             }
             MacBotVMControls(bot: bot)
-            MacVoiceCard()
+            MacVoiceCard(bot: bot)
             routinesCard
             InspectorCard(title: "Shared memory", footer: "Every Bot can see these. Remove anything that is out of date.") {
                 ForEach(app.workspace.sharedMemory ?? [], id: \.self) { item in
@@ -147,6 +148,13 @@ struct MacBotInspectorView: View {
                     TextField("Add something every Bot should know", text: $sharedDraft).textFieldStyle(.roundedBorder).font(.system(size: 12)).onSubmit(addShared)
                     Button("Add", action: addShared).buttonStyle(InspectorButtonStyle(compact: true)).disabled(sharedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+            }
+            if bot.memberIDs == nil {
+                DisclosureGroup(isExpanded: $showProviders) {
+                    MacBotProviderSettingsView(bot: bot).padding(.top, 10)
+                } label: {
+                    Text("Providers & models").font(.system(size: 13, weight: .semibold)).foregroundStyle(MacTheme.secondary)
+                }.padding(.horizontal, 4)
             }
         }
     }
@@ -186,7 +194,7 @@ struct MacBotInspectorView: View {
     }
 
     private var routinesCard: some View {
-        InspectorCard(title: "Routines", footer: "Ask the Bot to run a task at a set time, repeat it hourly, daily or weekly, or run it when another Bot messages it. The app must be running; missed runs catch up once.") {
+        InspectorCard(title: "Routines", footer: "You can also ask in chat to add one. A routine runs at a set time, repeats hourly, daily or weekly, or runs when another Bot messages it. The app must be running; missed runs catch up once.") {
             Button("Create routine…") { editingRoutine = nil; routineName = ""; routineInstruction = ""; routineDate = Date().addingTimeInterval(3600); routineZone = TimeZone.current.identifier; routineRepeat = "none"; routineTrigger = "time"; routineContains = ""; creatingRoutine = true }
                 .buttonStyle(InspectorButtonStyle())
             if creatingRoutine {

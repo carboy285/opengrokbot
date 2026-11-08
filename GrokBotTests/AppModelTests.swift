@@ -29,6 +29,33 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testReactionVoiceHiddenAndUnreadSurviveRelaunch() throws {
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = AppModel(store: store); model.enterPreview()
+        XCTAssertTrue(model.addBot(name: "Voice test", purpose: "Help", color: "purple"))
+        let bot = try XCTUnwrap(model.workspace.bots.last)
+        let noteID = UUID()
+        XCTAssertTrue(model.addNote("Hello", to: bot, id: noteID))
+        let entry = try XCTUnwrap(model.workspace.entries.first { $0.id == noteID })
+        XCTAssertTrue(model.setReaction("👍", for: entry.id))
+        XCTAssertFalse(model.setReaction("this is far too long to be one emoji", for: entry.id))
+        XCTAssertTrue(model.setVoice(BotVoice(speaker: "groq", speed: 9, language: "es-ES"), for: bot.id))
+        XCTAssertTrue(model.setHidden(true, for: bot))
+        XCTAssertTrue(model.setUnread(true, for: bot.id))
+        let reopened = AppModel(store: store); reopened.enterPreview()
+        XCTAssertEqual(reopened.workspace.entries.first { $0.id == entry.id }?.reaction, "👍")
+        let restored = try XCTUnwrap(reopened.workspace.bots.first { $0.id == bot.id })
+        XCTAssertEqual(restored.voice, BotVoice(speaker: "groq", speed: 1.5, language: "es-ES"), "Speed is clamped to 1.5")
+        XCTAssertEqual(restored.hidden, true)
+        XCTAssertEqual(restored.unread, true)
+        XCTAssertTrue(reopened.setVoice(BotVoice(speaker: "not-a-provider", speed: nil, language: "xx"), for: bot.id))
+        XCTAssertNil(reopened.workspace.bots.first { $0.id == bot.id }?.voice, "Unknown values are dropped, leaving the app default")
+        XCTAssertTrue(reopened.setReaction(nil, for: entry.id))
+        XCTAssertNil(reopened.workspace.entries.first { $0.id == entry.id }?.reaction)
+    }
+
+    @MainActor
     func testDetailsPreserveMemoryAndRejectDuplicateNames() throws {
         let store = temporaryStore()
         defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }

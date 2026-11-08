@@ -46,7 +46,7 @@ struct MacConnectAppsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     if showsMacSection { macSection }
-                    if category != Self.onThisMac { MacComposioSetupView(service: desktop.composio, query: query, category: category) }
+                    if category != Self.onThisMac { MacComposioSetupView(service: desktop.composio, query: query, category: category, viewAll: { category = $0 }) }
                 }.frame(maxWidth: 780, alignment: .leading).padding(.vertical, 8).frame(maxWidth: .infinity)
             }
         }.padding(36)
@@ -87,6 +87,16 @@ struct MacConnectAppsView: View {
 private struct ConnectedBadge: View {
     @ObservedObject var service: ComposioModel
     var body: some View {
-        if service.connectedCount > 0 { Label("\(service.connectedCount) connected", systemImage: "link").font(.system(size: 13)).foregroundStyle(MacTheme.secondary) }
+        if service.connectedCount > 0 {
+            HStack(spacing: 8) {
+                HStack(spacing: -8) {
+                    ForEach(Array(service.toolkits.filter { $0.connected || $0.is_no_auth }.prefix(4)), id: \.slug) { toolkit in
+                        Image(systemName: ComposioCatalog.app(toolkit.slug)?.symbol ?? "app").font(.system(size: 11))
+                            .frame(width: 26, height: 26).background(MacTheme.panel, in: Circle()).overlay(Circle().stroke(MacTheme.canvas, lineWidth: 2))
+                    }
+                }.accessibilityHidden(true)
+                Text("\(service.connectedCount) connected").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+            }
+        }
     }
 }

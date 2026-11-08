@@ -197,6 +197,46 @@ final class MacConnectionsTests: XCTestCase {
         XCTAssertFalse(MacDeviceActions.actionNames.contains("vm_exec"))
     }
 
+    func testApprovalRulesAllowSkipsThePromptAndAlwaysAskForcesIt() async throws {
+        let suite = "org.opengrokbot.tests.rules." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let rules = ApprovalRules(defaults: defaults)
+        XCTAssertEqual(rules.decide(tool: "calendar", target: "Dentist"), .noRule)
+        XCTAssertTrue(rules.add(kind: .allow, tool: "calendar", pattern: ""))
+        XCTAssertEqual(rules.decide(tool: "calendar", target: "Dentist"), .allow)
+        XCTAssertTrue(rules.add(kind: .ask, tool: "calendar", pattern: "dentist"))
+        XCTAssertEqual(rules.decide(tool: "calendar", target: "Dentist at 3"), .ask, "Always ask beats allow")
+        XCTAssertEqual(rules.decide(tool: "calendar", target: "Lunch"), .allow)
+        XCTAssertFalse(rules.add(kind: .ask, tool: "calendar", pattern: "DENTIST"), "No duplicates")
+        XCTAssertFalse(rules.add(kind: .allow, tool: "browser_click", pattern: "shop.example"), "Clicks can only be set to always ask")
+        XCTAssertTrue(rules.add(kind: .ask, tool: "browser_click", pattern: "shop.example"))
+        XCTAssertEqual(rules.decide(tool: "browser_click", target: "shop.example.com"), .ask)
+        XCTAssertFalse(rules.add(kind: .allow, tool: "secure_login", pattern: ""), "Saved logins can never be allowed")
+        XCTAssertFalse(rules.add(kind: .allow, tool: "mail_send", pattern: ""))
+        XCTAssertEqual(ApprovalRules(defaults: defaults).rules.count, 3, "Rules persist")
+        rules.setEnabled(false)
+        XCTAssertEqual(rules.decide(tool: "calendar", target: "Lunch"), .noRule)
+        XCTAssertFalse(ApprovalRules(defaults: defaults).enabled)
+        rules.setEnabled(true)
+
+        let approval = MacApproval(), log = ApprovalLog()
+        approval.handler = { title, detail, authenticate in log.items.append((title, detail, authenticate)); return true }
+        ApprovalRules.shared.setEnabled(true)
+        let saved = ApprovalRules.shared.rules
+        defer { for rule in ApprovalRules.shared.rules where !saved.contains(rule) { ApprovalRules.shared.remove(rule.id) } }
+        let marker = "zz-test-" + UUID().uuidString.prefix(6)
+        XCTAssertTrue(ApprovalRules.shared.add(kind: .allow, tool: "notes", pattern: marker))
+        let skipped = await approval.approve(title: "Add a note", detail: marker, tool: "notes", target: marker)
+        XCTAssertTrue(skipped); XCTAssertTrue(log.items.isEmpty, "An allow rule skips the dialog")
+        let touchID = await approval.approve(title: "Sign in", detail: marker, authenticate: true, tool: "notes", target: marker)
+        XCTAssertTrue(touchID); XCTAssertEqual(log.items.count, 1, "A Touch ID request is never answered by a rule")
+        _ = await approval.approve(title: "Other note", detail: "unrelated", tool: "notes", target: "unrelated")
+        XCTAssertEqual(log.items.count, 2, "Targets that match no rule still ask")
+        XCTAssertTrue(ApprovalRules.shared.add(kind: .ask, tool: "notes", pattern: marker))
+        _ = await approval.approve(title: "Add a note", detail: marker, tool: "notes", target: marker)
+        XCTAssertEqual(log.items.count, 3, "An always-ask rule forces the dialog")
+    }
+
     func testDisabledServicesAndWritesAreRefusedWithoutPrompting() async throws {
         let suite = "org.opengrokbot.tests.apple." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
@@ -278,6 +318,31 @@ final class MacVoiceAndSummaryTests: XCTestCase {
         let sentence = VoiceText.nextChunk("Hello there. And more", from: 0, final: false, eager: true)
         XCTAssertEqual(sentence.chunk, "Hello there.")
         XCTAssertEqual(VoiceText.nextChunk("Short", from: 0, final: true).chunk, "Short")
+    }
+
+    func testTeachRecordingMergesClicksHidesSecretsAndBuildsAnInstruction() {
+        var recording = TeachRecording()
+        recording.opened("Safari"); recording.opened("Safari")
+        recording.clicked(in: "Safari"); recording.clicked(in: "Safari"); recording.clicked(in: "Safari")
+        recording.typed("quarterly report", markedSecret: false)
+        recording.typed("hunter2", markedSecret: true)
+        recording.typed("my password is swordfish", markedSecret: false)
+        recording.noted("sk-abcdef0123456789abcdef0123456789")
+        recording.noted("Then press Export")
+        recording.opened("Numbers")
+        XCTAssertEqual(recording.steps, [.open(app: "Safari"), .click(app: "Safari", count: 3), .type(text: "quarterly report"), .secret, .secret, .secret, .note("Then press Export"), .open(app: "Numbers")])
+        let lines = recording.steps.map(\.line)
+        XCTAssertFalse(lines.joined().contains("hunter2") || lines.joined().contains("swordfish") || lines.joined().contains("sk-abc"))
+        let text = TeachRecording.instruction(title: "Weekly report", lines: lines)
+        XCTAssertTrue(text.hasPrefix("Task “Weekly report”."))
+        XCTAssertTrue(text.contains("1. Open Safari."))
+        XCTAssertTrue(text.contains("2. Click in Safari (3 times)."))
+        XCTAssertLessThanOrEqual(text.count, 1900)
+        var full = TeachRecording()
+        for index in 0..<200 { full.opened("App \(index)") }
+        XCTAssertEqual(full.steps.count, TeachRecording.maxSteps)
+        XCTAssertFalse(TeachRecording.looksSecret("Open the report and send it"))
+        XCTAssertTrue(TeachRecording.looksSecret("4111 1111 1111 1111"))
     }
 
     func testFirstSpokenChunkFallsBackToAWordBoundaryForALongRunWithoutPunctuation() {

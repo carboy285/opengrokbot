@@ -114,7 +114,7 @@
 .inspector-body summary { cursor:pointer; }
 .inspector-body .empty-state, .inspector-body .empty { text-align:center; }
 
-/* 0.9.0 visual pass: quieter sidebar, narrower reading column, calmer composer */
+/* 0.8.6 visual pass: quieter sidebar, narrower reading column, calmer composer */
 #folder-filter{display:none}
 .sidebar footer{display:flex;flex-direction:column;gap:8px}
 .sidebar footer .footer-actions{display:flex;align-items:center;gap:10px}

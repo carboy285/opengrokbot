@@ -184,10 +184,10 @@ struct VoiceWaveform: View {
 struct VoiceSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var transcriber = VoiceSettings.transcriber
-    @State private var speaker = VoiceSettings.speaker
+    @State private var speaker = VoiceSettings.storedSpeaker
     @State private var talkOver = VoiceSettings.allowTalkOver
-    @State private var speed = VoiceSettings.speed
-    @State private var language = VoiceSettings.language
+    @State private var speed = VoiceSettings.storedSpeed
+    @State private var language = VoiceSettings.storedLanguage
     @State private var voiceID = VoiceSettings.elevenLabsVoiceID
     @State private var groqVoice = VoiceSettings.groqVoice
     @State private var nimURL = VoiceSettings.nimBaseURL

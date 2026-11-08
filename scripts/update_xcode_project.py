@@ -71,7 +71,7 @@ reference(ios_entitlements, 'text.plist.entitlements')
 add_to_group(uid('appgroup'), [uid(ios_entitlements)])
 for configuration in ('Debug','Release'):
     objects[uid('app'+configuration)]['buildSettings']['CODE_SIGN_ENTITLEMENTS'] = ios_entitlements
-    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.9.0'
+    objects[uid('app'+configuration)]['buildSettings']['MARKETING_VERSION'] = '0.8.6'
     objects[uid('app'+configuration)]['buildSettings']['CURRENT_PROJECT_VERSION'] = '15'
 
 mac_sources = sorted(str(p.relative_to(ROOT)) for p in (ROOT/'GrokBotMac').rglob('*.swift'))

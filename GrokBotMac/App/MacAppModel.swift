@@ -42,6 +42,7 @@ final class MacAppModel: ObservableObject {
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
     @Published var showSearch = false
+    let teach = MacTeachRecorder()
     @Published var showPalette = false
     @Published var showMirror = false
     /// Non-nil while the main window is showing another computer on this account instead of this Mac.

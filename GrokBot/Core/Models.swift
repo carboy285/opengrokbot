@@ -20,6 +20,15 @@ struct Bot: Identifiable, Codable, Hashable, Sendable {
     var hidden: Bool? = nil
     /// Marked unread by the human; cleared when the Bot is opened.
     var unread: Bool? = nil
+    /// This Bot's own voice choices. Anything left empty follows the app-wide voice settings.
+    var voice: BotVoice? = nil
+}
+
+struct BotVoice: Codable, Hashable, Sendable {
+    var speaker: String? = nil
+    var speed: Double? = nil
+    var language: String? = nil
+    var isEmpty: Bool { speaker == nil && speed == nil && language == nil }
 }
 
 struct BotAppearance: Codable, Hashable, Sendable {

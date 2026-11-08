@@ -5,6 +5,8 @@ struct MacComposioSetupView: View {
     @ObservedObject var service: ComposioModel
     var query = ""
     var category: String?
+    /// Called when "View all" is pressed on a category section.
+    var viewAll: ((String) -> Void)?
     @State private var projectKey = ""
 
     private var filtering: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty || category != nil }
@@ -18,7 +20,7 @@ struct MacComposioSetupView: View {
                 else { section("Results", results) }
             } else {
                 section("Recommended for you", ComposioCatalog.recommended.compactMap(ComposioCatalog.app))
-                ForEach(ComposioCatalog.categories, id: \.self) { name in section(name, ComposioCatalog.filter(query: "", category: name)) }
+                ForEach(ComposioCatalog.categories, id: \.self) { name in section(name, ComposioCatalog.filter(query: "", category: name), limit: 4, viewAllCategory: name) }
             }
             if let feedback = service.feedback { Text(feedback).font(.system(size: 14)).lineSpacing(4).foregroundStyle(MacTheme.secondary) }
             if service.configured { footer }
@@ -67,12 +69,19 @@ struct MacComposioSetupView: View {
     }
 
     // MARK: Catalog
-    @ViewBuilder private func section(_ title: String, _ apps: [CatalogApp]) -> some View {
+    @ViewBuilder private func section(_ title: String, _ apps: [CatalogApp], limit: Int? = nil, viewAllCategory: String? = nil) -> some View {
         if !apps.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text(title).font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+                HStack {
+                    Text(title).font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+                    Spacer()
+                    if let limit, let viewAllCategory, apps.count > limit, let viewAll {
+                        Button("View all (\(apps.count))") { viewAll(viewAllCategory) }.buttonStyle(.plain).font(.system(size: 13, weight: .medium)).foregroundStyle(MacTheme.secondary)
+                            .accessibilityLabel("View all \(title) apps")
+                    }
+                }
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    ForEach(apps) { app in card(app) }
+                    ForEach(limit.map { Array(apps.prefix($0)) } ?? apps) { app in card(app) }
                 }
             }
         }

@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.9.0/ --output=artifacts/OpenGrokBot-0.9.0-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.8.6/ --output=artifacts/OpenGrokBot-0.8.6-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,7 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
-          0.9.0: a visual pass, a Grok-Bot-style set of screens, and much faster voice. Look: a narrower chat column with 16 pt text, a calmer sidebar (one hero Bot, pinned Bots first, a footer with your profile, Connect apps and an update arrow), a taller pill message box with a plain + and a mic for dictation, and an Accent setting. Find things fast: ⌘K or ⌘F opens a command palette that searches Bots and runs New Bot, New group chat, Computers, Settings and Keyboard shortcuts. Bot rows have a menu to rename, pin, mark unread, hide and delete, and hovering a message shows Reply, React (👍 👎 ❤️ 😂 🎉 🤔), Copy, Retry and Delete. New Bot is a small dialog with a shape and colour picker. Settings: a Permissions page shows what Bots may do without asking (deleting, sending, saved logins and unattended routines always ask) and Bot details has a Voice chat card with voice, speed and language. Voice is faster: replies start speaking after about 14 characters instead of 24 or at the last whole word of a long run, the app stops waiting for you sooner (0.4 to 0.6 seconds of quiet instead of 0.9), reply checks run every 40 ms, up to three speech clips are fetched at once over a kept-open connection, ElevenLabs uses a smaller audio format, and there is a speaking speed slider (0.75× to 1.5×) on Mac, iPhone and Windows, plus a voice language on Apple devices. Windows gets the same sidebar, message box and voice speed-ups. Not in this release: Windows dictation, iPhone layout changes, a Teach a task recorder, cloud runner and widgets. Nothing here has been tried on real devices yet.
+          0.8.6: a visual pass, a Grok-Bot-style set of screens, and much faster voice. Look: a narrower chat column with 16 pt text, a calmer sidebar (one hero Bot, pinned Bots first, a footer with your profile, Connect apps and an update arrow), a taller pill message box with a plain + and a mic for dictation, and an Accent setting. Find things fast: ⌘K or ⌘F opens a command palette that searches Bots and runs New Bot, New group chat, Computers, Settings and Keyboard shortcuts. Bot rows have a menu to rename, pin, mark unread, hide and delete, and hovering a message shows Reply, React (👍 👎 ❤️ 😂 🎉 🤔), Copy, Retry and Delete. New Bot is a small dialog with a shape and colour picker. Settings: a Permissions page shows what Bots may do without asking (deleting, sending, saved logins and unattended routines always ask) and Bot details has a Voice chat card with voice, speed and language. Voice is faster: replies start speaking after about 14 characters instead of 24 or at the last whole word of a long run, the app stops waiting for you sooner (0.4 to 0.6 seconds of quiet instead of 0.9), reply checks run every 40 ms, up to three speech clips are fetched at once over a kept-open connection, ElevenLabs uses a smaller audio format, and there is a speaking speed slider (0.75× to 1.5×) on Mac, iPhone and Windows, plus a voice language on Apple devices. Windows gets the same sidebar, message box and voice speed-ups. Not in this release: Windows dictation, iPhone layout changes, a Teach a task recorder, cloud runner and widgets. Nothing here has been tried on real devices yet.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
@@ -137,6 +137,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.9.0" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.6" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.9.0 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.9.0 · Calmer, quicker, faster voice' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.8.6 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.6 · Calmer, quicker, faster voice' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

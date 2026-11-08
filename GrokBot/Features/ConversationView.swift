@@ -270,6 +270,7 @@ struct ConversationView: View {
         let current = bot
         Task {
             await voice.start(
+                botVoice: current.voice,
                 send: { text in await remote.send(text, bot: current) },
                 latestReply: {
                     guard let entry = model.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }

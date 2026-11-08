@@ -116,6 +116,7 @@ struct MacConversationView: View {
                     }.padding(.horizontal, 4)
                 }.font(.caption)
             }
+            MacTeachBar(bot: bot, teach: desktop.teach)
             HStack(alignment: .bottom, spacing: 11) {
                 Button { showActions.toggle() } label: {
                     Image(systemName: "plus").font(.system(size: 18, weight: .regular))
@@ -228,6 +229,7 @@ struct MacConversationView: View {
         let current = bot, model = desktop, workspace = app
         Task {
             await voice.start(
+                botVoice: current.voice,
                 send: { text in model.send(text, to: current, app: workspace) },
                 latestReply: {
                     guard let entry = workspace.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
@@ -255,6 +257,12 @@ struct MacConversationView: View {
             ComposerActionRow(title: "Paste image", icon: "photo.on.clipboard", disabled: attachDisabled, tint: tint) {
                 showActions = false
                 desktop.pasteAttachments(from: .general, for: bot)
+            }
+            if desktop.gateway == nil, bot.memberIDs == nil {
+                ComposerActionRow(title: desktop.teach.recording ? "Recording…" : "Teach a task", icon: "record.circle", disabled: desktop.teach.recording, tint: .red) {
+                    showActions = false
+                    desktop.teach.start(for: bot.id)
+                }
             }
             Divider().padding(.vertical, 4)
             ComposerActionRow(title: "Export conversation…", icon: "square.and.arrow.up", disabled: false, tint: tint) {
