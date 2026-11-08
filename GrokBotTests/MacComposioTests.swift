@@ -306,6 +306,38 @@ final class MacConnectionsTests: XCTestCase {
         XCTAssertNil(handoff.request)
     }
 
+    func testVMInputRunsXdotoolThroughAFixedLauncherAndKeepsTextSeparate() {
+        let typed = VMInput.type("p@ss; rm -rf / $(x)")
+        XCTAssertEqual(typed?.prefix(5).map { $0 }, ["/bin/sh", "-c", typed?[2] ?? "", "sh", "xdotool"])
+        XCTAssertFalse((typed?[2] ?? "").contains("rm -rf"), "The script never contains the text")
+        XCTAssertEqual(typed?.last, "p@ss; rm -rf / $(x)"); XCTAssertLessThanOrEqual(typed?.count ?? 99, 16)
+        XCTAssertEqual(VMInput.click(x: 10, y: 20)?.dropFirst(5).map { $0 }, ["mousemove", "10", "20", "click", "1"])
+        XCTAssertNil(VMInput.click(x: -1, y: 5)); XCTAssertNil(VMInput.click(x: 99999, y: 5))
+        XCTAssertNil(VMInput.type("")); XCTAssertNil(VMInput.type("a\0b"))
+        XCTAssertEqual(VMInput.type(String(repeating: "x", count: 900))?.last?.count, 500)
+        XCTAssertEqual(VMInput.key("Return")?.dropFirst(5).map { $0 }, ["key", "Return"]); XCTAssertNil(VMInput.key("ctrl+alt+Delete"))
+        XCTAssertTrue(VMInput.geometry.contains("getdisplaygeometry"))
+        let size = VMInput.parseGeometry("Linux guest exit 0:\n1920 1080\n")
+        XCTAssertEqual(size?.0, 1920); XCTAssertEqual(size?.1, 1080)
+        XCTAssertNil(VMInput.parseGeometry("Linux guest exit 1:\nxdotool: not found"))
+    }
+
+    @MainActor
+    func testHandoffClicksAreScaledToTheGuestScreenAndReportMissingTools() async throws {
+        let handoff = MacVMHandoff()
+        var sent: [[String]] = []
+        handoff.inputRunner = { argv in sent.append(argv); return argv.contains("getdisplaygeometry") ? "Linux guest exit 0:\n1000 500\n" : "Linux guest exit 0:\n" }
+        let waiting = Task { await handoff.ask(botName: "Fantasy", reason: "Log in") }
+        for _ in 0..<100 where handoff.request == nil { try await Task.sleep(for: .milliseconds(20)) }
+        await handoff.click(fx: 0.5, fy: 0.25)
+        XCTAssertEqual(sent.last?.dropFirst(5).map { $0 }, ["mousemove", "500", "125", "click", "1"])
+        await handoff.type("hello"); XCTAssertEqual(sent.last?.last, "hello")
+        handoff.inputRunner = { _ in "Linux guest exit 127:\nsh: xdotool: not found" }
+        await handoff.press("Tab")
+        XCTAssertTrue(handoff.note?.contains("xdotool") ?? false)
+        handoff.finish(.done); _ = await waiting.value
+    }
+
     func testVMCommandsAndResultsSurviveTheRelayEncoding() throws {
         let id = UUID(), vm = UUID()
         let sent = RemoteCommand(requestID: id, action: "vm_exec", botID: vm, argv: ["/bin/ls", "/home"])

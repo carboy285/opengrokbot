@@ -756,10 +756,15 @@ function renderVMHandoff(request) {
   const back = node('div', 'palette-backdrop'); back.id = 'vm-handoff';
   const box = node('div', 'palette-box handoff-box'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', `${request.botName} needs you in the VM`);
   const shot = node('div', 'handoff-shot'), note = node('p', 'muted', '');
-  const refresh = async () => { try { const preview = await result(bridge.vmHandoffPreview()); if (preview?.imageData) { const img = node('img'); img.alt = 'The VM screen'; img.src = 'data:image/jpeg;base64,' + preview.imageData; shot.replaceChildren(img); note.textContent = ''; } } catch (error) { note.textContent = error.message; } };
+  const refresh = async () => { try { const preview = await result(bridge.vmHandoffPreview()); if (preview?.imageData) { const img = node('img'); img.alt = 'The VM screen. Click to click in the VM.'; img.src = 'data:image/jpeg;base64,' + preview.imageData; img.style.cursor = 'crosshair'; img.addEventListener('click', event => { const box = img.getBoundingClientRect(); sendInput({ kind: 'click', fx: (event.clientX - box.left) / box.width, fy: (event.clientY - box.top) / box.height }); }); shot.replaceChildren(img); note.textContent = ''; } } catch (error) { note.textContent = error.message; } };
   const finish = outcome => { clearInterval(handoffTimer); handoffTimer = null; back.remove(); bridge.vmHandoffDone(request.id, outcome); };
+  let sending = false;
+  const sendInput = async payload => { if (sending) return; sending = true; note.textContent = 'Sending…'; try { await result(bridge.vmHandoffInput(payload)); note.textContent = ''; } catch (error) { note.textContent = error.message; } sending = false; refresh(); };
+  const typed = node('input', 'field'); typed.placeholder = 'Type into the VM'; typed.setAttribute('aria-label', 'Type into the VM');
+  typed.addEventListener('keydown', event => { if (event.key === 'Enter' && typed.value) { event.preventDefault(); const text = typed.value; typed.value = ''; sendInput({ kind: 'type', text }); } });
+  const keys = append(node('div', 'panel-bottom'), button('Type', () => { if (!typed.value) return; const text = typed.value; typed.value = ''; sendInput({ kind: 'type', text }); }), ...[['↩', 'Return'], ['Tab', 'Tab'], ['Esc', 'Escape'], ['⌫', 'BackSpace']].map(([label, name]) => button(label, () => sendInput({ kind: 'key', key: name }))));
   shot.append(node('p', 'muted', 'The VM screen appears here when it can be shown. Use Open VM to work in it.'));
-  append(box, node('h2', '', `${request.botName} needs you in the VM`), node('p', 'muted', request.reason), shot, note,
+  append(box, node('h2', '', `${request.botName} needs you in the VM`), node('p', 'muted', request.reason), shot, typed, keys, node('p', 'muted', 'Click the picture to click in the VM; type above. Each action takes a moment. Clicking and typing need xdotool and an Xorg desktop session in the VM (Ubuntu: sudo apt install xdotool, and sign in with “Ubuntu on Xorg”).'), note,
     append(node('div', 'panel-bottom'),
       button('Open VM', async () => { try { note.textContent = await result(bridge.vmHandoffOpen()); } catch (error) { note.textContent = error.message; } }),
       button('Cancel task', () => finish('cancelled')),

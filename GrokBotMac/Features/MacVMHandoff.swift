@@ -1,6 +1,31 @@
 import AppKit
 import SwiftUI
 
+/// Clicks, typing and keys sent into the VM by running xdotool inside it, through the same guest-command channel Bots use.
+/// Needs xdotool and an Xorg (not Wayland) desktop session in the VM.
+enum VMInput {
+    static let keys = ["Return", "Tab", "Escape", "BackSpace", "Up", "Down", "Left", "Right"]
+    /// Finds the logged-in desktop's display and permission file, then runs xdotool with the arguments after it. Nothing is spliced into the script.
+    private static let launcher = "export DISPLAY=:0; for f in /run/user/*/gdm/Xauthority /home/*/.Xauthority /root/.Xauthority; do if [ -f \"$f\" ]; then export XAUTHORITY=\"$f\"; break; fi; done; exec \"$@\""
+    private static func run(_ words: [String]) -> [String] { ["/bin/sh", "-c", launcher, "sh", "xdotool"] + words }
+    static var geometry: [String] { run(["getdisplaygeometry"]) }
+    static func click(x: Int, y: Int) -> [String]? { x >= 0 && y >= 0 && x < 20000 && y < 20000 ? run(["mousemove", String(x), String(y), "click", "1"]) : nil }
+    static func type(_ text: String) -> [String]? {
+        let clean = String(text.prefix(500))
+        guard !clean.isEmpty, !clean.contains("\0") else { return nil }
+        return run(["type", "--delay", "30", "--", clean])
+    }
+    static func key(_ name: String) -> [String]? { keys.contains(name) ? run(["key", name]) : nil }
+    /// "Linux guest exit 0:\n1920 1080" becomes (1920, 1080).
+    static func parseGeometry(_ output: String) -> (Int, Int)? {
+        let numbers = output.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        guard numbers.count >= 2 else { return nil }
+        let tail = Array(numbers.suffix(2))
+        return tail[0] > 100 && tail[1] > 100 ? (tail[0], tail[1]) : nil
+    }
+    static let needsNote = "Clicking and typing need xdotool and an Xorg desktop session in the VM (Ubuntu: sudo apt install xdotool, and sign in with “Ubuntu on Xorg”)."
+}
+
 /// A Bot asking the human to use the shared VM themselves (to sign in, pick something, and so on) and then carry on.
 struct VMHandoffRequest: Identifiable, Equatable {
     let id = UUID()
@@ -31,6 +56,10 @@ final class MacVMHandoff: ObservableObject {
     /// Set by the app: a picture of the shared VM's screen, and a way to open its console for the human.
     var previewLoader: (@MainActor () async throws -> Data?)?
     var opener: (@MainActor () async throws -> String)?
+    /// Set by the app: runs a guest command in the shared VM (wherever it is) and returns what it printed.
+    var inputRunner: (@MainActor ([String]) async throws -> String)?
+    @Published private(set) var sending = false
+    private var guestSize: (Int, Int)?
     private var continuation: CheckedContinuation<VMHandoffOutcome, Never>?
     private var timeout: Task<Void, Never>?
     static let waitLimit: Duration = .seconds(1800)
@@ -40,7 +69,7 @@ final class MacVMHandoff: ObservableObject {
         while request != nil { try? await Task.sleep(for: .milliseconds(400)) }
         let clean = String(reason.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400))
         request = VMHandoffRequest(botName: botName, reason: clean.isEmpty ? "It needs you to use the VM." : clean)
-        preview = nil; note = nil
+        preview = nil; note = nil; guestSize = nil
         let outcome: VMHandoffOutcome = await withCheckedContinuation { continuation in
             self.continuation = continuation
             timeout = Task { [weak self] in
@@ -55,7 +84,7 @@ final class MacVMHandoff: ObservableObject {
     func finish(_ outcome: VMHandoffOutcome) {
         timeout?.cancel(); timeout = nil
         let waiting = continuation; continuation = nil
-        request = nil; preview = nil
+        request = nil; preview = nil; guestSize = nil
         waiting?.resume(returning: outcome)
     }
 
@@ -66,6 +95,44 @@ final class MacVMHandoff: ObservableObject {
         } catch { note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
     }
 
+    /// A click on the picture of the VM screen, as fractions (0...1) of its width and height.
+    func click(fx: Double, fy: Double) async {
+        guard !sending else { return }
+        sending = true; defer { sending = false }
+        do {
+            let size = try await guestScreenSize()
+            guard let argv = VMInput.click(x: Int((fx * Double(size.0)).rounded()), y: Int((fy * Double(size.1)).rounded())) else { return }
+            _ = try await send(argv)
+            note = nil
+        } catch { note = message(error) }
+        await refreshPreview()
+    }
+    func type(_ text: String) async {
+        guard !sending, let argv = VMInput.type(text) else { return }
+        sending = true; defer { sending = false }
+        do { _ = try await send(argv); note = nil } catch { note = message(error) }
+        await refreshPreview()
+    }
+    func press(_ key: String) async {
+        guard !sending, let argv = VMInput.key(key) else { return }
+        sending = true; defer { sending = false }
+        do { _ = try await send(argv); note = nil } catch { note = message(error) }
+        await refreshPreview()
+    }
+    private func guestScreenSize() async throws -> (Int, Int) {
+        if let guestSize { return guestSize }
+        let output = try await send(VMInput.geometry)
+        guard let size = VMInput.parseGeometry(output) else { throw CloudError.message("The VM screen size could not be read. " + VMInput.needsNote) }
+        guestSize = size; return size
+    }
+    private func send(_ argv: [String]) async throws -> String {
+        guard let inputRunner else { throw CloudError.message("Open the VM from Settings → Computer to use it.") }
+        let output = try await inputRunner(argv)
+        if output.contains("exit 1") || output.localizedCaseInsensitiveContains("Can't open display") || output.localizedCaseInsensitiveContains("not found") { throw CloudError.message(VMInput.needsNote) }
+        return output
+    }
+    private func message(_ error: Error) -> String { (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+
     func openConsole() async {
         guard let opener else { return }
         do { note = try await opener() } catch { note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
@@ -74,6 +141,8 @@ final class MacVMHandoff: ObservableObject {
 
 struct MacVMHandoffOverlay: View {
     @ObservedObject var handoff: MacVMHandoff
+    @State private var typed = ""
+    private func sendTyped() { let text = typed; typed = ""; Task { await handoff.type(text) } }
 
     var body: some View {
         if let request = handoff.request {
@@ -87,9 +156,28 @@ struct MacVMHandoffOverlay: View {
                     Text(request.reason).font(.system(size: 14)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
                     ZStack {
                         RoundedRectangle(cornerRadius: 12).fill(MacTheme.canvas)
-                        if let image = handoff.preview { Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 12)) }
+                        if let image = handoff.preview {
+                            GeometryReader { box in
+                                let ratio = image.size.width / max(image.size.height, 1)
+                                let width = min(box.size.width, box.size.height * ratio), height = width / max(ratio, 0.01)
+                                Image(nsImage: image).resizable().frame(width: width, height: height).clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .contentShape(Rectangle())
+                                    .onTapGesture(coordinateSpace: .local) { point in Task { await handoff.click(fx: point.x / width, fy: point.y / height) } }
+                                    .position(x: box.size.width / 2, y: box.size.height / 2)
+                                    .help("Click in the picture to click in the VM")
+                            }
+                        }
                         else { Text("The VM screen appears here when it can be shown. Use Open VM to work in it.").font(.system(size: 12)).foregroundStyle(MacTheme.secondary).padding(20).multilineTextAlignment(.center) }
                     }.frame(height: 260)
+                    HStack(spacing: 8) {
+                        TextField("Type into the VM", text: $typed).textFieldStyle(.roundedBorder).onSubmit { sendTyped() }
+                        Button("Type") { sendTyped() }.disabled(typed.isEmpty || handoff.sending)
+                        ForEach(["Return", "Tab", "Escape", "BackSpace"], id: \.self) { key in
+                            Button(key == "BackSpace" ? "⌫" : key == "Return" ? "↩" : key == "Escape" ? "Esc" : key) { Task { await handoff.press(key) } }.disabled(handoff.sending)
+                        }
+                        if handoff.sending { ProgressView().controlSize(.small) }
+                    }
+                    Text("Click the picture to click in the VM; type below. Each action takes a moment. " + VMInput.needsNote).font(.system(size: 11)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
                     if let note = handoff.note { Text(note).font(.system(size: 12)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true) }
                     HStack(spacing: 10) {
                         Button("Open VM") { Task { await handoff.openConsole() } }

@@ -370,7 +370,7 @@ let handoffQueue=Promise.resolve(),handoffCurrent=null;
 function requestVMHandoff(botName,reason){
  const run=async()=>{
   const outcomes={done:{continues:true,message:'The human finished using the VM and is ready for you to continue. Check the VM for what changed before you go on.'},cancelled:{continues:false,message:'The human cancelled the VM request. Do not continue that task; ask what they would like instead.'},timedOut:{continues:false,message:'The human did not respond about the VM within 30 minutes. Stop this task and tell them it is waiting.'}};
-  const id=randomUUID(),text=String(reason||'').trim().slice(0,400)||'It needs you to use the VM.';
+  const id=randomUUID(),text=String(reason||'').trim().slice(0,400)||'It needs you to use the VM.';guestSize=null;
   return new Promise(resolve=>{
    const timer=setTimeout(()=>finish('timedOut'),1800000);
    const finish=key=>{clearTimeout(timer);if(handoffCurrent?.id===id)handoffCurrent=null;if(window&&!window.isDestroyed())window.webContents.send('vm:handoff',null);resolve(outcomes[key]||outcomes.cancelled);};
@@ -393,6 +393,21 @@ async function startVMJob(requestID,bot,argv){
 function configureIPC() {
  const uuidLike=value=>typeof value==='string'&&/^[a-f0-9-]{36}$/i.test(value);
  handle('vm:handoff-done',async(id,outcome)=>{if(handoffCurrent?.id===id)handoffCurrent.finish(outcome==='done'?'done':'cancelled');return true;});
+ let guestSize=null;
+ handle('vm:handoff-input',async(request)=>{
+  await ensureState();const input=require('./vm-input.cjs');
+  const link=(await vmLinks()).shared;
+  const exec=async argv=>{const output=link?await remoteVMExec(link,argv):'Linux guest exit 0:\n'+await localVMs.execute(homeBotID(),argv);if(input.failed(output))throw new PublicError(input.NEEDS);return output;};
+  try{
+   if(request?.kind==='click'){if(!guestSize){guestSize=input.parseGeometry(await exec(input.geometry()));if(!guestSize)throw new PublicError('The VM screen size could not be read. '+input.NEEDS);}
+    const fx=Number(request.fx),fy=Number(request.fy);if(!(fx>=0&&fx<=1&&fy>=0&&fy<=1))throw new PublicError('Click inside the picture.');
+    const argv=input.click(Math.round(fx*guestSize[0]),Math.round(fy*guestSize[1]));await exec(argv);}
+   else if(request?.kind==='type'){const argv=input.type(request.text);if(!argv)throw new PublicError('Type some text first.');await exec(argv);}
+   else if(request?.kind==='key'){const argv=input.key(request.key);if(!argv)throw new PublicError('That key is not available.');await exec(argv);}
+   else throw new PublicError('Unknown input.');
+   return true;
+  }catch(error){if(error instanceof PublicError)throw error;throw new PublicError(error.message);}
+ });
  handle('vm:handoff-preview',async()=>{await ensureState();const link=(await vmLinks()).shared;try{if(link){if(vmLink.peer?.id!==link.hostID)await vmLink.attach(link.hostID);return (await vmLink.fetch('/v1/vm?bot='+encodeURIComponent(link.vmBotID))).value;}return await localVMs.preview(homeBotID());}catch(error){throw new PublicError(error.message);}});
  handle('vm:handoff-open',async()=>{await ensureState();const link=(await vmLinks()).shared;try{if(link){if(vmLink.peer?.id!==link.hostID)await vmLink.attach(link.hostID);await vmLink.fetch('/v1/command',{action:'open_vm',botID:link.vmBotID,requestID:randomUUID()});return 'The VM console was opened on '+link.hostName+'. You can watch it here; to click inside it, use that computer.';}await localVMs.open(homeBotID());return 'The VM was opened.';}catch(error){throw new PublicError(error.message);}});
  handle('vmremote:hosts',async()=>{try{await vmLink.discover();return vmLink.status().hosts;}catch(error){throw new PublicError(error.message);}});

@@ -104,6 +104,10 @@ final class MacAppModel: ObservableObject {
             }
             return try await MacBotVMs.shared.preview(home).imageData
         }
+        MacVMHandoff.shared.inputRunner = { [weak self] argv in
+            guard let self, let home = self.localApp?.workspace.bots.first(where: { $0.isMain == true }) else { throw CloudError.message("Open the VM from Settings → Computer to use it.") }
+            return try await MacBotVMs.shared.execute(home, argv: argv)
+        }
         MacVMHandoff.shared.opener = { [weak self] in
             guard let self, let home = self.localApp?.workspace.bots.first(where: { $0.isMain == true }) else { return "Open the VM from Settings → Computer." }
             if let link = MacBotVMs.shared.sharedRemoteLink {

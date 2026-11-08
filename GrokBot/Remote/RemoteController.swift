@@ -295,7 +295,7 @@ final class RemoteController: ObservableObject {
         _ = try await client.fetch(peer, target: "/v1/command", command: RemoteCommand(requestID: requestID, action: "vm_exec", botID: vm, argv: argv))
         let deadline = Date().addingTimeInterval(130)
         while Date() < deadline {
-            try await Task.sleep(for: .seconds(2))
+            try await Task.sleep(for: .milliseconds(700))
             let response = try await client.fetch(peer, target: "/v1/vm-result?id=" + requestID.uuidString)
             let result = try CloudCoding.decoder().decode(RemoteVMResult.self, from: response.body)
             switch result.status {

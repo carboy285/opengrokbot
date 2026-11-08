@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('desktop', {
   vmHandoffDone:(id,outcome)=>ipcRenderer.invoke('vm:handoff-done',id,outcome),
   vmHandoffPreview:()=>ipcRenderer.invoke('vm:handoff-preview'),
   vmHandoffOpen:()=>ipcRenderer.invoke('vm:handoff-open'),
+  vmHandoffInput:request=>ipcRenderer.invoke('vm:handoff-input',request),
   vmRemoteHosts:()=>ipcRenderer.invoke('vmremote:hosts'),
   vmRemoteList:hostID=>ipcRenderer.invoke('vmremote:list',hostID),
   vmRemoteGet:id=>ipcRenderer.invoke('vmremote:get',id),
