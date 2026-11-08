@@ -1,4 +1,6 @@
+import AVFoundation
 import PhotosUI
+import Speech
 import SwiftUI
 import UIKit
 
@@ -19,6 +21,7 @@ struct ConversationView: View {
     @State private var clipboardHasImage = false
     @AppStorage("autoVoiceBotID") private var autoVoiceBotID = ""
     @StateObject private var voice = VoiceConversation()
+    @StateObject private var dictation = PhoneDictation()
     @State private var nearBottom = true
     @State private var userScrolling = false
     @State private var scrollTask: Task<Void,Never>?
@@ -45,7 +48,7 @@ struct ConversationView: View {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     if model.entries(for: bot).isEmpty { emptyConversation }
                     ForEach(model.entries(for: bot)) { entry in
-                        MessageRow(entry: entry).equatable().id(entry.id)
+                        MessageRow(entry: entry, actions: messageActions(for: entry)).equatable().id(entry.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }.padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 24)
@@ -71,7 +74,7 @@ struct ConversationView: View {
             .onChange(of: model.entries(for: bot).last) { _, _ in
                 if nearBottom && !userScrolling { scrollToLatest(proxy) }
             }
-            .onDisappear { scrollTask?.cancel() }
+            .onDisappear { scrollTask?.cancel(); dictation.stop() }
 
         }
         .background(Palette.background)
@@ -179,6 +182,9 @@ struct ConversationView: View {
             if let attachNotice {
                 Text(attachNotice).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 12)
             }
+            if let note = dictation.note {
+                Text(note).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 12).onTapGesture { dictation.note = nil }
+            }
             HStack(alignment: .bottom, spacing: 10) {
                 Menu {
                     Button("Paste text", systemImage: "doc.on.clipboard") {
@@ -194,56 +200,71 @@ struct ConversationView: View {
                     Button("Voice mode", systemImage: "waveform") { startVoice() }
                     Button("Bot details", systemImage: "info.circle") { info = true }
                 } label: {
-                    Image(systemName: "plus").font(.system(size: 19, weight: .medium))
-                        .foregroundStyle(composerInk).frame(width: 36, height: 36)
-                        .background(composerTint, in: Circle())
-                        .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 1).allowsHitTesting(false))
-                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                    Image(systemName: "plus").font(.system(size: 24, weight: .regular))
+                        .foregroundStyle(.secondary).frame(width: 34, height: 44)
+                        .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Message options")
                 TextField("Ask \(bot.name)", text: draft, axis: .vertical)
-                    .font(.body).lineLimit(1...6).focused($composing).padding(.vertical, 5).frame(minHeight: 48)
+                    .font(.system(size: 16)).lineLimit(1...6).focused($composing).padding(.vertical, 5).frame(minHeight: 44)
                     .accessibilityIdentifier("remote-chat-input")
                 if remote.running.contains(bot.id) {
                     Button {
                         Task { await remote.command(RemoteCommand(action: "stop", botID: bot.id)) }
                     } label: {
                         Image(systemName: "stop.fill").font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(composerInk).frame(width: 38, height: 38)
+                            .foregroundStyle(composerInk).frame(width: 36, height: 36)
                             .background(composerTint, in: Circle())
-                            .frame(width: 48, height: 48).contentShape(Rectangle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!remote.online).accessibilityLabel("Stop response")
                 } else if !hasContent && !sending {
-                    Button { startVoice() } label: {
-                        Image(systemName: "waveform").font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(composerInk).frame(width: 38, height: 38)
+                    Button { dictation.toggle(current: draft.wrappedValue) { draft.wrappedValue = $0 } } label: {
+                        Image(systemName: dictation.listening ? "mic.fill" : "mic").font(.system(size: 19, weight: .regular))
+                            .foregroundStyle(dictation.listening ? Color.red : Color.secondary).frame(width: 34, height: 44).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityLabel(dictation.listening ? "Stop dictation" : "Dictate a message")
+                    Button { dictation.stop(); startVoice() } label: {
+                        Image(systemName: "waveform").font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(composerInk).frame(width: 36, height: 36)
                             .background(composerTint, in: Circle())
-                            .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 1).allowsHitTesting(false))
-                            .frame(width: 48, height: 48).contentShape(Rectangle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!remote.online).accessibilityLabel("Start voice mode")
                 } else {
                     Button { send() } label: {
                         ZStack {
                             Circle().fill(composerTint.opacity(canSend || sending ? 1 : 0.22))
-                                .frame(width: 38, height: 38)
-                                .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 1).allowsHitTesting(false))
+                                .frame(width: 36, height: 36)
                             if sending {
                                 ProgressView().controlSize(.small).tint(composerInk)
                             } else {
-                                Image(systemName: "arrow.up").font(.system(size: 21, weight: .semibold))
+                                Image(systemName: "arrow.up").font(.system(size: 19, weight: .semibold))
                                     .foregroundStyle(canSend ? composerInk : Color.secondary)
                             }
-                        }.frame(width: 48, height: 48).contentShape(Rectangle())
+                        }.frame(width: 44, height: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!canSend).accessibilityLabel(sending ? "Sending message" : "Send message")
                 }
             }
             .padding(5)
             .background {
-                RoundedRectangle(cornerRadius: 30).fill(.clear)
-                    .glassChrome(in: RoundedRectangle(cornerRadius: 30), interactive: false)
+                RoundedRectangle(cornerRadius: 28).fill(.clear)
+                    .glassChrome(in: RoundedRectangle(cornerRadius: 28), interactive: false)
                     .allowsHitTesting(false)
             }
             .shadow(color: .black.opacity(0.035), radius: 14, y: 4)
         }.padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 4)
+    }
+
+    private func messageActions(for entry: Entry) -> MessageActions {
+        let current = bot
+        let last = model.entries(for: bot).last
+        return MessageActions(
+            canRetry: last?.id == entry.id && !remote.running.contains(bot.id), online: remote.online,
+            reply: {
+                let quoted = entry.text.split(separator: "\n", omittingEmptySubsequences: true).prefix(3).map { "> " + String($0.prefix(240)) }.joined(separator: "\n")
+                draft.wrappedValue = quoted + "\n\n" + draft.wrappedValue
+                composing = true
+            },
+            react: { emoji in Task { _ = await remote.command(RemoteCommand(action: "react", botID: current.id, text: emoji ?? "", taskID: entry.id)) } },
+            retry: { Task { _ = await remote.command(RemoteCommand(action: "retry", botID: current.id)) } },
+            delete: { Task { _ = await remote.command(RemoteCommand(action: "delete_entry", botID: current.id, taskID: entry.id)) } })
     }
 
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
@@ -282,6 +303,7 @@ struct ConversationView: View {
     }
 
     private func send() {
+        dictation.stop()
         let typed = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let sentImages = images
         let text = typed.isEmpty && !sentImages.isEmpty ? "Please look at the attached image\(sentImages.count == 1 ? "" : "s")." : typed
@@ -304,8 +326,21 @@ private struct ChatScrollMetrics: Equatable {
     var bottom: CGFloat
 }
 
+/// What the long-press menu on a message can do. Compared by `canRetry` and `online` only, so closures never defeat the row's equality check.
+private struct MessageActions: Equatable {
+    var canRetry = false
+    var online = true
+    var reply: () -> Void = {}
+    var react: (String?) -> Void = { _ in }
+    var retry: () -> Void = {}
+    var delete: () -> Void = {}
+    static func == (lhs: MessageActions, rhs: MessageActions) -> Bool { lhs.canRetry == rhs.canRetry && lhs.online == rhs.online }
+}
+
 private struct MessageRow: View, Equatable {
     let entry: Entry
+    var actions = MessageActions()
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.entry == rhs.entry && lhs.actions == rhs.actions }
     private var formattedText: AttributedString {
         (try? AttributedString(markdown: entry.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(entry.text)
     }
@@ -333,11 +368,118 @@ private struct MessageRow: View, Equatable {
                 }
                 .padding(.horizontal, 19).padding(.vertical, 17)
                 .background(entry.kind == .user ? Palette.userBubble : Palette.card, in: RoundedRectangle(cornerRadius: 26))
+                .overlay(alignment: entry.kind == .user ? .bottomLeading : .bottomTrailing) {
+                    if let reaction = entry.reaction, !reaction.isEmpty {
+                        Text(reaction).font(.system(size: 14)).padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Palette.background, in: Capsule()).overlay(Capsule().stroke(.primary.opacity(0.1)))
+                            .offset(y: 12).accessibilityLabel("Reaction \(reaction)")
+                    }
+                }
+                .padding(.bottom, entry.reaction?.isEmpty == false ? 12 : 0)
                 .contextMenu {
+                    Button("Copy text", systemImage: "doc.on.doc") { UIPasteboard.general.string = entry.text }
+                    Button("Copy as Markdown", systemImage: "doc.richtext") { UIPasteboard.general.string = (entry.kind == .user ? "**You:** " : "") + entry.text }
+                    Button("Reply", systemImage: "arrowshape.turn.up.left") { actions.reply() }
+                    Menu("React", systemImage: "face.smiling") {
+                        ForEach(["👍", "👎", "❤️", "😂", "🎉", "🤔"], id: \.self) { emoji in
+                            Button(entry.reaction == emoji ? "\(emoji)  Remove" : emoji) { actions.react(entry.reaction == emoji ? nil : emoji) }
+                        }
+                    }.disabled(!actions.online)
+                    if entry.kind == .bot, actions.canRetry { Button("Retry", systemImage: "arrow.clockwise") { actions.retry() }.disabled(!actions.online) }
                     ShareLink(item: entry.text) { Label("Share text", systemImage: "square.and.arrow.up") }
+                    if entry.state != .streaming { Button("Delete message", systemImage: "trash", role: .destructive) { actions.delete() }.disabled(!actions.online) }
                 }
                 if entry.kind == .bot { Spacer(minLength: 26) }
             }
         }
     }
+}
+
+/// Dictation for the message box: tap the mic, talk, tap again. Uses Apple's on-device recognition when available, so nothing leaves the phone.
+@MainActor
+final class PhoneDictation: ObservableObject {
+    @Published private(set) var listening = false
+    @Published var note: String?
+    private let engine = AVAudioEngine()
+    private var task: SFSpeechRecognitionTask?
+    private var generation = 0
+    private var base = ""
+    private var deliver: ((String) -> Void)?
+
+    func toggle(current: String, set: @escaping (String) -> Void) {
+        if listening { stop(); return }
+        note = nil
+        Task { await begin(current: current, set: set) }
+    }
+
+    private func begin(current: String, set: @escaping (String) -> Void) async {
+        guard await VoiceSession.requestAccess(needsSpeech: true) else {
+            note = "Allow Microphone and Speech Recognition for OpenGrokBot in Settings → OpenGrokBot, then try again."
+            return
+        }
+        guard let recognizer = SFSpeechRecognizer(locale: VoiceSettings.locale) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US")), recognizer.isAvailable else {
+            note = "Speech recognition isn't available for this language right now."
+            return
+        }
+        do {
+            let audio = AVAudioSession.sharedInstance()
+            try audio.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try audio.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch { note = "The microphone is busy. Try again."; return }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.addsPunctuation = true
+        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+        base = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        deliver = set
+        generation += 1
+        let mine = generation
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0 else { note = "No microphone was found."; return }
+        input.removeTap(onBus: 0)
+        Self.installTap(on: input, format: format, request: request)
+        task = recognizer.recognitionTask(with: request, resultHandler: Self.handler { [weak self] text, done in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.heard(text, done: done, generation: mine) } }
+        })
+        engine.prepare()
+        do { try engine.start(); listening = true } catch {
+            note = "Couldn't start the microphone: \(error.localizedDescription)"
+            teardown()
+        }
+    }
+
+    nonisolated private static func installTap(on input: AVAudioInputNode, format: AVAudioFormat, request: SFSpeechAudioBufferRecognitionRequest) {
+        let box = DictationRequestBox(request)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in box.request.append(buffer) }
+    }
+
+    nonisolated private static func handler(deliver: @escaping @Sendable (String, Bool) -> Void) -> (SFSpeechRecognitionResult?, Error?) -> Void {
+        { result, error in deliver(result?.bestTranscription.formattedString ?? "", (result?.isFinal ?? false) || error != nil) }
+    }
+
+    private func heard(_ text: String, done: Bool, generation current: Int) {
+        guard current == generation else { return }
+        if !text.isEmpty { deliver?(base.isEmpty ? text : base + " " + text) }
+        if done { stop() }
+    }
+
+    func stop() {
+        guard listening || task != nil else { return }
+        generation += 1
+        task?.finish()
+        teardown()
+    }
+
+    private func teardown() {
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        task = nil; deliver = nil; listening = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+}
+
+private final class DictationRequestBox: @unchecked Sendable {
+    let request: SFSpeechAudioBufferRecognitionRequest
+    init(_ request: SFSpeechAudioBufferRecognitionRequest) { self.request = request }
 }

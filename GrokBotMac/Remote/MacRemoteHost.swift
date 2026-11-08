@@ -312,7 +312,18 @@ final class MacRemoteHost: ObservableObject {
             case "stop": guard let bot else { return .error(404,"Bot not found") }; desktop.stop(botID: bot.id)
             case "retry": guard let bot, !desktop.runningBots.contains(bot.id) else { return .error(409,"Bot is busy") }; desktop.retry(bot: bot, app: app)
             case "create_bot":
-                guard let name = command.name, name.count <= 200, let purpose = command.purpose, purpose.count <= 2000, ["white","purple","pink","ochre"].contains(command.color ?? ""), app.workspace.bots.count < 100, app.addBot(name: name, purpose: purpose, color: command.color!) else { return .error(409,"Use a unique Bot name and a short description") }
+                let colors = ["purple", "pink", "red", "orange", "amber", "green", "teal", "blue", "gray", "black"]
+                let legacy = ["white", "purple", "pink", "ochre"]
+                // Older phones send one of four colours; newer ones also send a shape and one of ten colours.
+                guard let name = command.name, name.count <= 200, let purpose = command.purpose, purpose.count <= 2000,
+                      legacy.contains(command.color ?? "") || command.appearance.map({ colors.contains($0.color) }) == true,
+                      app.workspace.bots.count < 100,
+                      app.addBot(name: name, purpose: purpose, color: legacy.contains(command.color ?? "") ? command.color! : "purple") else { return .error(409,"Use a unique Bot name and a short description") }
+                if let appearance = command.appearance, colors.contains(appearance.color), let created = app.workspace.bots.last(where: { $0.name == name }) { app.setAppearance(BotAppearance(shape: appearance.shape, color: appearance.color), for: created) }
+            case "react":
+                guard let id = command.taskID, (command.text ?? "").count <= 8, app.setReaction((command.text ?? "").isEmpty ? nil : command.text, for: id) else { return .error(409,"That message could not be updated") }
+            case "delete_entry":
+                guard let id = command.taskID, app.deleteEntry(id) else { return .error(409,"That message could not be deleted") }
             case "delete_bot": guard let bot, bot.isMain != true else { return .error(409,"The main Grok Bot must be kept") }; desktop.stop(botID: bot.id); app.removeBot(bot)
             case "configure_bot":
                 guard let bot, let config = command.configuration, !desktop.runningBots.contains(bot.id), app.setAIConfiguration(config, for: bot) else { return .error(409,"Stop the Bot before changing its provider or model") }

@@ -27,6 +27,12 @@ struct RootView: View {
             (filter != .groups || bot.memberIDs != nil)
         }
     }
+    /// One hero card: the main Bot (or the first pinned one). Other pinned Bots lead the list with a pin.
+    private var heroBot: Bot? { pinnedBots.first(where: { $0.isMain == true }) ?? pinnedBots.first }
+    private var listedBots: [Bot] {
+        let hero = heroBot?.id
+        return pinnedBots.filter { $0.id != hero } + bots
+    }
     private var pinnedBots: [Bot] {
         let ids = remote.pinnedBotIDs ?? model.workspace.bots.filter { $0.isMain == true }.map(\.id)
         return matchingBots.filter { remote.isPinned($0) }.sorted {
@@ -164,20 +170,14 @@ struct RootView: View {
     private var roster: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if !pinnedBots.isEmpty {
-                    if pinnedBots.count == 1, let bot = pinnedBots.first {
-                        HStack {
-                            Spacer(minLength: 0)
-                            pinnedTile(bot, large: true)
-                            Spacer(minLength: 0)
-                        }.padding(.top, 32).padding(.bottom, 28)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 18)], spacing: 28) {
-                            ForEach(pinnedBots) { bot in pinnedTile(bot, large: false) }
-                        }.padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 26)
-                    }
+                if let hero = heroBot {
+                    HStack {
+                        Spacer(minLength: 0)
+                        pinnedTile(hero, large: true)
+                        Spacer(minLength: 0)
+                    }.padding(.top, 32).padding(.bottom, 28)
                 }
-                ForEach(bots) { bot in
+                ForEach(listedBots) { bot in
                     NavigationLink(value: bot.id) { botRow(bot) }.buttonStyle(.plain)
                         .contextMenu { botActions(bot) }
                 }
@@ -237,6 +237,7 @@ struct RootView: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(bot.name).font(.system(.body, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                    if remote.isPinned(bot) { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
                     Spacer(minLength: 0)
                     if let date = latest?.date {
                         Text(date, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
@@ -309,31 +310,55 @@ struct CreateBotView: View {
     @State private var saving = false
     @State private var name = ""
     @State private var purpose = ""
+    @State private var shape = BotAvatarShape.hexagon
     @State private var color = "purple"
+    @State private var showMore = false
+    @FocusState private var nameFocused: Bool
+
+    private let colors = ["purple", "pink", "red", "orange", "amber", "green", "teal", "blue", "gray", "black"]
+    private var cleanName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    HStack { Spacer(); BotAvatar(color: color, size: 72); Spacer() }.padding()
-                    TextField("Bot name", text: $name).textInputAutocapitalization(.words)
-                    TextField("What will this Bot help with?", text: $purpose, axis: .vertical).lineLimit(3...5)
-                    Picker("Color", selection: $color) {
-                        Text("Violet").tag("purple")
-                        Text("Rose").tag("pink")
-                        Text("Amber").tag("ochre")
+            ScrollView {
+                VStack(spacing: 20) {
+                    BotAvatar(color: color, size: 100, appearance: BotAppearance(shape: shape, color: color)).padding(.top, 8)
+                    TextField("Name your Bot", text: $name).focused($nameFocused).textInputAutocapitalization(.words)
+                        .font(.system(size: 18)).padding(14).background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
+                        ForEach(BotAvatarShape.allCases, id: \.self) { option in
+                            Button { shape = option } label: {
+                                BotAvatar(color: color, size: 46, appearance: BotAppearance(shape: option, color: color)).frame(width: 56, height: 56)
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(shape == option ? Color.primary : .clear, lineWidth: 2))
+                            }.buttonStyle(.plain).accessibilityLabel(option.label + " shape").accessibilityAddTraits(shape == option ? [.isSelected] : [])
+                        }
                     }
-                } footer: { Text("Creates a Bot in your connected desktop workspace.") }
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 10) {
+                        ForEach(colors, id: \.self) { option in
+                            Button { color = option } label: {
+                                Circle().fill(AvatarArtwork.color(option)).frame(width: 30, height: 30).padding(5)
+                                    .overlay(Circle().stroke(color == option ? Color.primary : .clear, lineWidth: 2))
+                            }.buttonStyle(.plain).accessibilityLabel(option + " color").accessibilityAddTraits(color == option ? [.isSelected] : [])
+                        }
+                    }
+                    DisclosureGroup("Add a description", isExpanded: $showMore) {
+                        TextField("What will this Bot help with? (optional)", text: $purpose, axis: .vertical).lineLimit(3...5)
+                            .padding(12).background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12)).padding(.top, 8)
+                    }.font(.subheadline).foregroundStyle(.secondary)
+                    Text("Creates a Bot in your connected desktop workspace.").font(.footnote).foregroundStyle(.secondary)
+                }.padding(.horizontal, 22).padding(.bottom, 24)
             }
-            .navigationTitle("New Bot")
+            .navigationTitle("Create a Bot")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { nameFocused = true }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
                         saving = true
-                        Task { if await remote.command(RemoteCommand(action: "create_bot", name: name, purpose: purpose, color: color)) { dismiss() }; saving = false }
-                    }.disabled(saving || !remote.online || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        let appearance = BotAppearance(shape: shape, color: color)
+                        Task { if await remote.command(RemoteCommand(action: "create_bot", name: cleanName, purpose: purpose, color: "purple", appearance: appearance)) { dismiss() }; saving = false }
+                    }.disabled(saving || !remote.online || cleanName.isEmpty)
                 }
             }
         }
