@@ -56,7 +56,8 @@ struct InstalledCLI: Identifiable, Hashable, Sendable {
     var id: String { provider.rawValue + ":" + path }
 }
 
-enum CLIEvent: Sendable, Equatable { case session(String), text(String), activity(String), failed }
+/// `notice` is a short explanation for the human (for example that connected apps did not load); it is shown in the chat.
+enum CLIEvent: Sendable, Equatable { case session(String), text(String), activity(String), notice(String), failed }
 
 enum CLIError: Error, LocalizedError, Equatable {
     case notInstalled, notLoggedIn, invalidModel, network, rateLimited, failed(Int32), invalidOutput, stopped, timedOut
@@ -87,7 +88,10 @@ enum CLIError: Error, LocalizedError, Equatable {
 struct CLICommand: Sendable {
     let arguments: [String]
     let input: String
-    static func chat(provider: CLIProvider, prompt: String, session: String?, promptFile: String? = nil, model: String = "") -> CLICommand {
+    /// The name Bots' connected apps (Composio) are registered under in each CLI.
+    static let connectedAppsServer = "opengrokbot-composio"
+    /// `allowConnectedApps` pre-approves only the connected-apps tools for Claude Code, which cannot ask for permission in the background.
+    static func chat(provider: CLIProvider, prompt: String, session: String?, promptFile: String? = nil, model: String = "", allowConnectedApps: Bool = false) -> CLICommand {
         let modelArguments = model.isEmpty ? [String]() : ["--model", model]
         switch provider {
         case .codex:
@@ -97,6 +101,7 @@ struct CLICommand: Sendable {
             return CLICommand(arguments: args, input: prompt)
         case .claude:
             var args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+            if allowConnectedApps { args += ["--allowedTools", "mcp__" + connectedAppsServer] }
             if let session { args += ["--resume", session] }
             return CLICommand(arguments: args + modelArguments, input: prompt)
         case .opencode:
@@ -125,6 +130,17 @@ struct CLIEventParser {
         var events: [CLIEvent] = []
         if let id = (value["thread_id"] ?? value["session_id"] ?? value["sessionID"]) as? String,
            !id.isEmpty, id.count <= 200, id.first != "-", id.rangeOfCharacter(from: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_" )).inverted) == nil { events.append(.session(id)) }
+        // Claude Code reports which MCP servers started and which tool calls it refused. Say so, instead of leaving the Bot to guess.
+        if type == "system", value["subtype"] as? String == "init", let servers = value["mcp_servers"] as? [[String:Any]] {
+            for server in servers where (server["name"] as? String) == CLICommand.connectedAppsServer {
+                let status = (server["status"] as? String) ?? "unknown"
+                if status != "connected" { events.append(.notice("Connected apps did not load: the Composio connection reported “\(status)”. Open Connect apps and choose Refresh connections, then send the message again.")) }
+            }
+        }
+        if type == "result", let denials = value["permission_denials"] as? [[String:Any]],
+           denials.contains(where: { ($0["tool_name"] as? String)?.hasPrefix("mcp__" + CLICommand.connectedAppsServer) == true }) {
+            events.append(.notice("Claude Code did not run a connected-app action because it needs your permission and cannot ask while it works in the background. In Connect apps, turn on “Let Claude Code use connected apps without asking” if you want it to."))
+        }
         if type == "turn.failed" || (type == "result" && (value["is_error"] as? Bool == true || value["status"] as? String == "error")) { events.append(.failed); return events }
         if type == "error" { events.append(.activity("The CLI is handling a connection or provider error…")) }
         if value["parent_tool_use_id"] is String { return events }

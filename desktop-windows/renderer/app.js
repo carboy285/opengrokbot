@@ -721,7 +721,7 @@ async function renderCatalog(content) {
   search.addEventListener('input', () => { query = search.value; draw(); });
   if (!status.configured && window.desktop) append(setup, node('p', 'muted', 'Use your own Composio project to connect apps to your CLI. This is optional. Add the apps you want, paste your project key, then connect.'), key, append(node('div', 'panel-bottom'), button('Get a project key ↗', () => bridge.openDocs('https://platform.composio.dev')), link), node('p', 'muted', 'The project key and tool session are encrypted with Windows device storage. Composio has its own pricing and usage limits.')), link.disabled = true;
   else if (!window.desktop) append(setup, node('p', 'muted', 'Open the installed desktop app to store your project key securely.'));
-  else append(setup, node('p', 'muted', 'Apps are chosen when the project is connected. To change them, remove the project below and connect again.'), button('Remove project from this device', async () => { try { await result(bridge.composioRemove()); await showApps(); } catch (error) { toast(error.message); } }), button('Manage or revoke accounts in Composio ↗', () => bridge.openDocs('https://platform.composio.dev')));
+  else { append(setup, node('p', 'muted', 'Apps are chosen when the project is connected. To change them, remove the project below and connect again.'), button('Remove project from this device', async () => { try { await result(bridge.composioRemove()); await showApps(); } catch (error) { toast(error.message); } }), button('Manage or revoke accounts in Composio ↗', () => bridge.openDocs('https://platform.composio.dev'))); addAllowToggle(setup); }
   append(content, header, search, chips, setup, body); draw();
 }
 
@@ -738,3 +738,12 @@ function renderBrowserPill() {
     button(state.revealed ? 'Hide browser' : 'Show browser', async () => { try { await result(bridge.revealBrowser(bot.id, !state.revealed)); } catch (error) { toast(error.message); } }, 'link-button'));
 }
 bridge.onBrowserActivity?.(value => { if (value?.working) browserActivity.set(value.botID, value); else browserActivity.delete(value?.botID); renderBrowserPill(); });
+
+// Claude Code cannot ask before using a connected app, so it refuses unless this is on. Only the connected-apps (Composio) tools are allowed.
+function addAllowToggle(setup) {
+  const allow = node('input'); allow.type = 'checkbox'; allow.setAttribute('aria-label', 'Let Claude Code use connected apps without asking');
+  Promise.resolve(bridge.allowConnectedApps?.()).then(value => { if (value?.ok) allow.checked = value.value === true; }).catch(() => {});
+  allow.addEventListener('change', async () => { try { await result(bridge.setAllowConnectedApps(allow.checked)); } catch (error) { toast(error.message); allow.checked = !allow.checked; } });
+  setup.append(append(node('label', 'setting-row'), allow, append(node('span', 'details'), node('strong', '', 'Let Claude Code use connected apps without asking'),
+    node('small', 'muted', 'Claude Code works in the background and cannot ask you before using an app, so it refuses unless this is on. It lets only your connected apps (Composio) run without a question, for example reading Google Drive or sending an email from Gmail. Leave it off if you read pages or files you do not trust. Other AI CLIs follow their own settings.'))));
+}

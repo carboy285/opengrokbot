@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld('desktop', {
   stop:id=>ipcRenderer.invoke('chat:stop',id),
   onChange:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('workspace:changed',listener);return()=>ipcRenderer.removeListener('workspace:changed',listener);},
   composioStatus:()=>ipcRenderer.invoke('composio:status'),
+  allowConnectedApps:()=>ipcRenderer.invoke('connected-apps:allow-get'),
+  setAllowConnectedApps:value=>ipcRenderer.invoke('connected-apps:allow-set',value),
   composioConnect:(key,tools)=>ipcRenderer.invoke('composio:connect',key,tools),
   composioRefresh:()=>ipcRenderer.invoke('composio:refresh'),
   composioLink:slug=>ipcRenderer.invoke('composio:link',slug),

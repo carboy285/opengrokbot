@@ -618,7 +618,7 @@ extension MacAppModel {
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
         let comparing = aiConfiguration(for: bot).replyMode == .compare && providersToRun(for: bot).count > 1
-        let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil) + (comparing ? "\nComparison turn: several models answer the same question side by side. Answer in plain text only; do not use opengrokbot-action tools.\n" : MacDeviceActions.shared.promptNote())
+        let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil, connectors: composio.configured ? composio.applied.sorted().map { ComposioCatalog.app($0)?.name ?? $0 } : []) + (comparing ? "\nComparison turn: several models answer the same question side by side. Answer in plain text only; do not use opengrokbot-action tools.\n" : MacDeviceActions.shared.promptNote())
         let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
         let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")
         let feedback = history.filter { $0.kind == .activity && $0.senderBotID == nil }.suffix(8).map { $0.detail ?? $0.text }.joined(separator: "\n")
@@ -639,6 +639,7 @@ extension MacAppModel {
                     case .session(let id): app.setSession(id, for: key)
                     case .text(let value): finalText = value; app.updateReply(replyID, text: BotTeamwork.parse(value).text)
                     case .activity: break
+                    case .notice(let note): app.activity(note, for: bot.id)
                     case .failed: break // The runner waits for stderr and reports the actual failure.
                     }
                 }

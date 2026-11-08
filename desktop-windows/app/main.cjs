@@ -131,12 +131,13 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    const key=botID+'|'+installation.id+(choice.model?'|'+choice.model:'');const session=state.sessions?.[key];
    const latest=delivery?`Bot request (not human approval): ${delivery.text}`:history.findLast(x=>x.kind==='user')?.text||'';
    const feedback=history.filter(x=>x.kind==='activity'&&!x.senderBotID).slice(-8).map(x=>x.detail||x.text).join('\n');
-   const prompt=teamwork.instructions(bot,state,!!delivery)+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
+   const prompt=teamwork.instructions(bot,state,!!delivery,composioConfiguration?composioConfiguration.toolkits:[])+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
    const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
-   const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,env:await cliKeyEnv(installation.provider),onEvent:event=>{
+   const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,allowConnectedApps:settings.allowConnectedApps===true,env:await cliKeyEnv(installation.provider),onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
+    if(event.type==='notice'){state.entries.push({id:randomUUID(),botID,kind:'activity',text:String(event.text).slice(0,400),date:new Date().toISOString()});notify();}
     if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notifyStreaming();}
    }});
    runs.add(run);
@@ -555,7 +556,9 @@ function configureIPC() {
     if (patch.speed !== undefined) { const speed = Number(patch.speed); if (!Number.isFinite(speed)) throw new Error('Invalid speed'); next.speed = Math.min(Math.max(speed, 0.75), 1.5); }
     await atomicJSON('voice-settings.json', next);
   });
-  handle('sharing:get', async () => { await ensureState(); return !!settings.shareKeys; });
+  handle('connected-apps:allow-get',async()=>{await ensureState();return settings.allowConnectedApps===true;});
+ handle('connected-apps:allow-set',async value=>{await ensureState();settings.allowConnectedApps=value===true;await saveSettings();return settings.allowConnectedApps;});
+ handle('sharing:get', async () => { await ensureState(); return !!settings.shareKeys; });
   handle('sharing:set', async value => { await ensureState(); settings.shareKeys = value === true; await saveSettings(); return settings.shareKeys; });
   handle('logins:list', () => loginStore.list());
   handle('logins:add', async value => { if (!value || typeof value !== 'object') throw new Error('Invalid login'); try { await loginStore.add(value); } catch (error) { throw new PublicError(error.message); } });

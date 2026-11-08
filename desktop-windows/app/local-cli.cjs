@@ -67,10 +67,12 @@ async function discover(overrides={}) {
   }
   return result;
 }
-function command(id,session,promptFile,model='') {
+/** The name connected apps (Composio) are registered under in each CLI. */
+const CONNECTED_APPS_SERVER='opengrokbot-composio';
+function command(id,session,promptFile,model='',{allowConnectedApps=false}={}) {
   let args=[];
   if(id==='codex') {args=['exec','--sandbox','read-only'];if(session)args.push('resume',session);args.push('--json','--skip-git-repo-check','-');}
-  else if(id==='claude'){args=['-p','--output-format','stream-json','--verbose','--include-partial-messages'];if(session)args.push('--resume',session);}
+  else if(id==='claude'){args=['-p','--output-format','stream-json','--verbose','--include-partial-messages'];if(allowConnectedApps)args.push('--allowedTools','mcp__'+CONNECTED_APPS_SERVER);if(session)args.push('--resume',session);}
   else if(id==='grok'){args=['--prompt-file',promptFile,'--output-format','streaming-messages-json','--include-partial-messages'];if(session)args.push('--resume',session);}
   else if(id==='opencode'){args=['run','--format','json'];if(session)args.push('--session',session);}
   else if(id==='gemini'){args=['--output-format','stream-json'];if(session)args.push('--resume',session);}
@@ -84,6 +86,9 @@ class EventParser {
     let value;try{value=JSON.parse(line);}catch{return [];}
     const events=[];const session=value.thread_id||value.session_id||value.sessionID;
     if(typeof session==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,199}$/.test(session))events.push({type:'session',id:session});
+    // Claude Code reports which MCP servers started and which tool calls it refused. Say so, instead of leaving the Bot to guess.
+    if(value.type==='system'&&value.subtype==='init'&&Array.isArray(value.mcp_servers))for(const server of value.mcp_servers)if(server?.name===CONNECTED_APPS_SERVER&&server.status!=='connected')events.push({type:'notice',text:`Connected apps did not load: the Composio connection reported “${String(server.status||'unknown').slice(0,40)}”. Open Connect apps and choose Refresh connections, then send the message again.`});
+    if(value.type==='result'&&Array.isArray(value.permission_denials)&&value.permission_denials.some(x=>typeof x?.tool_name==='string'&&x.tool_name.startsWith('mcp__'+CONNECTED_APPS_SERVER)))events.push({type:'notice',text:'Claude Code did not run a connected-app action because it needs your permission and cannot ask while it works in the background. In Connect apps, turn on “Let Claude Code use connected apps without asking” if you want it to.'});
     if(value.type==='turn.failed'||(value.type==='result'&&(value.is_error===true||value.status==='error')))return [...events,{type:'failed'}];
     if(typeof value.parent_tool_use_id==='string')return events;
     const item=value.item;
@@ -98,7 +103,7 @@ class EventParser {
   }
   part(id,text){if(!this.parts.has(id))this.order.push(id);this.parts.set(id,text);this.text=this.order.map(x=>this.parts.get(x)).join('\n\n');}
 }
-function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',timeout=600000,env={}}) {
+function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',timeout=600000,env={},allowConnectedApps=false}) {
   let child, cancelled=false, timedOut=false, cancelTimer;
   const cancel=(immediately=false)=>{cancelled=true;if(child&&child.exitCode===null){if(immediately){child.kill('SIGKILL');return;}if(!child.killed){child.kill('SIGINT');cancelTimer=setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},2000);cancelTimer.unref();}}};
   const done=(async()=>{
@@ -114,7 +119,7 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',t
       return await new Promise((resolve,reject)=>{
         const timer=setTimeout(()=>{timedOut=true;cancel();},timeout);timer.unref();
         const clean=()=>{clearTimeout(timer);clearTimeout(cancelTimer);};
-        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile,model),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment,...env}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
+        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile,model,{allowConnectedApps:!!mcpURL&&allowConnectedApps===true}),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment,...env}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
         const decoder=new StringDecoder('utf8');
         const consume=line=>{for(const event of parser.parse(line)){if(event.type==='failed')protocolFailed=true;onEvent(event);}};
         child.stdout.on('data',data=>{
@@ -139,4 +144,4 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',t
   })();
   return {done,cancel};
 }
-module.exports={environment,providers,discover,capture,command,EventParser,runCLI,invocation};
+module.exports={environment,providers,discover,capture,command,EventParser,runCLI,invocation,CONNECTED_APPS_SERVER};

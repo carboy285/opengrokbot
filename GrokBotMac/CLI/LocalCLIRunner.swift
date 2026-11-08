@@ -67,7 +67,7 @@ final class LocalCLIRun: @unchecked Sendable {
             defer { if let promptFile { try? FileManager.default.removeItem(at: promptFile) } }
             let mcp = try ComposioCLIConfiguration.make(provider: cli.provider, directory: directory, sessionURL: mcpURL)
             defer { mcp.cleanup() }
-            let command = CLICommand.chat(provider: cli.provider, prompt: prompt, session: session, promptFile: promptFile?.path, model: model)
+            let command = CLICommand.chat(provider: cli.provider, prompt: prompt, session: session, promptFile: promptFile?.path, model: model, allowConnectedApps: mcpURL != nil && UserDefaults.standard.bool(forKey: "claudeAllowConnectedApps"))
             let input = Pipe(), output = Pipe(), error = Pipe()
             process.executableURL = URL(fileURLWithPath: cli.path)
             process.arguments = command.arguments + mcp.arguments

@@ -409,6 +409,31 @@ final class MacVoiceAndSummaryTests: XCTestCase {
         catch { XCTAssertEqual(error as? ComposioSearch.Failure, .unreachable) }
     }
 
+    func testClaudeCodeReportsConnectedAppsProblemsAndTheBotKnowsItsConnectedApps() throws {
+        var parser = CLIEventParser()
+        let failed = parser.parse(Data(#"{"type":"system","subtype":"init","session_id":"abc","mcp_servers":[{"name":"opengrokbot-composio","status":"failed"}]}"#.utf8))
+        XCTAssertTrue(failed.contains { if case .notice(let text) = $0 { return text.contains("failed") && text.contains("Refresh connections") } else { return false } })
+        var fine = CLIEventParser()
+        let ok = fine.parse(Data(#"{"type":"system","subtype":"init","session_id":"abc","mcp_servers":[{"name":"opengrokbot-composio","status":"connected"},{"name":"other","status":"failed"}]}"#.utf8))
+        XCTAssertFalse(ok.contains { if case .notice = $0 { return true } else { return false } }, "A connected server, or somebody else's failed one, needs no notice")
+        var denied = CLIEventParser()
+        let blocked = denied.parse(Data(#"{"type":"result","result":"I could not","permission_denials":[{"tool_name":"mcp__opengrokbot-composio__COMPOSIO_SEARCH_TOOLS","tool_use_id":"t1"}]}"#.utf8))
+        XCTAssertTrue(blocked.contains { if case .notice(let text) = $0 { return text.contains("Let Claude Code use connected apps") } else { return false } })
+        var other = CLIEventParser()
+        XCTAssertFalse(other.parse(Data(#"{"type":"result","result":"ok","permission_denials":[{"tool_name":"Bash"}]}"#.utf8)).contains { if case .notice = $0 { return true } else { return false } })
+        let off = CLICommand.chat(provider: .claude, prompt: "hi", session: nil)
+        XCTAssertFalse(off.arguments.contains("--allowedTools"), "Nothing is pre-approved unless the human turned it on")
+        let on = CLICommand.chat(provider: .claude, prompt: "hi", session: nil, allowConnectedApps: true)
+        let index = try XCTUnwrap(on.arguments.firstIndex(of: "--allowedTools"))
+        XCTAssertEqual(on.arguments[index + 1], "mcp__opengrokbot-composio", "Only the connected-apps server is pre-approved")
+        XCTAssertFalse(CLICommand.chat(provider: .codex, prompt: "hi", session: nil, allowConnectedApps: true).arguments.contains("--allowedTools"))
+        let main = Bot(id: UUID(), name: "Grok Bot", purpose: "Help", color: "white", symbol: "sparkles")
+        let withApps = BotTeamwork.instructions(bot: main, workspace: Workspace(), delegated: false, connectors: ["Google Drive", "Gmail"])
+        XCTAssertTrue(withApps.contains("Connected apps (through Composio): Google Drive, Gmail"))
+        XCTAssertTrue(withApps.contains("opengrokbot-composio"))
+        XCTAssertFalse(BotTeamwork.instructions(bot: main, workspace: Workspace(), delegated: false).contains("Connected apps (through Composio)"))
+    }
+
     func testTeachRecordingMergesClicksHidesSecretsAndBuildsAnInstruction() {
         var recording = TeachRecording()
         recording.opened("Safari"); recording.opened("Safari")

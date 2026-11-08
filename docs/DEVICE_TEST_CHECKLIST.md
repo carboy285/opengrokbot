@@ -95,3 +95,10 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Hidden browser (Windows): same; Show browser / Hide browser in the bar. If the screenshot comes back empty, say so: that is the hidden-window capture risk.
 - Composio search: with a Composio project connected, ask a Bot to search the web. The result says “via Composio” and no browser opens. With Composio removed, the search uses the hidden browser and no “via Composio” label. If Composio refuses the search tool, the result says “Composio search failed … Used the browser instead.” Report the exact message: the tool names (COMPOSIO_SEARCH_DUCK_DUCK_GO_SEARCH, COMPOSIO_SEARCH_WEB) were taken from public notes and are unverified.
 - VM on another computer: on the computer with a VM, Bot details → Linux VM → turn on Allow guest commands, then “Let my other computers use this VM”. On another computer, Bot details → VM on another computer → Choose a computer → Use the VM. The first time, approve the new device on the sharing computer. Ask the Bot to run a harmless command (for example /bin/uname -a) and check the output says which computer it ran on. Turn sharing off and confirm the command is refused. Try Mac → Windows and Windows → Mac.
+
+## 0.8.8: connected apps
+- Connect Google Drive in Connect apps (Add, Apply, Connect, authorize in the browser, Refresh). Ask a Claude Code Bot “Can you see my Google Drive?” The Bot should search for a Drive tool and answer from it. With “Let Claude Code use connected apps without asking” off, Claude Code may refuse: the chat should then say so (a note about needing permission). Turn the switch on and ask again.
+- If the Bot still says Drive is missing, look in the chat for a note starting “Connected apps did not load” (the connection to Composio failed to start) and report its exact words, plus whether Drive shows Connected in Connect apps.
+- Other AI CLIs (Codex, Gemini, OpenCode, Grok): ask the same question; they follow their own permission settings, so they may still refuse. Report what they say.
+- Prompt check: a Bot with no connected apps should not mention Composio.
+

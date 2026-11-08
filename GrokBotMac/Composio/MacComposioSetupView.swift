@@ -8,6 +8,7 @@ struct MacComposioSetupView: View {
     /// Called when "View all" is pressed on a category section.
     var viewAll: ((String) -> Void)?
     @State private var projectKey = ""
+    @AppStorage("claudeAllowConnectedApps") private var claudeAllowConnectedApps = false
 
     private var filtering: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty || category != nil }
 
@@ -61,6 +62,9 @@ struct MacComposioSetupView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle("Let Claude Code use connected apps without asking", isOn: $claudeAllowConnectedApps).toggleStyle(.switch)
+            Text("Claude Code works in the background and cannot ask you before using an app, so it refuses unless this is on. It lets only your connected apps (Composio) run without a question, for example reading Google Drive or sending an email from Gmail. Leave it off if you read pages or files you do not trust. Other AI CLIs follow their own settings.")
+                .font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary)
             Text("Connected apps are available to your selected CLI through MCP, and actions follow that CLI’s permission settings. Add more apps above and choose Apply; accounts you already authorized stay connected.")
                 .font(.system(size: 12)).lineSpacing(4).foregroundStyle(MacTheme.secondary)
             Button("Remove project from this Mac") { service.disconnect() }.disabled(service.busy)

@@ -60,3 +60,12 @@ test('forget removes matching memory only from the chosen scope', () => {
  assert.deepEqual(main.memory,['works at Acme']);assert.deepEqual(state.sharedMemory,['likes pizza too']);
  assert.ok(state.entries.some(x=>x.text.includes('Forgot 1 memory item')));assert.ok(state.entries.some(x=>x.text.includes('Nothing forgotten')));
 });
+
+test('a Bot is told which connected apps it has and how to reach them, and nothing is said when there are none', () => {
+  const bot = { id: 'a', name: 'Grok Bot', purpose: 'Help' }, state = { bots: [bot] };
+  const withApps = team.instructions(bot, state, false, ['googledrive', 'gmail']);
+  assert.match(withApps, /Connected apps \(through Composio\): googledrive, gmail/);
+  assert.match(withApps, /opengrokbot-composio/);
+  assert.doesNotMatch(team.instructions(bot, state, false), /Connected apps \(through Composio\)/);
+  assert.equal(team.connectedAppsNote([]), '');
+});
