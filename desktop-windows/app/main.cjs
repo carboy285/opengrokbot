@@ -85,8 +85,9 @@ function setupStatus(){return {providers:cli.providers.map(({package,...info})=>
 function composioStatus(){return {configured:!!composioConfiguration,toolkits:connectedTools,selected:composioConfiguration?.toolkits||[]};}
 // A streaming reply changes many times a second and each message carries the whole workspace, so updates are sent at most about twelve times a second.
 let notifyTimer=null,lastNotify=0;
-function sendNotify(){notifyTimer=null;lastNotify=Date.now();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
-function notify(){revision=randomUUID();if(notifyTimer)return;notifyTimer=setTimeout(sendNotify,Math.max(0,80-(Date.now()-lastNotify)));}
+function sendNotify(){clearTimeout(notifyTimer);notifyTimer=null;lastNotify=Date.now();if(window&&!window.isDestroyed())window.webContents.send('workspace:changed',{workspace:state,running:[...active.keys()]});}
+// The first change after a quiet moment goes out at once (so "a reply is running" is never late); a burst after it is batched.
+function notify(){revision=randomUUID();if(notifyTimer)return;const wait=80-(Date.now()-lastNotify);if(wait<=0)sendNotify();else notifyTimer=setTimeout(sendNotify,wait);}
 async function cliKeyEnv(provider){
  try{const keys=await loadJSON('cli-keys.encrypted.json',{});if(!keys[provider]||!safeStorage.isEncryptionAvailable())return {};return providerKeys.environmentFor(provider,safeStorage.decryptString(Buffer.from(keys[provider],'base64')));}catch{return {};}
 }

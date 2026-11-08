@@ -71,7 +71,7 @@ enum ComposioSearch {
     }
 
     /// Runs the search tools in order. Returns hits (empty means it ran and found nothing) or throws why it could not run.
-    static func search(query: String, userID: String, run: (_ tool: String, _ body: Data) async throws -> (Int, Data)) async throws -> [WebSearchHit] {
+    static func search(query: String, userID: String, isolation: isolated (any Actor)? = #isolation, run: (_ tool: String, _ body: Data) async throws -> (Int, Data)) async throws -> [WebSearchHit] {
         let body = try JSONSerialization.data(withJSONObject: ["user_id": userID, "arguments": ["query": query], "version": "latest"] as [String: Any])
         var last = Failure.unreachable, ran = false
         for tool in tools {
