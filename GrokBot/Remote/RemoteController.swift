@@ -278,6 +278,9 @@ final class RemoteController: ObservableObject {
             let list = try CloudCoding.decoder().decode([RemoteVM].self, from: response.body)
             vmDiagnostics["lastStatus"] = "ok, \(list.count) VM(s)"
             return list
+        } catch CloudError.approvalRequired {
+            vmDiagnostics["lastStatus"] = "waiting for approval on \(peer.name)"
+            throw CloudError.approvalRequired
         } catch {
             let text = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             vmDiagnostics["lastStatus"] = "failed"; vmDiagnostics["error"] = text

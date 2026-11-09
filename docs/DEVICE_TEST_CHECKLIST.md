@@ -129,4 +129,7 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Change the bot password inside the VM: a Bot command says “The saved guest password no longer matches. Click Update guest password.” Update it: commands work again.
 - Delete the VM in VirtualBox: the panel says “Set up again”. Delete VM in the app removes it.
 - Reboot the PC with “Start the VM when I sign in” on: the VM comes back; the Mac still lists it and a Bot command works.
-- Not built: Reset guest password without the old one; a unique guest session name per command (VBoxManage run has no such option that I could confirm).
+- Reset guest password (no old password needed): Copy guest login then shows a new password that works in the VM.
+- Mac → Computers → Old entries: Remove an offline duplicate. Needs `supabase/migrations/20261109050000_forget_device.sql` applied to the account database first.
+- Mac on an unapproved computer: the VM card says a prompt is waiting on that computer.
+- Not built: a unique guest session name per command (I could not confirm VBoxManage run accepts one; retries cover VERR_DUPLICATE).

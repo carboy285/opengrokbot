@@ -7,7 +7,7 @@ class CloudMirror{
  accountChanged(){if(this.accountGeneration!==this.cloud.accountGeneration){this.accountGeneration=this.cloud.accountGeneration;this.devices=[];this.stop();}}
  get owner(){return this.cloud.data.session?.user.id;}
  get local(){return this.cloud.data.controllers?.[this.owner?.toLowerCase()+this.slot];}
- status(){return {phase:this.phase,stage:this.stage,error:this.lastError,receivedAt:this.receivedAt,host:this.peer?.name,hostID:this.peer?.id,hosts:this.devices.filter(x=>x.kind==='host'&&x.id!==this.cloud.local?.id).map(({id,name,available,last_seen})=>({id,name,online:available&&Date.now()-Date.parse(last_seen)<90000})),fingerprint:this.local?fingerprint(this.local.publicKey):null,snapshot:this.snapshot};}
+ status(){return {phase:this.phase,stage:this.stage,error:this.lastError,receivedAt:this.receivedAt,host:this.peer?.name,hostID:this.peer?.id,hosts:newestByName(this.devices.filter(x=>x.kind==='host'&&x.id!==this.cloud.local?.id)).map(({id,name,available,last_seen})=>({id,name,online:available&&Date.now()-Date.parse(last_seen)<90000})),fingerprint:this.local?fingerprint(this.local.publicKey):null,snapshot:this.snapshot};}
  emit(){this.changed(this.status());}
  async discover(){
   if(!this.owner)throw new Error('Sign in under Settings → Computer first.');
@@ -87,4 +87,6 @@ class CloudMirror{
  async pin(bot,value){if(!this.peer||!this.owner)throw new Error('Choose a server.');await this.cloud.request('/rest/v1/rpc/opengrok_set_bot_pin',{host_device:this.peer.id,bot,pinned:value});return true;}
  stop(){this.generation++;this.peer=null;this.snapshot=null;this.phase='Choose a computer';this.stage='idle';this.lastError='';this.receivedAt=null;this.emit();}
 }
+/** The same computer can be registered twice (after a reinstall): keep only its most recently seen entry. */
+function newestByName(list){const best=new Map();for(const device of list){const known=best.get(device.name);if(!known||Date.parse(device.last_seen)>Date.parse(known.last_seen))best.set(device.name,device);}return list.filter(device=>best.get(device.name)===device);}
 module.exports={CloudMirror};

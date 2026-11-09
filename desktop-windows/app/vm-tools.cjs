@@ -81,6 +81,22 @@ TimeoutStartSec=1800
 WantedBy=multi-user.target
 `;
 
+/**
+ * Lets the app give the bot account a new password without knowing the old one: the host puts a SHA-512 crypt hash
+ * (never the password itself) in the guest property below, and this runs as root every 20 s to apply and clear it.
+ */
+const PASSWORD_RESET_SCRIPT = `#!/bin/sh
+P=/OpenGrokBot/NewPasswordHash
+H=$(VBoxControl --nologo guestproperty get $P 2>/dev/null | sed -n 's/^Value: //p')
+[ -n "$H" ] || exit 0
+case "$H" in '$6$'*) usermod -p "$H" bot && VBoxControl --nologo guestproperty set /OpenGrokBot/PasswordResetDone "$(date +%s)" ;; esac
+VBoxControl --nologo guestproperty delete $P
+`;
+const PASSWORD_RESET_UNITS = {
+  service: `[Unit]\nDescription=OpenGrokBot guest password reset\n\n[Service]\nType=oneshot\nExecStart=/bin/sh /usr/local/sbin/opengrokbot-password-reset.sh\n`,
+  timer: `[Unit]\nDescription=OpenGrokBot guest password reset check\n\n[Timer]\nOnBootSec=30\nOnUnitActiveSec=20\nAccuracySec=5\n\n[Install]\nWantedBy=timers.target\n`,
+};
+
 const NO_LOCK_DCONF = `[org/gnome/desktop/screensaver]
 lock-enabled=false
 idle-activation-enabled=false
@@ -102,12 +118,16 @@ function postInstallCommand(options = {}) {
   const autoLogin = opts.autoLogin !== false, noLock = opts.noLock !== false, sudo = opts.sudo !== false;
   const gdm = '\n[daemon]\n' + (autoLogin ? 'AutomaticLoginEnable=true\nAutomaticLogin=bot\n' : '') + 'WaylandEnable=false\n';
   const parts = [
-    'mkdir -p /etc/gdm3 /usr/local/sbin /etc/sudoers.d /etc/systemd/system/multi-user.target.wants',
+    'mkdir -p /etc/gdm3 /usr/local/sbin /etc/sudoers.d /etc/systemd/system/multi-user.target.wants /etc/systemd/system/timers.target.wants',
     // Replaces GDM's settings file (Ubuntu ships it with only comments) so there is exactly one [daemon] section.
     writeFileCommand('/etc/gdm3/custom.conf', '# Written by OpenGrokBot\n' + gdm),
     writeFileCommand('/usr/local/sbin/opengrokbot-guest-setup.sh', GUEST_SETUP_SCRIPT, '755'),
     writeFileCommand('/etc/systemd/system/opengrokbot-guest-setup.service', GUEST_SETUP_UNIT, '644'),
     'ln -sf /etc/systemd/system/opengrokbot-guest-setup.service /etc/systemd/system/multi-user.target.wants/opengrokbot-guest-setup.service',
+    writeFileCommand('/usr/local/sbin/opengrokbot-password-reset.sh', PASSWORD_RESET_SCRIPT, '700'),
+    writeFileCommand('/etc/systemd/system/opengrokbot-password-reset.service', PASSWORD_RESET_UNITS.service, '644'),
+    writeFileCommand('/etc/systemd/system/opengrokbot-password-reset.timer', PASSWORD_RESET_UNITS.timer, '644'),
+    'ln -sf /etc/systemd/system/opengrokbot-password-reset.timer /etc/systemd/system/timers.target.wants/opengrokbot-password-reset.timer',
   ];
   if (noLock) parts.push('mkdir -p /etc/dconf/profile /etc/dconf/db/local.d', writeFileCommand('/etc/dconf/profile/user', 'user-db:user\nsystem-db:local\n'), writeFileCommand('/etc/dconf/db/local.d/00-nolock', NO_LOCK_DCONF), '(dconf update || true)');
   if (sudo) parts.push(writeFileCommand('/etc/sudoers.d/90-bot-nopasswd', 'bot ALL=(ALL) NOPASSWD:ALL\n', '440') + ' && (visudo -cf /etc/sudoers.d/90-bot-nopasswd || rm -f /etc/sudoers.d/90-bot-nopasswd)');
@@ -159,4 +179,4 @@ const lockedError = text => /already locked|VBOX_E_INVALID_OBJECT_STATE|is locke
 function savedClipboardMode(vboxXml) { const match = /<Clipboard\b[^>]*\bmode="([^"]+)"/i.exec(String(vboxXml || '')); return match ? match[1] : 'Disabled'; }
 const CLIPBOARD_MODES = { disabled: 'Disabled', hosttoguest: 'HostToGuest', guesttohost: 'GuestToHost', bidirectional: 'Bidirectional' };
 
-module.exports = { vmListEntry, parseVMInfo, vmState, guestRunLevel, pickUbuntuDesktop, parseVBoxVersion, pickVBoxWindows, HYPERVISOR_NOTE, postInstallCommand, GUEST_SETUP_SCRIPT, watchDecision, friendlyGuestError, retryableGuest, lockedError, savedClipboardMode, CLIPBOARD_MODES };
+module.exports = { vmListEntry, parseVMInfo, vmState, guestRunLevel, pickUbuntuDesktop, parseVBoxVersion, pickVBoxWindows, HYPERVISOR_NOTE, postInstallCommand, GUEST_SETUP_SCRIPT, PASSWORD_RESET_SCRIPT, watchDecision, friendlyGuestError, retryableGuest, lockedError, savedClipboardMode, CLIPBOARD_MODES };

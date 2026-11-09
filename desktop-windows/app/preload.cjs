@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('desktop', {
   vmAutoLogin:(id,value)=>ipcRenderer.invoke('vm:autologin',id,value),
   vmClipboard:mode=>ipcRenderer.invoke('vm:clipboard',null,mode),
   vmPassword:password=>ipcRenderer.invoke('vm:password',null,password),
+  vmResetPassword:()=>ipcRenderer.invoke('vm:reset-password'),
   vmRemove:()=>ipcRenderer.invoke('vm:remove'),
   vmOptions:options=>ipcRenderer.invoke('vm:options',null,options),
   vmHome:()=>ipcRenderer.invoke('vm:home'),

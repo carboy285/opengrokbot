@@ -201,6 +201,15 @@ final class CloudAccount: NSObject, ObservableObject, ASWebAuthenticationPresent
         let data = try await request(path:"/rest/v1/opengrok_devices?select=id,name,kind,public_key,last_seen,available&order=last_seen.desc",method:"GET")
         devices = try CloudCoding.decoder().decode([CloudDevice].self,from:data)
     }
+    /// Removes an old entry for one of this account's devices (for example a computer listed twice after a reinstall).
+    func forget(_ device: CloudDevice) async throws {
+        guard device.id != identity?.id else { throw CloudError.message("This device cannot remove itself.") }
+        guard !device.online else { throw CloudError.message("\(device.name) is online. Only old, offline entries can be removed.") }
+        do { _ = try await request(path: "/rest/v1/rpc/opengrok_forget_device", body: ["device_id": device.id.uuidString]) }
+        catch CloudError.signedOut { throw CloudError.signedOut }
+        catch { throw CloudError.message("The account service could not remove it. It may not have the 0.9.1 update yet (\(error.localizedDescription)).") }
+        devices.removeAll { $0.id == device.id }
+    }
     func botPins(host: UUID) async throws -> [CloudBotPin] {
         let data = try await request(path: "/rest/v1/opengrok_bot_pins?select=bot_id,is_pinned&host_id=eq." + host.uuidString, method: "GET")
         return try JSONDecoder().decode([CloudBotPin].self, from: data)

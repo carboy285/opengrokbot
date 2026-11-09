@@ -131,3 +131,26 @@ test('Delete VM unregisters with --delete and forgets the record', async () => {
   assert.ok(vms.calls.some(a => a[0] === 'unregistervm' && a.includes('--delete')));
   assert.equal(vms.records[ID], undefined);
 });
+
+test('Reset guest password sends only a SHA-512 hash, waits for the guest, then tests and saves the new password', async () => {
+  let done = '', hash = '';
+  const vms = harness(args => {
+    if (args[0] === 'guestproperty' && args[1] === 'get') return done ? 'Value: ' + done + '\n' : 'No value set!\n';
+    if (args[0] === 'guestproperty' && args[1] === 'set') { hash = args[4]; done = '1700000000'; return ''; }
+    if (args[0] === 'guestcontrol') return '';
+    return 'VMState="running"\nGuestAdditionsRunLevel=2\n';
+  }, record());
+  await vms.resetPassword(ID);
+  const saved = (await vms.credentials(ID)).password;
+  assert.match(hash, /^\$6\$[./A-Za-z0-9]{16}\$[./A-Za-z0-9]{86}$/);
+  assert.notEqual(saved, 'pw');
+  assert.ok(!vms.calls.flat().includes(saved), 'the new password never appears in a VirtualBox command');
+  assert.equal(require('./sha512-crypt.cjs').sha512Crypt(saved, hash.split('$')[2]), hash);
+});
+
+test('Reset guest password on a VM without the helper explains what to do and clears the request', async () => {
+  const vms = harness(args => args[0] === 'guestproperty' && args[1] === 'get' ? 'No value set!\n' : 'VMState="running"\nGuestAdditionsRunLevel=2\n', record());
+  await assert.rejects(vms.resetPassword(ID), /cannot reset it themselves/);
+  assert.ok(vms.calls.some(a => a[0] === 'guestproperty' && a[1] === 'delete'));
+  assert.equal((await vms.credentials(ID)).password, 'pw');
+});

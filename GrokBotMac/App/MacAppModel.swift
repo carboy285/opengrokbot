@@ -271,6 +271,14 @@ final class MacAppModel: ObservableObject {
         return others.filter { newest[$0.name + "|" + $0.kind]?.id == $0.id }
     }
 
+    /// Older offline entries for computers that are listed again under the same name (shown so they can be removed).
+    func duplicateComputers() -> [CloudDevice] {
+        guard remote.account.signedIn else { return [] }
+        let shown = Set(computers().map(\.id))
+        let source = gateway ?? ensureCopyGateway()
+        return source.hosts.filter { $0.id != remote.account.localDevice?.id && !shown.contains($0.id) }
+    }
+
     /// Computers a Bot on screen can be copied to: the others, minus the one being viewed.
     func copyTargets() -> [CloudDevice] { computers().filter { $0.name != gateway?.hostName } }
 

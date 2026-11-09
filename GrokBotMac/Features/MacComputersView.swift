@@ -12,6 +12,8 @@ struct MacComputersView: View {
     @State private var copyBots = true
     @State private var copyKeys = false
     @State private var copyConnectors = false
+    @State private var duplicates: [CloudDevice] = []
+    @State private var removeNote: String?
 
     private var shownName: String { desktop.gateway?.hostName ?? "This computer" }
     /// Where the computer on screen can be copied to: this Mac when viewing another computer, and every other computer except the one on screen.
@@ -48,6 +50,7 @@ struct MacComputersView: View {
                             everythingSection
                             oneBotSection
                         }
+                        if !duplicates.isEmpty || removeNote != nil { oldEntriesSection }
                         shareSection
                     }.frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
                 }
@@ -58,8 +61,29 @@ struct MacComputersView: View {
             oneBot = desktop.copyingBot
             while !Task.isCancelled {
                 hosts = desktop.computers()
+                duplicates = desktop.duplicateComputers()
                 try? await Task.sleep(for: .seconds(2))
             }
+        }
+    }
+
+    private var oldEntriesSection: some View {
+        card {
+            Text("Old entries").font(.system(size: 17, weight: .medium))
+            Text("These computers are listed twice, usually after reinstalling OpenGrokBot. The newest entry is used; remove the old ones.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+            ForEach(duplicates) { device in
+                HStack {
+                    Text(device.name + " · last seen " + device.last_seen.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 13))
+                    Spacer()
+                    MacPillButton(title: "Remove", prominent: false) {
+                        Task {
+                            do { try await desktop.remote.account.forget(device); removeNote = "Removed the old entry for \(device.name)." }
+                            catch { removeNote = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+                        }
+                    }
+                }
+            }
+            if let removeNote { Text(removeNote).font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
         }
     }
 

@@ -220,6 +220,8 @@ struct MacRemoteVMCard: View {
             let list = try await desktop.ensureCopyGateway().vms(on: computer)
             available = list
             if list.isEmpty { note = "\(computer.name) is not sharing any VM. On that computer, open Settings → Shared Linux VM and press Set up. Only the main Bot’s VM is shared, so set it up under the main Bot (usually “Grok Bot”)." }
+        } catch CloudError.approvalRequired {
+            note = "\(computer.name) has not approved this Mac yet. A prompt is waiting on that computer: approve it there, then choose it again."
         } catch { note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
     }
 }

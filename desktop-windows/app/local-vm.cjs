@@ -161,6 +161,19 @@ class LocalVMs{
   try{await this.guestRun(id,['/bin/true'],password);}catch(error){throw new Error(/not able to logon|AUTHENTICATION/i.test(error.detail||error.message)?'That password did not work for the bot account in the VM.':error.message);}
   record.password=safeStorage.encryptString(password).toString('base64');if(record.state==='failed'){record.state='ready';record.progress='Ready. Test command passed.';}await this.save(this.records);return this.status(id);
  }
+ /** Gives the bot account a new random password without knowing the old one (VMs set up with 0.9.1 or later). Only a SHA-512 hash is sent. */
+ async resetPassword(id){
+  await this.init();const record=this.records[id];if(!record)throw new Error('Set up the VM first.');
+  if(!safeStorage.isEncryptionAvailable())throw new Error('Unlock Windows encryption first.');
+  await this.ensureRunning(id,{wait:true});
+  const readDone=async()=>{try{return /Value:\s*(\S+)/.exec(await this.run(['guestproperty','get',record.name,'/OpenGrokBot/PasswordResetDone'],15000))?.[1]||'';}catch{return '';}};
+  const before=await readDone(),password=randomBytes(24).toString('base64url');
+  await this.run(['guestproperty','set',record.name,'/OpenGrokBot/NewPasswordHash',require('./sha512-crypt.cjs').sha512Crypt(password),'--flags','TRANSIENT'],15000);
+  let done=false;for(let i=0;i<45&&!done;i++){await sleep(4000);const now=await readDone();done=!!now&&now!==before;}
+  if(!done){await this.run(['guestproperty','delete',record.name,'/OpenGrokBot/NewPasswordHash'],15000).catch(()=>{});throw new Error('The VM did not pick up the new password. VMs set up before 0.9.1 cannot reset it themselves: use Update guest password if you know it, or Delete VM and set up again.');}
+  await this.guestRun(id,['/bin/true'],password);
+  record.password=safeStorage.encryptString(password).toString('base64');if(record.state==='failed'){record.state='ready';record.progress='Ready. Test command passed.';}await this.save(this.records);return this.status(id);
+ }
  /** Changes the saved clipboard mode: the VM is shut down, the setting saved, the VM started again, and the saved file checked. */
  async setClipboard(id,mode){
   await this.init();const record=this.records[id];if(!record)throw new Error('Set up the VM first.');
