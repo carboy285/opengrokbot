@@ -444,15 +444,27 @@ async function showBotVM(bot){
   info.textContent=state.assigned?(state.progress||('VM: '+state.name+' · '+label)):state.installed?'VirtualBox found. Press Set up to create the shared VM.':'VirtualBox is not installed yet. Set up will download and install it.';
   note.textContent=state.hypervisorNote||'';controls.replaceChildren();
   clearTimeout(timer);if(state.assigned&&['installing','verifying'].includes(state.state))timer=setTimeout(()=>draw().catch(()=>{}),5000);
-  if(!state.assigned){const setup=button('Set up shared Linux VM',async()=>{setup.disabled=true;try{await result(bridge.vmSetupAll());}catch(error){info.textContent=error.message;}setup.disabled=false;await draw().catch(()=>{});});controls.append(setup);return;}
+  const option=(text,checked,disabled,handler)=>{const box=node('input');box.type='checkbox';box.checked=checked;box.disabled=disabled;box.addEventListener('change',async()=>{try{await result(handler(box.checked));await draw();}catch(error){info.textContent=error.message;box.checked=!box.checked;}});controls.append(append(node('label','vm-option'),box,node('span','',' '+text)));};
+  if(!state.assigned||state.missing){
+   if(state.missing)info.textContent='The VM was deleted outside OpenGrokBot. Press Set up again to make a new one.';
+   const setup=button(state.missing?'Set up again':'Set up shared Linux VM',async()=>{setup.disabled=true;try{await result(bridge.vmSetupAll());}catch(error){info.textContent=error.message;}setup.disabled=false;await draw().catch(()=>{});});controls.append(setup);
+   controls.append(node('p','muted','These apply to the new VM. They make it easy to use, but anyone who can open this Windows account can then use the VM.'));
+   option('Sign in to Ubuntu automatically',state.autoLogin!==false,false,value=>bridge.vmOptions({autoLogin:value}));
+   option('No screen lock in the VM',state.noLock!==false,false,value=>bridge.vmOptions({noLock:value}));
+   option('Let the VM’s bot account use sudo without a password',state.sudo!==false,false,value=>bridge.vmOptions({sudo:value}));
+   return;
+  }
   controls.append(button('Open VM console',async()=>{try{await result(bridge.vmOpen(botID));await draw();}catch(error){info.textContent=error.message;}}));
-  if(state.hasCredentials)controls.append(button('Copy guest login',async()=>{try{const login=await result(bridge.vmCredentials(botID));await navigator.clipboard.writeText('Username: '+login.username+'\nPassword: '+login.password);info.textContent='Guest login copied (user '+login.username+').';}catch(error){info.textContent=error.message;}}));
-  if(state.state==='failed')controls.append(button('Retry',async()=>{try{await result(bridge.vmRetry());await draw();}catch(error){info.textContent=error.message;}}));
-  const option=(text,checked,disabled,handler)=>{const box=node('input');box.type='checkbox';box.checked=checked;box.disabled=disabled;box.addEventListener('change',async()=>{try{await result(handler(box.checked));await draw();}catch(error){info.textContent=error.message;box.checked=!box.checked;}});controls.append(append(node('label'),box,node('span','',' '+text)));};
+  if(state.hasCredentials)controls.append(button('Copy guest login',async()=>{try{const login=await result(bridge.vmCredentials(botID));await navigator.clipboard.writeText('Username: '+login.username+'\nPassword: '+login.password);info.textContent='Guest login copied (user '+login.username+').';}catch(error){info.textContent='Could not copy: '+error.message;}}));
+  if(state.canRetry)controls.append(button('Retry',async()=>{try{await result(bridge.vmRetry());await draw();}catch(error){info.textContent=error.message;}}));
   option('Allow Bots to run commands in the VM',!!state.commandsEnabled,!state.hasCredentials,value=>bridge.vmCommands(botID,value));
   option('Let my other computers use this VM',!!state.shared,!state.commandsEnabled,value=>bridge.vmShare(botID,value));
   option('Start the VM when I sign in to Windows (so it is running when a Bot needs it)',!!state.autoStart,false,value=>bridge.vmAutoStart(botID,value));
-  option('Sign in to Ubuntu automatically (only affects the next new VM; anyone using this PC can then use the VM)',state.autoLogin!==false,false,value=>bridge.vmAutoLogin(botID,value));
+  const clip=node('select');clip.id='vm-clipboard';for(const [value,label] of [['disabled','Off'],['hosttoguest','Windows to VM'],['guesttohost','VM to Windows'],['bidirectional','Both ways']]){const o=node('option','',label);o.value=value;o.selected=state.clipboard===value;clip.append(o);}
+  clip.addEventListener('change',async()=>{clip.disabled=true;info.textContent='Restarting the VM to change copy and paste…';try{await result(bridge.vmClipboard(clip.value));info.textContent='Copy and paste setting saved.';}catch(error){info.textContent=error.message;}clip.disabled=false;await draw().catch(()=>{});});
+  controls.append(append(node('label','vm-option'),node('span','','Copy and paste: '),clip));
+  if(state.hasCredentials){const field=node('input');field.type='password';field.placeholder='New guest password';field.autocomplete='off';const save=button('Update guest password',async()=>{save.disabled=true;info.textContent='Checking the password in the VM…';try{await result(bridge.vmPassword(field.value));field.value='';info.textContent='Guest password updated and tested.';}catch(error){info.textContent=error.message;}save.disabled=false;await draw().catch(()=>{});});controls.append(append(node('div','vm-password'),field,save));}
+  controls.append(button('Delete VM…',async()=>{try{await result(bridge.vmRemove());await draw();}catch(error){info.textContent=error.message;}}));
  };try{await draw();}catch(error){info.textContent=error.message;}
  showRemoteVM(bot,content);
 }

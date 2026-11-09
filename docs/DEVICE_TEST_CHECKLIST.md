@@ -119,3 +119,14 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Restart the PC with “Start the VM when I sign in” on: the VM is running; a Bot command works. With it off, a Bot command starts the VM first.
 - Ask a Bot “is the Linux VM ready?”: it should say yes when ready, and not when it is not set up.
 - Not built: the “Type into VM” helper, deleting old device entries on the server (duplicates are only hidden on the Mac).
+
+## 0.9.1: shared Linux VM works first time
+- Clean PC (no VirtualBox, no ISO): Settings → Shared Linux VM → Set up. Note the time to “Ready. Test command passed.”
+- The VM reaches a desktop without a login screen; no screen lock after idling; `sudo true` works for bot without a password.
+- `GuestAdditionsRunLevel` reaches 2 without any manual step (VBoxManage showvminfo <vm> --machinereadable).
+- `effparavirtprovider="none"` in showvminfo.
+- Copy guest login works. Change Copy and paste to Both: the VM restarts and copying works both ways.
+- Change the bot password inside the VM: a Bot command says “The saved guest password no longer matches. Click Update guest password.” Update it: commands work again.
+- Delete the VM in VirtualBox: the panel says “Set up again”. Delete VM in the app removes it.
+- Reboot the PC with “Start the VM when I sign in” on: the VM comes back; the Mac still lists it and a Bot command works.
+- Not built: Reset guest password without the old one; a unique guest session name per command (VBoxManage run has no such option that I could confirm).

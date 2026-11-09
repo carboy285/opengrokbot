@@ -29,8 +29,60 @@ test('the newest Ubuntu 24.04 desktop ISO and the Windows VirtualBox installer a
   assert.equal(tools.pickVBoxWindows(vb, '9.9.9'), null);
 });
 
-test('the post-install command turns on auto-login and Xorg only when asked, and always adds xdotool', () => {
-  assert.match(tools.postInstallCommand(true), /AutomaticLoginEnable=true/); assert.match(tools.postInstallCommand(true), /AutomaticLogin=bot/);
-  assert.doesNotMatch(tools.postInstallCommand(false), /AutomaticLogin/);
-  for (const on of [true, false]) { assert.match(tools.postInstallCommand(on), /WaylandEnable=false/); assert.match(tools.postInstallCommand(on), /xdotool/); }
+// The command carries files as base64 so quoting survives VirtualBox's template; decode it to check what lands in the guest.
+const decoded = command => command + '\n' + [...command.matchAll(/echo ([A-Za-z0-9+/=]+) \| base64 -d/g)].map(m => Buffer.from(m[1], 'base64').toString('utf8')).join('\n');
+
+test('post-install: auto-login, no lock, passwordless sudo by default; each can be turned off; Xorg always', () => {
+  const all = decoded(tools.postInstallCommand());
+  assert.match(all, /AutomaticLoginEnable=true/); assert.match(all, /AutomaticLogin=bot/); assert.match(all, /WaylandEnable=false/);
+  assert.match(all, /lock-enabled=false/); assert.match(all, /idle-delay=uint32 0/); assert.match(all, /dconf update/);
+  assert.match(all, /bot ALL=\(ALL\) NOPASSWD:ALL/); assert.match(all, /chmod 440/); assert.match(all, /visudo -cf/);
+  const none = decoded(tools.postInstallCommand({ autoLogin: false, noLock: false, sudo: false }));
+  assert.doesNotMatch(none, /AutomaticLogin/); assert.doesNotMatch(none, /lock-enabled/); assert.doesNotMatch(none, /NOPASSWD/);
+  assert.match(none, /WaylandEnable=false/);
+  assert.doesNotMatch(decoded(tools.postInstallCommand(false)), /AutomaticLogin/, 'older boolean form still works');
+  assert.doesNotMatch(tools.postInstallCommand(), /'/, 'no quotes to break the installer template');
+});
+
+test('post-install: the repair script fixes cdrom sources and dpkg, installs and starts guest tools, and runs at boot until it works', () => {
+  const all = decoded(tools.postInstallCommand());
+  const script = tools.GUEST_SETUP_SCRIPT;
+  assert.ok(script.indexOf('cdrom') < script.indexOf('apt-get update'), 'cdrom source removed before apt-get update');
+  assert.ok(script.indexOf('dpkg --configure -a') < script.indexOf('apt-get install -y virtualbox-guest-utils'));
+  assert.match(script, /virtualbox-guest-utils virtualbox-guest-x11 xdotool/);
+  assert.match(script, /systemctl start virtualbox-guest-utils/); assert.match(script, /systemctl enable virtualbox-guest-utils/);
+  assert.match(all, /ConditionPathExists=!\/var\/lib\/opengrokbot\/guest-tools-ok/);
+  assert.match(all, /multi-user\.target\.wants\/opengrokbot-guest-setup\.service/);
+  assert.match(script, /is-active --quiet virtualbox-guest-utils; then touch/);
+});
+
+test('watcher: every guest state leads somewhere, nothing waits forever', () => {
+  const M = 60000, base = { vmState: 'running', level: 0, now: 100 * M, levelSince: 100 * M, readySince: 0, offPolls: 0, testingSince: 0, rebooted: false };
+  const d = s => tools.watchDecision({ ...base, ...s });
+  assert.equal(d({}).action, 'wait'); assert.match(d({}).progress, /Installing Ubuntu/);
+  assert.equal(d({ vmState: 'poweroff', offPolls: 1 }).action, 'wait');
+  for (const vmState of ['poweroff', 'saved', 'aborted']) assert.equal(d({ vmState, offPolls: 3 }).action, 'start');
+  assert.match(d({ level: 1, levelSince: 95 * M }).progress, /Finishing guest tools/);
+  assert.equal(d({ level: 1, levelSince: 79 * M }).action, 'reboot', 'stuck at run level 1 (driver only): restart so the boot repair runs');
+  assert.equal(d({ level: 1, levelSince: 50 * M, rebooted: true }).action, 'fail');
+  assert.equal(d({ level: 1, levelSince: 70 * M, rebooted: true }).action, 'wait');
+  assert.equal(d({ level: 2, readySince: 100 * M - 10000 }).action, 'wait', 'waits 30 s after guest tools start');
+  assert.equal(d({ level: 2, readySince: 99 * M }).action, 'test');
+  assert.equal(d({ level: 3, readySince: 99 * M, testingSince: 95 * M }).action, 'test', 'keeps testing for up to 10 minutes');
+  assert.equal(d({ level: 2, readySince: 80 * M, testingSince: 89 * M }).action, 'reboot', 'reboots once before failing');
+  const failed = d({ level: 2, readySince: 80 * M, testingSince: 89 * M, rebooted: true, lastError: 'The specified user was not able to logon on guest' });
+  assert.equal(failed.action, 'fail'); assert.equal(failed.progress, 'The saved guest password no longer matches. Click Update guest password.');
+});
+
+test('guest errors: duplicate sessions retry, a wrong password does not, lock errors are recognised', () => {
+  assert.ok(tools.retryableGuest('VBoxManage: error: VERR_DUPLICATE (0x80bb0005) GuestSession'));
+  assert.ok(!tools.retryableGuest('The specified user was not able to logon on guest'));
+  assert.ok(tools.lockedError('The machine is already locked by a session (VBOX_E_INVALID_OBJECT_STATE)'));
+  assert.equal(tools.friendlyGuestError('random'), '');
+});
+
+test('clipboard mode is read from the saved .vbox file', () => {
+  assert.equal(tools.savedClipboardMode('<Hardware><Clipboard mode="HostToGuest"/></Hardware>'), 'HostToGuest');
+  assert.equal(tools.savedClipboardMode('<Hardware/>'), 'Disabled');
+  assert.deepEqual(Object.keys(tools.CLIPBOARD_MODES), ['disabled', 'hosttoguest', 'guesttohost', 'bidirectional']);
 });
