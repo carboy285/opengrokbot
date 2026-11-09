@@ -83,6 +83,18 @@ struct RemoteVM: Codable, Sendable, Identifiable, Hashable {
     var botName: String
     var state: String
     var id: UUID { botID }
+    init(botID: UUID, botName: String, state: String) { self.botID = botID; self.botName = botName; self.state = state }
+    private enum Keys: String, CodingKey { case botID, botName, name, state }
+    /// Older Windows builds sent `name` instead of `botName`, so either is accepted. A missing botID is reported by name.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: Keys.self)
+        guard let id = try values.decodeIfPresent(UUID.self, forKey: .botID) else {
+            throw CloudError.message("The other computer’s VM list is missing “botID”. Update OpenGrokBot on both computers.")
+        }
+        botID = id
+        botName = try values.decodeIfPresent(String.self, forKey: .botName) ?? values.decodeIfPresent(String.self, forKey: .name) ?? "Shared VM"
+        state = try values.decodeIfPresent(String.self, forKey: .state) ?? "ready"
+    }
 }
 /// How a command sent to a shared VM is going. `status` is running, done or error.
 struct RemoteVMResult: Codable, Sendable {

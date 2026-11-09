@@ -43,6 +43,14 @@ final class MacBotVMs: ObservableObject {
     func sharedWithComputers(_ id: UUID) -> Bool { preferences.bool(forKey: "bot-vm-shared-" + id.uuidString) }
     func setShared(_ on: Bool, id: UUID) { preferences.set(on, forKey: "bot-vm-shared-" + id.uuidString); objectWillChange.send() }
 
+    /// One line for the Bot's instructions: whether the shared VM can be used right now.
+    func statusNote(for bot: Bot) -> String {
+        if let link = remoteLink(bot.id) { return "Shared Linux VM status: READY on \(link.hostName) (\(link.vmName)). You can use vm_exec now; do not ask the human to set it up." }
+        let home = homeBotID?() ?? bot.id
+        if assigned(home) != nil && commandsEnabled(home) { return "Shared Linux VM status: READY on this Mac. You can use vm_exec now; do not ask the human to set it up." }
+        return "Shared Linux VM status: NOT set up or commands are off. Do not send vm_exec; if Linux is needed, tell the human to set it up in Settings → Shared Linux VM."
+    }
+
     private static func checkCommand(_ argv: [String]) throws {
         guard (1...16).contains(argv.count), argv[0].hasPrefix("/"), argv.reduce(0, { $0 + $1.utf8.count }) <= 16000, !argv.contains(where: { $0.contains("\0") }) else { throw CloudError.message("Use 1–16 guest command arguments, starting with an absolute Linux executable path.") }
     }
@@ -211,7 +219,7 @@ struct MacRemoteVMCard: View {
         do {
             let list = try await desktop.ensureCopyGateway().vms(on: computer)
             available = list
-            if list.isEmpty { note = "\(computer.name) is not sharing any VM. On that computer, open a Bot’s Linux VM settings, turn on “Allow guest commands”, then “Let my other computers use this VM”." }
+            if list.isEmpty { note = "\(computer.name) is not sharing any VM. On that computer, open Settings → Shared Linux VM and press Set up. Only the main Bot’s VM is shared, so set it up under the main Bot (usually “Grok Bot”)." }
         } catch { note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
     }
 }

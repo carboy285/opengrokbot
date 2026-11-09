@@ -252,6 +252,7 @@ final class MacAppModel: ObservableObject {
         if let copyGateway { return copyGateway }
         let made = MacGateway(source: remote.account)
         copyGateway = made
+        MacRemoteHost.vmDiagnosticsProvider = { [weak made] in made?.remote.vmDiagnosticsText ?? "none" }
         return made
     }
 
@@ -259,7 +260,15 @@ final class MacAppModel: ObservableObject {
     func computers() -> [CloudDevice] {
         guard remote.account.signedIn else { return [] }
         let source = gateway ?? ensureCopyGateway()
-        return source.hosts.filter { $0.id != remote.account.localDevice?.id }
+        // The same computer can be registered twice (reinstall). Show only its newest entry.
+        let others = source.hosts.filter { $0.id != remote.account.localDevice?.id }
+        var newest: [String: CloudDevice] = [:]
+        for device in others {
+            let key = device.name + "|" + device.kind
+            if let known = newest[key], known.last_seen >= device.last_seen { continue }
+            newest[key] = device
+        }
+        return others.filter { newest[$0.name + "|" + $0.kind]?.id == $0.id }
     }
 
     /// Computers a Bot on screen can be copied to: the others, minus the one being viewed.
@@ -643,7 +652,7 @@ extension MacAppModel {
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
         let comparing = aiConfiguration(for: bot).replyMode == .compare && providersToRun(for: bot).count > 1
-        let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil, connectors: composio.configured ? composio.applied.sorted().map { ComposioCatalog.app($0)?.name ?? $0 } : []) + (comparing ? "\nComparison turn: several models answer the same question side by side. Answer in plain text only; do not use opengrokbot-action tools.\n" : MacDeviceActions.shared.promptNote())
+        let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil, connectors: composio.configured ? composio.applied.sorted().map { ComposioCatalog.app($0)?.name ?? $0 } : []) + "\n" + MacBotVMs.shared.statusNote(for: bot) + (comparing ? "\nComparison turn: several models answer the same question side by side. Answer in plain text only; do not use opengrokbot-action tools.\n" : MacDeviceActions.shared.promptNote())
         let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
         let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")
         let feedback = history.filter { $0.kind == .activity && $0.senderBotID == nil }.suffix(8).map { $0.detail ?? $0.text }.joined(separator: "\n")

@@ -433,14 +433,26 @@ document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey)||
 if(window.desktop&&bridge.checkUpdates){result(bridge.checkUpdates()).then(update=>{if(update?.available&&!$('.update-button')){const pill=button('↓',()=>showSettings('Updates'),'update-button');pill.setAttribute('aria-label','Update available');pill.title='Update available';$('.sidebar footer .footer-actions').append(pill);}}).catch(()=>{});}
 
 async function showBotVM(bot){
- const content=panel('Shared Linux VM');append(content,node('p','muted','Install VirtualBox 7.2+, then download an Ubuntu 24.04 desktop ISO (x64) or supply a prepared Linux OVA. Setup creates a VM for this Bot: 2 CPU cores, 4 GB RAM and a 32 GB disk for ISO installs. OVA imports keep their disk size.'));
- append(content,button('Download VirtualBox',()=>bridge.openDocs('https://www.virtualbox.org/wiki/Downloads')),button('Download Ubuntu Linux',()=>bridge.openDocs('https://releases.ubuntu.com/24.04/')));
- const info=node('p','muted','Loading VM settings…'),controls=node('div');append(content,info,controls,node('p','muted','The console opens locally in VirtualBox. The AI CLI remains on the host. Optional Bot commands run inside Linux through Guest Additions; no separate guest AI agent is installed. ISO installation takes time inside the console. Copy guest login after setup.'));
- const draw=async()=>{const state=await result(bridge.vmStatus(bot.id));info.textContent=state.assigned?'VM: '+state.name+' · '+state.state:state.installed?'VirtualBox found. Choose a Linux guest image to set up.':'Install VirtualBox, then reopen this panel.';controls.replaceChildren();
-  const setup=button(state.assigned?'Open VM console':'Choose image and set up VM…',async()=>{setup.disabled=true;info.textContent=state.assigned?'Opening console…':'Setting up VM. This may take several minutes…';try{await result(state.assigned?bridge.vmOpen(bot.id):bridge.vmSetup(bot.id));await draw();}catch(error){info.textContent=error.message;setup.disabled=false;}});setup.disabled=!state.installed||state.busy;controls.append(setup);
-  if(state.hasCredentials){const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=state.commandsEnabled;checkbox.addEventListener('change',async()=>{try{await result(bridge.vmCommands(bot.id,checkbox.checked));}catch(error){info.textContent=error.message;}});append(controls,append(node('label'),checkbox,node('span','',' Allow this Bot to run guest commands (requires Guest Additions)')));}
-  if(state.hasCredentials){const share=node('input');share.type='checkbox';share.checked=!!state.shared;share.disabled=!state.commandsEnabled;share.addEventListener('change',async()=>{try{await result(bridge.vmShare(bot.id,share.checked));}catch(error){info.textContent=error.message;}});append(controls,append(node('label'),share,node('span','',' Let my other computers use this VM (needs guest commands above; you can turn it off at any time)')));}
-  if(state.hasCredentials)controls.append(button('Copy guest login',async()=>{try{const login=await result(bridge.vmCredentials(bot.id));await navigator.clipboard.writeText('Username: '+login.username+'\nPassword: '+login.password);info.textContent='Guest login copied.';}catch(error){info.textContent=error.message;}}));
+ const content=panel('Shared Linux VM');
+ const home=await result(bridge.vmHome()).catch(()=>null),botID=home?.botID||bot.id;
+ if(bot.id!==botID)append(content,node('p','muted','Only the main Bot’s VM is shared. Set it up under “'+(home?.name||'the main Bot')+'”.'));
+ append(content,node('p','muted','One button installs VirtualBox if needed, downloads Ubuntu 24.04, creates the VM, installs it, checks that commands work and shares it with your other computers. It needs about 25 GB of free disk space and takes a while.'));
+ const info=node('p','muted','Loading VM settings…'),note=node('p','muted'),controls=node('div');append(content,info,note,controls);
+ let stop=()=>{};const off=bridge.onVMProgress?.(value=>{if(value&&value.text)info.textContent=value.text;});stop=off||stop;
+ let timer=null;const draw=async()=>{const state=await result(bridge.vmStatus(botID));
+  const label={installing:'Installing',verifying:'Checking',ready:'Ready',failed:'Needs attention'}[state.state]||state.state;
+  info.textContent=state.assigned?(state.progress||('VM: '+state.name+' · '+label)):state.installed?'VirtualBox found. Press Set up to create the shared VM.':'VirtualBox is not installed yet. Set up will download and install it.';
+  note.textContent=state.hypervisorNote||'';controls.replaceChildren();
+  clearTimeout(timer);if(state.assigned&&['installing','verifying'].includes(state.state))timer=setTimeout(()=>draw().catch(()=>{}),5000);
+  if(!state.assigned){const setup=button('Set up shared Linux VM',async()=>{setup.disabled=true;try{await result(bridge.vmSetupAll());}catch(error){info.textContent=error.message;}setup.disabled=false;await draw().catch(()=>{});});controls.append(setup);return;}
+  controls.append(button('Open VM console',async()=>{try{await result(bridge.vmOpen(botID));await draw();}catch(error){info.textContent=error.message;}}));
+  if(state.hasCredentials)controls.append(button('Copy guest login',async()=>{try{const login=await result(bridge.vmCredentials(botID));await navigator.clipboard.writeText('Username: '+login.username+'\nPassword: '+login.password);info.textContent='Guest login copied (user '+login.username+').';}catch(error){info.textContent=error.message;}}));
+  if(state.state==='failed')controls.append(button('Retry',async()=>{try{await result(bridge.vmRetry());await draw();}catch(error){info.textContent=error.message;}}));
+  const option=(text,checked,disabled,handler)=>{const box=node('input');box.type='checkbox';box.checked=checked;box.disabled=disabled;box.addEventListener('change',async()=>{try{await result(handler(box.checked));await draw();}catch(error){info.textContent=error.message;box.checked=!box.checked;}});controls.append(append(node('label'),box,node('span','',' '+text)));};
+  option('Allow Bots to run commands in the VM',!!state.commandsEnabled,!state.hasCredentials,value=>bridge.vmCommands(botID,value));
+  option('Let my other computers use this VM',!!state.shared,!state.commandsEnabled,value=>bridge.vmShare(botID,value));
+  option('Start the VM when I sign in to Windows (so it is running when a Bot needs it)',!!state.autoStart,false,value=>bridge.vmAutoStart(botID,value));
+  option('Sign in to Ubuntu automatically (only affects the next new VM; anyone using this PC can then use the VM)',state.autoLogin!==false,false,value=>bridge.vmAutoLogin(botID,value));
  };try{await draw();}catch(error){info.textContent=error.message;}
  showRemoteVM(bot,content);
 }

@@ -52,7 +52,7 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.8.9/ --output=artifacts/OpenGrokBot-0.8.9-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.9.0/ --output=artifacts/OpenGrokBot-0.9.0-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,6 +121,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
+          0.9.0: the shared Linux VM sets itself up. On Windows, Settings → Shared Linux VM → Set up installs VirtualBox if needed, downloads and checks Ubuntu 24.04, creates the VM, installs it with automatic sign-in, waits until commands work, then shares it. The Mac can now list the PC's VM (a name mismatch broke this in 0.8.9). Opening a running VM no longer errors, a stopped VM is started before a Bot command, and Bots are told whether the VM is ready. Not tried on real devices: VirtualBox install, Ubuntu download and install, auto-login and the progress watcher.
           0.8.9: one shared VM for all your Bots, with a hand-over pop-up. All Bots now use the same Linux VM: set it up once under Settings → Computer, or choose a VM that another of your computers is sharing (Mac or Windows, either way); the per-Bot VM settings are gone. When a Bot needs you in the VM (to sign in, pick something, approve something only you can), it asks, a pop-up appears with the VM screen where it can be shown and an Open VM button, the Bot waits, and it carries on when you press “I’m done — continue” (or stops if you press Cancel task). You can control the VM from the pop-up itself, even when it is on another computer: click the picture of its screen to click, type into the box, and use the Enter, Tab, Esc and Backspace buttons. Each action takes a second or two, and it needs xdotool and an Xorg desktop session in the VM (on Ubuntu: sudo apt install xdotool, and sign in with “Ubuntu on Xorg”, because Wayland does not work). Open VM still opens the VM’s own window on the computer that has it. Bots still search the web through Composio and browse on their own. Also included: everything from 0.8.9 (connected apps fix, smoother app, pinned tiles, hidden browser, Composio search). Nothing here has been tried on real devices.
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
@@ -137,6 +138,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.8.9" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.9.0" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.8.9 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.8.9 · One shared VM, hand-over pop-up' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.9.0 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.9.0 · Shared Linux VM, one button' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

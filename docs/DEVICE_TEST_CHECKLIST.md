@@ -109,3 +109,13 @@ Automated checks (unit tests, fixture UI tests and builds) cannot prove that voi
 - Remote control: in the VM install xdotool (sudo apt install xdotool) and sign in with “Ubuntu on Xorg” (not Wayland). In the pop-up click the picture to click in the VM, type in the box, and use ↩ Tab Esc ⌫. Try it for a VM on this computer and on another one; each action takes a second or two. Without xdotool the pop-up should say what is missing. The picture needs remote VM viewing on the sharing computer, and Screen Recording on a Mac. Report how the delay and click accuracy feel.
 - Two Bots asking at once: the second request waits until the first is answered.
 
+
+## 0.9.0: shared Linux VM, one button
+- Windows → Settings → Shared Linux VM → Set up. Watch progress: VirtualBox, Ubuntu download (checksum), creating, installing Ubuntu, Guest Additions, “Ready. Test command passed.”
+- With Hyper-V / Memory Integrity on, the panel shows a slowness note; the installer should not freeze.
+- The VM signs in to Ubuntu by itself (option can be turned off before setup).
+- Mac → Shared VM on another computer: the PC is listed once with its VM; press “Use it”. Copy diagnostics shows the VM link status.
+- Open VM console while the VM is already running: no “already locked” error.
+- Restart the PC with “Start the VM when I sign in” on: the VM is running; a Bot command works. With it off, a Bot command starts the VM first.
+- Ask a Bot “is the Linux VM ready?”: it should say yes when ready, and not when it is not set up.
+- Not built: the “Type into VM” helper, deleting old device entries on the server (duplicates are only hidden on the Mac).

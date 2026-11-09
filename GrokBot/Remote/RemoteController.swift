@@ -272,9 +272,22 @@ final class RemoteController: ObservableObject {
     /// Linux VMs another computer is sharing with this account.
     func vmList(on host: CloudDevice? = nil) async throws -> [RemoteVM] {
         guard let peer = host ?? connection else { throw CloudError.message("Choose a computer first.") }
-        let response = try await client.fetch(peer, target: "/v1/vms")
-        return try CloudCoding.decoder().decode([RemoteVM].self, from: response.body)
+        vmDiagnostics = ["host": peer.name, "checkedAt": ISO8601DateFormatter().string(from: Date()), "appVersion": Self.appVersion, "protocolVersion": "1"]
+        do {
+            let response = try await client.fetch(peer, target: "/v1/vms")
+            let list = try CloudCoding.decoder().decode([RemoteVM].self, from: response.body)
+            vmDiagnostics["lastStatus"] = "ok, \(list.count) VM(s)"
+            return list
+        } catch {
+            let text = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            vmDiagnostics["lastStatus"] = "failed"; vmDiagnostics["error"] = text
+            throw CloudError.message("Could not read \(peer.name)’s VM list: \(text) (this app \(Self.appVersion)). If it keeps happening, update OpenGrokBot on both computers.")
+        }
     }
+    /// What the last attempt to list a shared VM did, for Copy diagnostics.
+    private(set) var vmDiagnostics: [String: String] = [:]
+    static var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown" }
+    var vmDiagnosticsText: String { (try? String(data: JSONSerialization.data(withJSONObject: vmDiagnostics, options: [.sortedKeys]), encoding: .utf8)) ?? "{}" }
     /// A picture of a shared VM's screen on another computer (it must have remote VM viewing turned on).
     func vmPreview(vm: UUID, on host: CloudDevice? = nil) async throws -> RemoteBrowserPreview {
         guard let peer = host ?? connection else { throw CloudError.message("Choose a computer first.") }

@@ -351,6 +351,17 @@ final class MacConnectionsTests: XCTestCase {
         XCTAssertEqual(list.first?.botName, "Research")
     }
 
+    /// The same JSON file is checked by the Windows host's tests, so the two apps cannot drift apart again.
+    func testSharedVMListFixtureAndOlderWindowsShapeDecode() throws {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/vms.json")
+        let list = try CloudCoding.decoder().decode([RemoteVM].self, from: try Data(contentsOf: fixture))
+        XCTAssertEqual(list.count, 1); XCTAssertEqual(list.first?.state, "ready"); XCTAssertEqual(list.first?.botName, "Shared VM on Bens-Windows-PC")
+        let id = UUID().uuidString
+        let older = try CloudCoding.decoder().decode([RemoteVM].self, from: Data(#"[{"botID":"\#(id)","name":"Old PC","state":"ready"}]"#.utf8))
+        XCTAssertEqual(older.first?.botName, "Old PC", "0.8.9 Windows sent name instead of botName")
+        XCTAssertThrowsError(try CloudCoding.decoder().decode([RemoteVM].self, from: Data(#"[{"name":"x"}]"#.utf8)))
+    }
+
     func testDisabledServicesAndWritesAreRefusedWithoutPrompting() async throws {
         let suite = "org.opengrokbot.tests.apple." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }

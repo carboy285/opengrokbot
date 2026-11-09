@@ -184,10 +184,13 @@ final class MacRemoteHost: ObservableObject {
         Task { if !enabled, account.signedIn { try? await account.sync(available:false) } }
     }
     func reconnect() { guard account.signedIn else { return }; stop(persistPreference: false); start() }
+    /// Set by the app model so the host's diagnostics can include the VM link's last attempt.
+    static var vmDiagnosticsProvider: () -> String = { "none" }
     var diagnostics: String {
         let formatter = ISO8601DateFormatter()
         let values: [String: String] = ["state": connectionState, "phoneAccess": String(enabled), "lastHeartbeat": lastHeartbeat.map(formatter.string(from:)) ?? "none", "lastPhoneRequest": lastPhoneRequest.map(formatter.string(from:)) ?? "none", "approvedPhones": String(account.controllers.filter { account.approved($0) }.count)]
-        return (try? String(data: JSONEncoder().encode(values), encoding: .utf8)) ?? "Connection diagnostics unavailable."
+        let base = (try? String(data: JSONEncoder().encode(values), encoding: .utf8)) ?? "Connection diagnostics unavailable."
+        return base + "\nappVersion: " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown") + "\nprotocolVersion: 1" + "\nvmLink: " + MacRemoteHost.vmDiagnosticsProvider()
     }
     func approve(_ device: CloudDevice, allowed: Bool) {
         do {
