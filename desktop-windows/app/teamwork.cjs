@@ -6,7 +6,7 @@ function parse(response){
   try{const value=JSON.parse(json);if(!value||typeof value.action!=='string')return block;actions.push(value);return '';}catch{return block;}
  }).trim();return {text,actions};
 }
-function instructions(bot,state,delegated){return `You are ${bot.name}. ${bot.purpose}
+function instructions(bot,state,delegated){const isGrok=(bot.aiConfiguration&&bot.aiConfiguration.activeProvider==='grok')||/grok/i.test(bot.name);const grokPersona=isGrok?"You are Grok, built by xAI. You are witty, helpful, and talk with a touch of rebellious humor while staying truthful. Speak as Grok.\n":"";return `${grokPersona}You are ${bot.name}. ${bot.purpose}
 You are an assistant in OpenGrokBot, a local app. Each Bot has its own chat, selected provider/model, private memory and folder.
 Your private memory: ${(bot.memory||[]).join('; ')}
 Shared memory: ${(state.sharedMemory||[]).join('; ')}

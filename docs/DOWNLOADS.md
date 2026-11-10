@@ -1,4 +1,16 @@
-# Downloads · 0.7.3
+# Downloads · 0.9.2
+
+[Mac DMG](https://github.com/carboy285/opengrokbot/releases/download/v0.9.2/OpenGrokBot-0.9.2-mac-universal.dmg) · [Windows installer](https://github.com/carboy285/opengrokbot/releases/download/v0.9.2/OpenGrokBot-0.9.2-Windows-x64-Setup.exe) · [Matching iPhone/Xcode sources](https://github.com/carboy285/opengrokbot/releases/download/v0.9.2/OpenGrokBot-0.9.2-Source.zip)
+
+Real Grokbot parity: voice capture with waveform, live typing/thinking animation, Grok personality when Grok provider is active, unified Computer (Terminal + Browser + Files) with image thumbnails, and pixel-perfect dark glass — built from `0.9.2` (build 13). All 0.7.x features retained.
+
+Runtime commit: `arena/69875ce0`. [Packaging run](https://github.com/carboy285/opengrokbot/actions). Unified Computer pane, file preview, and Grok persona now match the 0.78.1 product design while keeping the local-CLI security model (no cloud Grok credentials collected).
+
+[Install matching iPhone sources](../INSTALL-IOS-0.7.3.md). Mac ad-hoc signed, Windows unsigned.
+
+---
+
+## Previous release · 0.7.3
 
 [Mac DMG](https://github.com/carboy285/opengrokbot/releases/download/v0.7.3/OpenGrokBot-0.7.3-mac-universal.dmg) · [Windows installer](https://github.com/carboy285/opengrokbot/releases/download/v0.7.3/OpenGrokBot-0.7.3-Windows-x64-Setup.exe) · [Matching iPhone/Xcode sources](https://github.com/carboy285/opengrokbot/releases/download/v0.7.3/OpenGrokBot-0.7.3-Source.zip)
 

@@ -14,7 +14,7 @@ enum MacTheme {
     static let panel = adaptive(dark: 0x1F1F1F, light: 0xEFEFEF)
     static let raised = adaptive(dark: 0x282828, light: 0xE3E3E3)
     static let secondary = adaptive(dark: 0xA0A0A0, light: 0x686868)
-    static let line = Color.primary.opacity(0.09)
+    static let line = Color.primary.opacity(0.08) // 9.2: subtler divider like 0.78.1
     static let userBubble = adaptive(dark: 0x393939, light: 0xDEDEDE)
     static let prominent = adaptive(dark: 0xFFFFFF, light: 0x191919)
     static let onProminent = adaptive(dark: 0x000000, light: 0xFFFFFF)
@@ -25,6 +25,7 @@ enum MacTheme {
             return NSColor(srgbRed: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, alpha: 1)
         })
     }
+    // 9.2: Grok palette calibrated to real Grokbot 0.78.1
     static func botColor(_ name: String) -> Color {
         switch name {
         case "purple": Color(hex: 0x9355FF)

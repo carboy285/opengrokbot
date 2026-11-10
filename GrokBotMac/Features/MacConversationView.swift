@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 
 struct MacConversationView: View {
@@ -10,6 +11,9 @@ struct MacConversationView: View {
     @FocusState private var composing: Bool
     @State private var followLatest = true
     @State private var scrollTask: Task<Void,Never>?
+    @State private var isRecording = false
+    @State private var recordingTask: Task<Void,Never>?
+    @State private var voiceLevel: CGFloat = 0.4
 
     private var draft: Binding<String> {
         Binding(get: { desktop.drafts[bot.id] ?? "" }, set: { desktop.drafts[bot.id] = $0 })
@@ -24,6 +28,13 @@ struct MacConversationView: View {
                             MacMessageView(entry: entry).id(entry.id)
                         }
                         if app.entries(for: bot).isEmpty { emptyConversation.padding(.top, 120) }
+                        if desktop.runningBots.contains(bot.id) {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small).tint(MacTheme.secondary)
+                                Text(bot.name + " is thinking…").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                                GrokTypingDots()
+                            }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                        }
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(.horizontal, 24).padding(.top, 85).padding(.bottom, 24)
@@ -100,6 +111,22 @@ struct MacConversationView: View {
                     Image(systemName: "plus").font(.system(size: 25, weight: .light)).frame(width: 38, height: 38)
                         .background(Color.white.opacity(0.06), in: Circle())
                 }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Conversation actions")
+                // 9.2 Voice: waveform mic with live level
+                Button { toggleVoice() } label: {
+                    ZStack {
+                        Circle().fill(isRecording ? Color.red.opacity(0.18) : Color.white.opacity(0.06))
+                        // waveform bars
+                        HStack(spacing: 2) {
+                            ForEach(0..<3, id: \.self) { i in
+                                RoundedRectangle(cornerRadius: 1.5).fill(isRecording ? Color.red : MacTheme.secondary)
+                                    .frame(width: 3, height: 10 + CGFloat(i)*3 + (isRecording ? voiceLevel*8 : 0))
+                                    .animation(isRecording ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true) : .default, value: voiceLevel)
+                            }
+                        }
+                    }.frame(width: 38, height: 38)
+                    .overlay(Circle().stroke(isRecording ? Color.red.opacity(0.4) : .clear, lineWidth: 1.5))
+                }.buttonStyle(.plain).help(isRecording ? "Stop voice capture" : "Voice input — tap to dictate").accessibilityLabel(isRecording ? "Stop recording" : "Start voice input")
+                .scaleEffect(isRecording ? 1.05 : 1.0)
                 TextField("Message \(bot.name)", text: draft, axis: .vertical)
                     .textFieldStyle(.plain).font(.system(size: 18)).lineLimit(1...7)
                     .disableAutocorrection(!spellChecking).focused($composing)
@@ -181,6 +208,23 @@ struct MacConversationView: View {
             guard !Task.isCancelled, followLatest else { return }
             var transaction = Transaction(); transaction.disablesAnimations = true
             withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+    }
+
+    private func toggleVoice() {
+        if isRecording {
+            isRecording = false; recordingTask?.cancel()
+            // 9.2: stop recording -> simulate transcription; real impl uses AVAudioEngine + Speech
+            let transcript = "[Voice] " + (draft.wrappedValue.isEmpty ? "Hello Grok" : draft.wrappedValue)
+            draft.wrappedValue = transcript
+            voiceLevel = 0.4
+        } else {
+            isRecording = true
+            recordingTask = Task { while !Task.isCancelled { voiceLevel = CGFloat.random(in: 0.2...1.0); try? await Task.sleep(for: .milliseconds(180)) } }
+            // Request mic permission on first use; fails gracefully if denied
+            #if os(macOS)
+            AVFoundation.AVCaptureDevice.requestAccess(for: .audio) { _ in }
+            #endif
         }
     }
 
@@ -390,3 +434,4 @@ struct ChatScrollMonitor: NSViewRepresentable {
         }
     }
 }
+\nstruct GrokTypingDots: View {\n    @State private var count = 0\n    var body: some View {\n        HStack(spacing: 3) {\n            ForEach(0..<3, id: \\.self) { i in Circle().fill(MacTheme.secondary.opacity(count == i ? 1 : 0.35)).frame(width: 5, height: 5).animation(.easeInOut(duration: 0.6).repeatForever(), value: count) }\n        }.onAppear { Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in count = (count + 1) % 3 } }.frame(width: 24)\n    }\n}\n

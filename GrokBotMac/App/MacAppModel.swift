@@ -376,6 +376,7 @@ extension MacAppModel {
         let key = bot.id.uuidString + "|" + cli.id + (model.isEmpty ? "" : "|" + model)
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
+        // 9.2 Grok persona injected in BotTeamwork.instructions when provider is grok
         let instructions = BotTeamwork.instructions(bot: bot, workspace: app.workspace, delegated: delivery != nil)
         let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
         let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")

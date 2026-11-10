@@ -53,3 +53,24 @@
 #primary-bot{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;padding:16px 18px 22px;max-height:32vh;overflow:auto}.primary-card{width:118px;margin:0!important;padding:14px 8px!important;min-width:0}.primary-card>span:last-child{font-size:14px;white-space:normal}.primary-card .avatar{--size:60px}.folder-filter{margin:8px 18px 10px;width:calc(100% - 36px);padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text)}.bot-row{cursor:grab}.bot-row:active{cursor:grabbing}.custom-avatar{background:none!important;transform:none!important;position:relative;display:inline-block;flex:none}.custom-avatar:before,.custom-avatar:after{display:none!important}.custom-avatar svg,.custom-avatar img{width:100%;height:100%;display:block}.custom-avatar img{object-fit:cover;border-radius:50%}.custom-avatar b{position:absolute;bottom:-2px;right:-2px}.avatar-edit{border:0;background:none}.avatar-edit>.avatar{--size:86px}.avatar-preview{--size:100px;align-self:center}.avatar-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:15px;margin:20px 0}.avatar-grid>button{padding:12px;border-radius:15px;background:var(--panel)}.avatar-grid .avatar{--size:44px}.colors{flex-wrap:wrap}.delivery-state{display:block;text-align:right;font-size:11px;color:var(--muted);margin:5px 8px}.pending{opacity:.75}.pending .pill{margin:8px}.connection-state{border-left:3px solid #10bf70;padding:12px 16px;background:var(--panel);border-radius:6px}.connection-state.offline,.connection-state.locked{border-color:#ff7012}.connection-state.approval-required{border-color:#f69a0a}.fingerprint{font-family:monospace;user-select:text;line-height:1.7}.composio-settings form{display:grid;gap:12px}.update-available:after{content:'';position:absolute;width:8px;height:8px;background:#10bf70;border-radius:50%;right:3px;top:3px}.switcher-results{display:grid;gap:8px;overflow:auto}.switcher-results>button{text-align:left;background:var(--panel);padding:12px 18px}.message-body{min-width:0}.message-body .bubble{overflow-wrap:anywhere;line-height:1.65}.composer-area .microphone{display:none}#save-note,#attachment-button{min-width:44px;min-height:44px;cursor:pointer}#save-note:disabled{opacity:.4;cursor:default}#attachment-button{color:var(--bot-accent)}:focus-visible{outline:2px solid var(--bot-accent,#9355ff);outline-offset:4px}#workspace{transition:grid-template-columns .18s ease}.inspector-body>.pill{text-align:left}.avatar-edit{cursor:pointer}
 .phone-state{display:block;margin:0 auto 10px;padding:7px 13px;border-radius:20px;font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--line)}.phone-state[data-state="approval-required"]{color:#f69a0a}.phone-state[data-state="offline"]{color:#ff7012}.phone-state[data-state="online"]{color:#10bf70}
 #messages{scroll-behavior:auto;overflow-anchor:none}#message-content{min-height:1px}
+
+/* 9.2 Real Grokbot parity — voice, typing, unified computer, pixel polish */
+.voice-mic { width:38px; height:38px; border-radius:50%; background:var(--panel); border:1px solid var(--line); font-size:18px; display:grid; place-items:center; transition: all .15s ease; }
+.voice-mic.recording { background:#ff2948; color:white; border-color:#ff2948; animation: pulse-rec 1.2s infinite; }
+@keyframes pulse-rec { 0%{box-shadow:0 0 0 0 #ff294855} 70%{box-shadow:0 0 0 8px #ff294800} 100%{box-shadow:0 0 0 0 #ff294800} }
+.thinking-indicator { display:flex; gap:8px; align-items:center; padding:12px 16px; background:var(--panel); border-radius:18px; margin:12px auto; max-width:760px; font-size:14px; color:var(--muted); }
+.thinking-bubble { display:flex; gap:8px; align-items:center; }
+.typing-dots { display:inline-block; letter-spacing:2px; animation: blink-dots 1.2s infinite; }
+@keyframes blink-dots { 0%{opacity:.3} 50%{opacity:1} 100%{opacity:.3} }
+.thumb-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap:10px; margin-top:12px; }
+.thumb { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; text-align:center; font-size:12px; }
+.computer-card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:10px; }
+.composer-area { position:relative; }
+#voice-button { flex:none; }
+#workspace { background: var(--bg); }
+/* Liquid glass polish like real Grokbot: more blur, subtle border */
+.glass { backdrop-filter: blur(20px) saturate(140%); border:1px solid rgba(255,255,255,0.10); box-shadow: 0 8px 24px rgba(0,0,0,0.20), inset 0 1px 1px rgba(255,255,255,0.06); }
+.chat-heading { font-weight:600; letter-spacing:-0.02em; padding:10px 18px; }
+.bubble { line-height:1.6; font-size:17px; border-radius:22px; transition: all .12s ease; }
+.message-row.bot .bubble { background: #1f1f1f; border: 1px solid rgba(255,255,255,0.06); }
+.message-row.user .bubble { background: var(--user); }

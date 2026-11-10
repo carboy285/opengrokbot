@@ -48,9 +48,11 @@ enum BotTeamwork {
     }
 
     static func instructions(bot: Bot, workspace: Workspace, delegated: Bool) -> String {
+        let isGrok = (bot.aiConfiguration?.activeProvider == .grok) || bot.name.lowercased().contains("grok")
+        let grokPersona = isGrok ? "You are Grok, built by xAI. You are witty, helpful, and talk with a touch of rebellious humor while staying truthful. Speak as Grok.\n" : ""
         let roster = workspace.bots.filter { $0.memberIDs == nil }.map { "\($0.id.uuidString): \($0.name) — \(String($0.purpose.prefix(300)))" }.joined(separator: "\n")
         return """
-        You are \(bot.name). \(bot.purpose)
+        \(grokPersona)You are \(bot.name). \(bot.purpose)
         You are an assistant in OpenGrokBot, a local app. Each Bot has its own chat, model, memory and working folder.
         Your saved private memory: \((bot.memory ?? []).joined(separator: "; "))
         Shared memory: \((workspace.sharedMemory ?? []).joined(separator: "; "))

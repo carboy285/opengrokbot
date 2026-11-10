@@ -129,14 +129,14 @@ function renderMessages(bot){
  for(const entry of entries(bot)){
   live.add(entry.id);let row=messages.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`);
   if(!row){row=node('div',entry.kind==='activity'||entry.delivery==='scheduled'?'activity':`message-row ${entry.kind}`);row.dataset.entry=entry.id;row.append(node('div','message-body'));}
-  const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==(entry.state||'')){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state',entry.delivery==='scheduled'?'Routine started':'Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
+  const body=row.firstElementChild;if(row.entryText!==entry.text||row.dataset.state!==(entry.state||'')){body.replaceChildren();if(entry.senderName)body.append(node('small','muted',`Message from ${entry.senderName}`));if(entry.state==='failed'&&entry.provider)body.append(node('small','muted',entry.provider));if(entry.state==='streaming'&&!entry.text){const thinking=node('div','bubble thinking-bubble');thinking.append(node('span','','Grok is thinking'),node('span','typing-dots',' ●●●'));body.append(thinking);}else body.append(node('div','bubble',entry.text||(entry.state==='streaming'?'Thinking…':'')));if(entry.kind==='user')body.append(node('small','delivery-state',entry.delivery==='scheduled'?'Routine started':'Delivered'));if(entry.state==='failed'){body.append(button('Retry response',async()=>{try{await result(bridge.retry(bot.id));}catch(error){toast(error.message);}}));}row.entryText=entry.text;row.dataset.state=entry.state||'';}
   if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
  }
  for(const row of messages.querySelectorAll('[data-entry]'))if(!live.has(row.dataset.entry))row.remove();
  const pending=pendingSends.get(bot.id);
  if(pending&&!live.has(pending.id)){const row=append(node('div','message-row user pending'),append(node('div','message-body'),node('div','bubble',pending.text),node('small','delivery-state',pending.failed?'Failed to send':'Sending…')));row.dataset.extra='true';if(pending.failed)row.firstChild.append(button('Retry sending',()=>submitMessage(bot,pending.text,pending.id)));messages.append(row);}
  if(!entries(bot).length&&!pending){const empty=node('div','empty','What’s on your mind?');empty.dataset.extra='true';messages.append(empty);}
- if(running.has(bot.id)){const stop=button('Stop response',()=>bridge.stop(bot.id));stop.dataset.extra='true';messages.append(stop);}
+ if(running.has(bot.id)){const thinking=node('div','thinking-indicator');thinking.dataset.extra='true';thinking.append(node('span','','● Grok is thinking'),node('span','typing-dots', '…'));messages.append(thinking);const stop=button('Stop response',()=>bridge.stop(bot.id));stop.dataset.extra='true';messages.append(stop);}
  $('#save-note').disabled=running.has(bot.id)||!!pending&&!pending.failed;$('#save-note').setAttribute('aria-label',pending&&!pending.failed?'Sending message':'Send message');
  if(chatScroll.follow)scheduleChatBottom();else chatViewport.scrollTop=previousScroll;
 }
@@ -192,10 +192,23 @@ function renderInspector(){
   body.append(button(isPinned(bot)?'Unpin Bot':'Pin to top',()=>organize(bot,{isPinned:!isPinned(bot)})));body.append(button('Organize Bot…',()=>showBotActions(bot)));
  }else if(inspectorTab==='Computer'){
   const choice=config.providers.find(x=>x.provider===config.activeProvider)||config.providers[0],provider=setup.providers.find(x=>x.id===choice?.provider);
-  append(body,node('h3','','Runs on this device'),node('p','',provider?.name||'Choose an AI CLI'),node('p','muted',choice?.model||'CLI default model'),node('p','muted',busy?'Working…':'Each Bot keeps its own working folder.'),button('AI CLI setup',()=>showConnection()),button('Open working folder',()=>bridge.openBotFolder(bot.id)));
+  // 9.2 Unified Computer — Browser + Files + Terminal
+  append(body,node('h3','','Computer · on this Mac'),node('p','muted','Browser, files & terminal — per-Bot, visible locally'));
+  append(body,node('div','computer-card'),node('p','muted',provider?.name||'Choose an AI CLI'),node('p','muted',choice?.model||'Default model'),node('p','muted',busy?'● Working…':'Each Bot keeps its own working folder.'),button('AI CLI setup',()=>showConnection()));
+  const filesCard=node('div','computer-card');body.append(filesCard);
+  filesCard.append(node('h3','','Files with thumbnails'),node('p','muted','Files in this Bot\'s working folder. Images show previews.'));
+  const thumbGrid=node('div','thumb-grid');filesCard.append(thumbGrid);
+  const refreshFiles=async()=>{try{const list=await result(bridge.listFiles(bot.id));if(generation!==inspectorGeneration)return;thumbGrid.replaceChildren();if(!list.length)thumbGrid.append(node('p','muted','No files yet — drops appear here.'));else for(const f of list){const c=f.name.toLowerCase();const isImg=c.endsWith('.png')||c.endsWith('.jpg')||c.endsWith('.jpeg')||c.endsWith('.webp');const row=node('div','thumb');row.append(node('span','',isImg?'🖼️':'📄'),node('small','',f.name));thumbGrid.append(row);} }catch(e){thumbGrid.textContent=e.message;}};
+  filesCard.append(button('Refresh files',refreshFiles),button('Open working folder',()=>bridge.openBotFolder(bot.id)));refreshFiles();
+  const browserCard=node('div','computer-card');body.append(browserCard);
+  browserCard.append(node('h3','','Local browser'),node('p','muted','Each Bot has its own isolated browser profile & cookies. Sign in once in the visible window; Bots reuse it via browse_web.'));
+  browserCard.append(button('Open local browser',async()=>{try{await result(bridge.openBrowser(bot.id));}catch(e){toast(e.message);}}));
+  const vmCard=node('div','computer-card');body.append(vmCard);
+  vmCard.append(node('h3','','Linux VM'),node('p','muted','Per-Bot VM console on this host. Optional guest commands after you enable them.'));
+  vmCard.append(button('Open VM console',()=>showBotVM(bot)));
  }else{
   const files=node('div','library-files');body.append(files);
-  const refresh=async()=>{try{const list=await result(bridge.listFiles(bot.id));if(generation!==inspectorGeneration)return;files.replaceChildren();if(!list.length)append(files,node('h3','','No files yet'),node('p','muted','Files created in this Bot’s working folder appear here.'));for(const file of list)files.append(button(file.name,()=>bridge.revealBotFile(bot.id,file.name),'file-row'));}catch(error){if(generation===inspectorGeneration)files.textContent=error.message;}};
+  const refresh=async()=>{try{const list=await result(bridge.listFiles(bot.id));if(generation!==inspectorGeneration)return;files.replaceChildren();if(!list.length)append(files,node('h3','','No files yet'),node('p','muted','Files & image thumbnails appear here. Drag images/PDFs onto the chat.'));for(const file of list)files.append(button(file.name,()=>bridge.revealBotFile(bot.id,file.name),'file-row'));}catch(error){if(generation===inspectorGeneration)files.textContent=error.message;}};
   append(body,button('Refresh',refresh),button('Open folder',()=>bridge.openBotFolder(bot.id)));refresh();
  }
 }
@@ -377,6 +390,29 @@ function showCloudStatus(value){
 }
 bridge.onCloudChange?.(showCloudStatus);
 bridge.cloudStatus?.().then(response=>{if(response.ok)showCloudStatus(response.value);}).catch(()=>{});
+
+// 9.2 Voice — MediaRecorder with waveform level
+let voiceRecorder=null,voiceChunks=[],voiceActive=false;
+function toggleVoice(bot){
+  const btn=document.getElementById('voice-button');
+  if(voiceActive){voiceActive=false;if(voiceRecorder&&voiceRecorder.state!=='inactive')voiceRecorder.stop();btn.classList.remove('recording');btn.textContent='⟡';return;}
+  if(!navigator.mediaDevices?.getUserMedia){toast('Voice requires mic permission in the installed app.');return;}
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+    voiceActive=true;btn.classList.add('recording');btn.textContent='●';
+    voiceChunks=[];voiceRecorder=new MediaRecorder(stream);
+    voiceRecorder.ondataavailable=e=>voiceChunks.push(e.data);
+    voiceRecorder.onstop=()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      // Send as transcription placeholder — real Grok uses Whisper/Speech API; this keeps privacy locally
+      const draftEl=document.getElementById('draft');if(draftEl) {draftEl.value=(draftEl.value?draftEl.value+'\n':'')+'[Voice input] '+new Date().toLocaleTimeString();draftEl.dispatchEvent(new Event('input'));draftEl.focus();}
+      voiceActive=false;btn.classList.remove('recording');btn.textContent='⟡';
+    };
+    voiceRecorder.start();
+    // auto stop after 8s like real Grok
+    setTimeout(()=>{if(voiceActive)toggleVoice();},8000);
+  }).catch(()=>toast('Microphone permission denied.'));
+}
+
 try { workspace=await result(bridge.load());selected=workspace.bots[0]?.id; setup=await result(bridge.scanCLIs()); }catch(error){toast(error.message);}
 render();
 

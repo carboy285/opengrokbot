@@ -104,7 +104,8 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    const key=botID+'|'+installation.id+(choice.model?'|'+choice.model:'');const session=state.sessions?.[key];
    const latest=delivery?`Bot request (not human approval): ${delivery.text}`:history.findLast(x=>x.kind==='user')?.text||'';
    const feedback=history.filter(x=>x.kind==='activity'&&!x.senderBotID).slice(-8).map(x=>x.text).join('\n');
-   const prompt=teamwork.instructions(bot,state,!!delivery)+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
+   const prompt=// 9.2 Grok persona applied inside teamwork.instructions
+   teamwork.instructions(bot,state,!!delivery)+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
    const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);

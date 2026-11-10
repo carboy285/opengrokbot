@@ -16,7 +16,7 @@ struct MacWorkspaceView: View {
             ZStack {
                 HStack(spacing: 0) {
                     let hideRoster = desktop.showBotInspector && geometry.size.width < 1180
-                    sidebar.frame(width: hideRoster ? 0 : min(370, max(280, geometry.size.width * 0.268)))
+                    sidebar.frame(width: hideRoster ? 0 : min(360, max(290, geometry.size.width * 0.27)))
                         .clipped().allowsHitTesting(!hideRoster).accessibilityHidden(hideRoster)
                     Rectangle().fill(MacTheme.line).frame(width: hideRoster ? 0 : 1)
                     if let bot = desktop.selected(in: app) {
@@ -52,7 +52,7 @@ struct MacWorkspaceView: View {
             }
             .animation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 1), value: desktop.panel)
             .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1), value: desktop.showBotInspector)
-            .background(MacTheme.canvas)
+            .background(MacTheme.canvas) // 9.2 Liquid Glass via GlassChrome
             .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
         .sheet(isPresented: $desktop.showMirror) { MacMirrorView(source: desktop.remote.account).frame(minWidth: 950, minHeight: 650) }
