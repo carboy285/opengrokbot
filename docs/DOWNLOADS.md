@@ -4,6 +4,8 @@
 
 Real Grokbot parity: voice capture with waveform, live typing/thinking animation, Grok personality when Grok provider is active, unified Computer (Terminal + Browser + Files) with image thumbnails, and pixel-perfect dark glass — built from `0.9.2` (build 13). All 0.7.x features retained.
 
+> **Build note for 9.2:** Mac DMG + Windows EXE + Source.zip are produced by `.github/workflows/release-desktop.yml` on macOS-26 / windows-latest runners. Dispatch via GitHub Actions → *Package desktop workspace* → Run workflow (signed=false for dev ad-hoc). Publishing uploads 3+ files and creates `v{VERSION}` release automatically.
+
 Runtime commit: `arena/69875ce0`. [Packaging run](https://github.com/carboy285/opengrokbot/actions). Unified Computer pane, file preview, and Grok persona now match the 0.78.1 product design while keeping the local-CLI security model (no cloud Grok credentials collected).
 
 [Install matching iPhone sources](../INSTALL-IOS-0.7.3.md). Mac ad-hoc signed, Windows unsigned.

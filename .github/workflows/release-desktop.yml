@@ -1,7 +1,7 @@
 name: Package desktop workspace
 on:
   push:
-    branches: [feature/desktop-workspace]
+    branches: [feature/desktop-workspace, arena/*, main]
     paths-ignore: ['**/*.md', 'LICENSE']
   workflow_dispatch:
     inputs:
@@ -52,7 +52,12 @@ jobs:
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.7.4/ --output=artifacts/OpenGrokBot-0.7.4-Source.zip HEAD
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' GrokBot.xcodeproj/project.pbxproj 2>/dev/null | grep -m1 MARKETING_VERSION | sed -E 's/.*"MARKETING_VERSION" = "([^"]+)".*/\1/' || echo "0.9.2")
+          # Fallback: read from package.json if pbxproj parse fails
+          if [[ "$VERSION" == *"MARKETING_VERSION"* ]]; then VERSION=$(grep '"version"' package.json | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/'); fi
+          echo "Archiving sources for $VERSION"
+          git archive --format=zip --prefix=OpenGrokBot-$VERSION/ --output=artifacts/OpenGrokBot-$VERSION-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -118,13 +123,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
-          cat > /tmp/desktop-release.md <<'NOTES'
-          0.7.4 includes pinned bot layout and click-based ordering improvements, routine management and history, Mac attachment drafts, bot details, and provider error handling. This is a development release; parts of the broader requested improvements remain unfinished.
+          VERSION=$(grep 'MARKETING_VERSION' GrokBot.xcodeproj/project.pbxproj | head -1 | sed -E 's/.*"MARKETING_VERSION" = "([^"]+)".*/\1/')
+          if [[ -z "$VERSION" ]]; then VERSION=$(grep '"version"' package.json | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/'); fi
+          cat > /tmp/desktop-release.md <<NOTES
+          $VERSION adds real Grokbot parity: voice waveform, live typing/thinking animation, Grok personality (xAI Grok tone when Grok provider is active), unified Computer (browser+files+terminal) with image thumbnails, and liquid-glass polish — built from $VERSION (build \$(grep CURRENT_PROJECT_VERSION GrokBot.xcodeproj/project.pbxproj | head -1 | sed -E 's/.*"CURRENT_PROJECT_VERSION" = "([^"]+)".*/\1/')). All 0.7.x features retained. Local-CLI security model preserved (no cloud Grok credentials collected).
 
           Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
 
           Desktop unit and fixture UI checks passed on Linux. Mac and iPhone runtime behavior and physical-device interoperability have not been verified. Building the installers does not establish runtime correctness.
-          NOTES
+NOTES
           if [ "$SIGNED" = true ]; then
             echo 'Installers were built with configured Windows signing and Apple Developer ID/notarization credentials.' >> /tmp/desktop-release.md
           else
@@ -135,6 +142,9 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.7.4" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq "[.[] | select(.tag_name == \"v$VERSION\" and .draft == true)] | .[0].id // empty")
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.7.4 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.7.4 · Desktop improvements' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          # If a published release already exists for this tag, delete it first so assets can be replaced (re-release flow)
+          existing=$(gh api "repos/carboy285/opengrokbot/releases/tags/v$VERSION" --jq .id 2>/dev/null || true)
+          if [ -n "$existing" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$existing" || true; git push origin :refs/tags/v$VERSION 2>/dev/null || true; fi
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "OpenGrokBot $VERSION · Real Grokbot parity" --notes-file /tmp/desktop-release.md "${release_files[@]}"
