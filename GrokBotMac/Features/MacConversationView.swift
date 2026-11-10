@@ -434,4 +434,20 @@ struct ChatScrollMonitor: NSViewRepresentable {
         }
     }
 }
-\nstruct GrokTypingDots: View {\n    @State private var count = 0\n    var body: some View {\n        HStack(spacing: 3) {\n            ForEach(0..<3, id: \\.self) { i in Circle().fill(MacTheme.secondary.opacity(count == i ? 1 : 0.35)).frame(width: 5, height: 5).animation(.easeInOut(duration: 0.6).repeatForever(), value: count) }\n        }.onAppear { Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in count = (count + 1) % 3 } }.frame(width: 24)\n    }\n}\n
+
+struct GrokTypingDots: View {
+    @State private var count = 0
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: .self) { i in
+                Circle().fill(MacTheme.secondary.opacity(count == i ? 1 : 0.35))
+                    .frame(width: 5, height: 5)
+                    .animation(.easeInOut(duration: 0.6).repeatForever(), value: count)
+            }
+        }
+        .onAppear {
+            Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in count = (count + 1) % 3 }
+        }
+        .frame(width: 24)
+    }
+}
