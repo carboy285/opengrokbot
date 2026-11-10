@@ -1,0 +1,144 @@
+name: Package desktop workspace
+on:
+  push:
+    branches: [feature/desktop-workspace]
+    paths-ignore: ['**/*.md', 'LICENSE']
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Build signed Windows and notarized Mac installers (requires signing secrets)
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
+      MACOS_SIGN_IDENTITY: ${{ github.event_name == 'workflow_dispatch' && inputs.signed && secrets.MACOS_SIGN_IDENTITY || '-' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Developer ID signing and notarization
+        if: env.SIGNED == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          test -n "$CERTIFICATE" && test -n "$CERTIFICATE_PASSWORD" && test "$MACOS_SIGN_IDENTITY" != '-' && test -n "$APPLE_ID" && test -n "$APPLE_TEAM_ID" && test -n "$APPLE_APP_PASSWORD" || { echo 'Configure the Apple signing secrets listed in docs/DESKTOP_0_7.md before requesting signed installers.' >&2; exit 1; }
+          KEYCHAIN_PASS=$(uuidgen)
+          KEYCHAIN="$RUNNER_TEMP/opengrokbot.keychain-db"
+          export CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+          python3 - <<'PY'
+          import os, base64
+          from pathlib import Path
+          Path(os.environ['CERTIFICATE_PATH']).write_bytes(base64.b64decode(os.environ['CERTIFICATE']))
+          PY
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN"
+          xcrun notarytool store-credentials OpenGrokBotCI --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+          echo 'MACOS_NOTARY_PROFILE=OpenGrokBotCI' >> "$GITHUB_ENV"
+      - name: Package universal Mac installer
+        run: ./scripts/build-macos.sh
+      - name: Archive matching sources
+        run: git archive --format=zip --prefix=OpenGrokBot-0.9.2/ --output=artifacts/OpenGrokBot-0.9.2-Source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-mac
+          path: |
+            artifacts/macos/*.dmg
+            artifacts/macos/*.sha256
+            artifacts/*-Source.zip
+          if-no-files-found: error
+      - name: Remove signing keychain
+        if: always() && env.SIGNED == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/opengrokbot.keychain-db" || true
+  ios_sources:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile matching iPhone sources without running tests
+        run: >-
+          xcodebuild -project GrokBot.xcodeproj -scheme GrokBot
+          -configuration Release -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO build
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
+      CSC_LINK: ${{ github.event_name == 'workflow_dispatch' && inputs.signed && secrets.WINDOWS_CERTIFICATE_PFX_BASE64 || '' }}
+      CSC_KEY_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.signed && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Require credentials for a signed installer
+        if: env.SIGNED == 'true'
+        shell: pwsh
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) { throw 'Configure WINDOWS_CERTIFICATE_PFX_BASE64 and WINDOWS_CERTIFICATE_PASSWORD before requesting signed installers.' }
+      - run: npm ci
+      - name: Run desktop unit tests
+        run: npm run test:desktop
+      - name: Package Windows installer
+        shell: pwsh
+        run: npm run dist:windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: artifacts/windows/*Setup.exe
+          if-no-files-found: error
+  publish:
+    needs: [mac, windows, ios_sources]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: downloads
+          merge-multiple: true
+      - name: Publish development downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
+        run: |
+          cat > /tmp/desktop-release.md <<'NOTES'
+          0.9.2: Real Grokbot parity — voice waveform, live typing/thinking, Grok personality (xAI tone when Grok provider active), unified Computer (browser + files + terminal) with image thumbnails, and liquid-glass polish. Built from 0.9.2 (build 13) with all 0.7.x features retained. Local-CLI security preserved (no cloud Grok credentials collected). Voice capture uses on-device mic with waveform level and 8s auto-stop; thinking indicator shows 'Grok is thinking…' while streaming.
+          0.9.1: the shared Linux VM works first time. Fixes from a real Windows 11 PC with Hyper-V: guest tools auto-install and repair, retry VERR_DUPLICATE 10min, no lock failures, auto sign-in, clipboard, etc.
+          0.9.0: the shared Linux VM sets itself up. On Windows, Settings → Shared Linux VM → Set up installs VirtualBox if needed, downloads Ubuntu 24.04, creates VM with auto sign-in.
+
+          Download the Mac DMG or Windows Setup EXE, or open GrokBot.xcodeproj from the source archive for iPhone installation. Keep your existing bundle identifier and signing team for iPhone upgrades.
+
+          Desktop unit and fixture UI checks passed on Linux. Voice, microphone, echo cancellation, Mac and iPhone runtime behavior, and physical-device interoperability have not been verified. Building the installers does not establish runtime correctness.
+          NOTES
+          if [ "$SIGNED" = true ]; then
+            echo 'Installers were built with configured Windows signing and Apple Developer ID/notarization credentials.' >> /tmp/desktop-release.md
+          else
+            echo 'Development installers: the Mac app is ad-hoc signed and not notarized; the Windows installer is unsigned. Trusted publisher signing still requires the owner’s signing credentials.' >> /tmp/desktop-release.md
+          fi
+          # Artifacts preserve the macos subdirectory; upload files, never directories.
+          shopt -s nullglob
+          release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
+          test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
+          # A failed asset upload can leave an unpublished draft. Public releases are kept.
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.9.2" and .draft == true)] | .[0].id // empty')
+          if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
+          gh release create v0.9.2 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.9.2 · Shared Linux VM works first time' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
