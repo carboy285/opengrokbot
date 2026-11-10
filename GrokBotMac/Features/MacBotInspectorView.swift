@@ -190,23 +190,20 @@ struct MacBotInspectorView: View {
     private var library: some View {
         VStack(spacing: 18) {
             if files.isEmpty {
-                Image(systemName: "sparkles.rectangle.stack").font(.system(size: 30, weight: .light)).foregroundStyle(MacTheme.secondary)
+                Image(systemName: "doc.text").font(.system(size: 30, weight: .light)).foregroundStyle(MacTheme.secondary)
                 Text("No files yet").font(.system(size: 18, weight: .medium))
-                Text("Files & image thumbnails from this Bot's working folder appear here. Drag images or PDFs onto the chat.").font(.system(size: 14)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
+                Text("Files created in this Bot’s working folder appear here.")
+                    .font(.system(size: 14)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
-                    ForEach(files, id: \.path) { file in
-                        Button { NSWorkspace.shared.activateFileViewerSelecting([file]) } label: {
-                            VStack(spacing: 8) {
-                                if let data = try? Data(contentsOf: file), let nsImg = NSImage(data: data) {
-                                    Image(nsImage: nsImg).resizable().scaledToFill().frame(height: 84).clipped().clipShape(RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
-                                } else {
-                                    ZStack { RoundedRectangle(cornerRadius: 10).fill(MacTheme.panel); Image(systemName: file.pathExtension.lowercased() == "pdf" ? "doc.richtext" : "doc.text").font(.system(size: 22)).foregroundStyle(MacTheme.secondary) }.frame(height: 84)
-                                }
-                                Text(file.lastPathComponent).font(.system(size: 12)).lineLimit(1).multilineTextAlignment(.center)
-                            }.padding(10).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-                        }.buttonStyle(.plain).help("Show \(file.lastPathComponent) in Finder")
-                    }
+                ForEach(files, id: \.path) { file in
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([file]) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.text").font(.system(size: 22))
+                            Text(file.lastPathComponent).font(.system(size: 14)).lineLimit(2).multilineTextAlignment(.leading)
+                            Spacer()
+                            Image(systemName: "arrow.up.right").foregroundStyle(MacTheme.secondary)
+                        }.padding(15).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 14))
+                    }.buttonStyle(.plain).help("Show \(file.lastPathComponent) in Finder")
                 }
             }
             if let fileError { Text(fileError).font(.caption).foregroundStyle(MacTheme.secondary) }
@@ -214,69 +211,28 @@ struct MacBotInspectorView: View {
                 Button("Refresh") { refreshFiles() }
                 Button("Open folder") { desktop.openWorkingDirectory(for: bot) }
             }.controlSize(.small).padding(.top, 6)
-        }.padding(.horizontal, 20)
+        }.padding(.horizontal, 28)
     }
 
     private var computer: some View {
-        VStack(spacing: 22) {
-            // 9.2 Header — unified Computer like real Grokbot
-            VStack(spacing: 6) {
-                Image(systemName: "desktopcomputer").font(.system(size: 34, weight: .light)).foregroundStyle(MacTheme.secondary)
-                Text("Computer · on this Mac").font(.system(size: 18, weight: .medium))
-                Text("Browser, files & terminal — per-Bot, visible locally").font(.system(size: 12)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
-            }
+        VStack(spacing: 18) {
+            Image(systemName: "desktopcomputer").font(.system(size: 34, weight: .light)).foregroundStyle(MacTheme.secondary)
+            Text("Runs on this Mac").font(.system(size: 18, weight: .medium))
             if let provider = desktop.providersToRun(for: bot).first {
-                HStack(spacing: 8) { Image(systemName: "terminal.fill").foregroundStyle(MacTheme.secondary); Text(provider.cli.provider.name).font(.system(size: 14, weight: .medium)); Text(provider.choice.model.isEmpty ? "default model" : provider.choice.model).font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
-                Text(desktop.runningBots.contains(bot.id) ? "● Working…" : (desktop.providerHealth[provider.cli.provider] ?? "Installed · authentication not yet verified")).font(.system(size: 12)).foregroundStyle(desktop.runningBots.contains(bot.id) ? Color.green : MacTheme.secondary)
+                Label(provider.cli.provider.name, systemImage: "terminal").font(.system(size: 15))
+                Text(provider.choice.model.isEmpty ? "CLI default model" : provider.choice.model).font(.system(size: 13))
+                Text(desktop.runningBots.contains(bot.id) ? "Working…" : (desktop.providerHealth[provider.cli.provider] ?? "Installed · authentication not yet verified")).font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
             } else {
-                Label("Choose an AI CLI to start chatting.", systemImage: "exclamationmark.triangle").font(.system(size: 13)).foregroundStyle(.orange)
+                Text("Choose an AI CLI to start chatting.").font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
             }
-            // Files quick preview with thumbnails
-            VStack(alignment: .leading, spacing: 8) {
-                HStack { Text("Files").font(.headline); Spacer(); Button("Open folder") { desktop.openWorkingDirectory(for: bot) }.font(.caption) }
-                if files.isEmpty {
-                    Text("No files yet — drops appear here with thumbnails.").font(.caption).foregroundStyle(MacTheme.secondary)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(files.prefix(6), id: \.path) { file in
-                                VStack(spacing: 6) {
-                                    if let data = try? Data(contentsOf: file), let ns = NSImage(data: data) {
-                                        Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
-                                    } else {
-                                        ZStack { RoundedRectangle(cornerRadius: 8).fill(MacTheme.panel); Image(systemName: "doc.text").foregroundStyle(MacTheme.secondary) }.frame(width: 64, height: 64)
-                                    }
-                                    Text(file.lastPathComponent).font(.caption2).lineLimit(1).frame(width: 64)
-                                }
-                            }
-                        }
-                    }
-                }
-                HStack(spacing: 10) {
-                    Button("Refresh") { refreshFiles() }.controlSize(.small)
-                    Button("Open browser") { do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription } }.controlSize(.small)
-                }
-            }.padding(12).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-            // Browser pane preview
-            VStack(alignment: .leading, spacing: 8) {
-                HStack { Label("Browser", systemImage: "globe").font(.headline); Spacer(); Text("isolated per Bot").font(.caption2).foregroundStyle(MacTheme.secondary) }
-                Text("Each Bot has its own cookie jar. Sign in once in the visible window; Bots reuse it via browse_web.").font(.caption).foregroundStyle(.secondary)
-                Button { do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription } } label: { Label("Open local browser", systemImage: "arrow.up.forward.app") }.buttonStyle(.bordered).controlSize(.small)
-                // Live preview handled via remote snapshots every ~3s when enabled
-                Text("Preview available to Mac/iPhone viewers when signed in.").font(.caption2).foregroundStyle(.secondary).padding(8).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-            }.padding(12).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-            // VM pane
-            VStack(alignment: .leading, spacing: 8) {
-                HStack { Label("Linux VM", systemImage: "server.rack").font(.headline); Spacer() }
-                if MacBotVMs.shared.assigned(bot.id) != nil {
-                    Label("VM assigned — open console on this Mac", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
-                    Button("Open VM console") { Task { await MacBotVMs.shared.open(bot) } }.controlSize(.small)
-                } else {
-                    Text("No VM for this Bot. Set up in Bot details → Linux VM.").font(.caption).foregroundStyle(MacTheme.secondary)
-                }
-            }.padding(12).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-            if desktop.runningBots.contains(bot.id) { Button("Stop response") { desktop.stop(botID: bot.id) }.buttonStyle(.borderedProminent).tint(.red) }
-            Button("AI CLI setup") { desktop.panel = .setup }.font(.caption)
+            Text("Each Bot keeps its own working folder on this Mac.")
+                .font(.system(size: 14)).foregroundStyle(MacTheme.secondary).multilineTextAlignment(.center)
+            Text("AI CLI work runs on this Mac. Keep the app running for scheduled work; VM guest commands run in the assigned VM when enabled.").font(.caption).foregroundStyle(.secondary)
+            Button("Open browser") { do { _ = try LocalBotBrowsers.shared.open(bot) } catch { app.errorMessage = error.localizedDescription } }
+            Button("Open working folder") { desktop.openWorkingDirectory(for: bot) }
+            if MacBotVMs.shared.assigned(bot.id) != nil { Button("Open VM console") { Task { await MacBotVMs.shared.open(bot) } } }
+            if desktop.runningBots.contains(bot.id) { Button("Stop response") { desktop.stop(botID: bot.id) } }
+            Button("AI CLI setup") { desktop.panel = .setup }
             DisclosureGroup("Recent recorded activity") {
                 let events = app.entries(for: bot).filter { $0.kind == .activity }.suffix(5)
                 if events.isEmpty { Text("No recorded activity yet.").font(.caption).foregroundStyle(.secondary) }
@@ -287,8 +243,8 @@ struct MacBotInspectorView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            Text("Tool calls are audited here. Remote viewers see browser/VM previews every ~3s.").font(.caption2).foregroundStyle(.secondary)
-        }.padding(.horizontal, 20)
+            Text("Detailed tool calls appear only when recorded by the app.").font(.caption).foregroundStyle(.secondary)
+        }.padding(.horizontal, 28)
     }
 
     private func saveRoutine() {
