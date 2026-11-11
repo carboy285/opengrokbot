@@ -228,7 +228,7 @@ async function readOnePassword(item){
 }
 let approvalRules=null;
 const getApprovalRules=async()=>approvalRules??=ruleSet.sanitize(await loadJSON('approval-rules.json',{}));
-const devices=deviceActions.create({composioSearch:async query=>{if(!composioConfiguration)return null;const hits=await require('./composio-search.cjs').search({key:composioConfiguration.key,userID:settings.composioUserID,query});return hits;},rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:async(title,detail)=>{const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;},logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
+const devices=deviceActions.create({composioSearch:async query=>{if(!composioConfiguration)return null;const hits=await require('./composio-search.cjs').search({key:composioConfiguration.key,userID:settings.composioUserID,query});return hits;},rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:(title,detail)=>requestApproval(title,detail),logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
 // A VM on another computer: its own connection (with its own identity), so it never interferes with viewing another computer.
 const vmLink = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,()=>{},{slot:':vm'});
 let remoteVMLinks=null;
@@ -368,6 +368,21 @@ async function removeEntry(id){
 async function vmStatusNote(){try{await ensureState();const link=(await vmLinks()).shared;if(link)return `Shared Linux VM status: READY on ${link.hostName} (${link.vmName}). You can use vm_exec now; do not ask the human to set it up.`;const status=await localVMs.status(homeBotID());if(status.assigned&&status.state==='ready'&&status.commandsEnabled)return 'Shared Linux VM status: READY on this PC. You can use vm_exec now; do not ask the human to set it up.';if(status.assigned&&['installing','verifying'].includes(status.state))return 'Shared Linux VM status: still installing. Do not send vm_exec yet.';}catch{}return 'Shared Linux VM status: NOT set up or commands are off. Do not send vm_exec; if Linux is needed, tell the human to set it up in Settings → Shared Linux VM.';}
 const homeBotID=fallback=>state?.bots.find(bot=>bot.isMain===true)?.id||fallback;
 /** A Bot asking the human to use the shared VM. One request is shown at a time; the Bot waits for the answer. */
+// 0.9.2: a Bot asking for the human's OK shows as a card in the chat (Grok Bot style), not a system dialog.
+// The card defaults to Deny; a reload or crash of the window denies whatever was waiting. Without a window, the dialog is used.
+const approvalWaiters=new Map();
+async function dialogApproval(title,detail){const response=await dialog.showMessageBox(window,{type:'warning',message:title,detail,buttons:['Deny','Approve'],defaultId:0,cancelId:0,noLink:true});return response.response===1;}
+function requestApproval(title,detail){
+ if(!window||window.isDestroyed()||window.webContents.isLoading())return dialogApproval(title,detail);
+ const id=randomUUID();
+ return new Promise(resolve=>{
+  approvalWaiters.set(id,{resolve,title:String(title).slice(0,300),detail:String(detail||'').slice(0,2000)});
+  if(!window.isVisible())window.show();if(window.isMinimized())window.restore();try{window.flashFrame(true);}catch{}
+  window.webContents.send('approval:request',{id,title:String(title).slice(0,300),detail:String(detail||'').slice(0,2000)});
+ });
+}
+function settleApproval(id,approved){const waiter=approvalWaiters.get(id);if(!waiter)return false;approvalWaiters.delete(id);waiter.resolve(approved===true);if(!approvalWaiters.size&&window&&!window.isDestroyed()){try{window.flashFrame(false);}catch{}}return true;}
+function denyAllApprovals(){for(const id of [...approvalWaiters.keys()])settleApproval(id,false);}
 let handoffQueue=Promise.resolve(),handoffCurrent=null;
 function requestVMHandoff(botName,reason){
  const run=async()=>{
@@ -394,6 +409,8 @@ async function startVMJob(requestID,bot,argv){
 }
 function configureIPC() {
  const uuidLike=value=>typeof value==='string'&&/^[a-f0-9-]{36}$/i.test(value);
+ handle('approval:answer',async(id,approved)=>settleApproval(String(id),approved===true));
+ handle('approval:pending',async()=>[...approvalWaiters].map(([id,x])=>({id,title:x.title,detail:x.detail})));
  handle('vm:handoff-done',async(id,outcome)=>{if(handoffCurrent?.id===id)handoffCurrent.finish(outcome==='done'?'done':'cancelled');return true;});
  let guestSize=null;
  handle('vm:handoff-input',async(request)=>{
@@ -681,6 +698,7 @@ app.whenReady().then(() => {
   window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, frame: false, backgroundColor: '#111111', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   window.on('close',event=>{if(cloud.active&&!quitting){event.preventDefault();window.hide();}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('render-process-gone',()=>denyAllApprovals());window.on('closed',()=>denyAllApprovals());
   window.webContents.on('will-navigate', event => event.preventDefault());
   // The app's own window may write to the clipboard (Copy guest login, Copy diagnostics). No other page may.
   window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(contents === window?.webContents && (permission === 'clipboard-sanitized-write' || (permission === 'media' && Array.isArray(details?.mediaTypes) && details.mediaTypes.length > 0 && details.mediaTypes.every(type => type === 'audio')))));

@@ -45,10 +45,12 @@ struct ConversationView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    if model.entries(for: bot).isEmpty { emptyConversation }
-                    ForEach(model.entries(for: bot)) { entry in
-                        MessageRow(entry: entry, canRetry: canRetryMessage(entry), online: remote.online, actions: messageActions(for: entry)).equatable().id(entry.id)
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    let entries = model.entries(for: bot)
+                    let lastTalkID = entries.last(where: { $0.kind != .activity })?.id
+                    if entries.isEmpty { emptyConversation }
+                    ForEach(entries) { entry in
+                        row(entry, lastTalkID: lastTalkID).equatable().id(entry.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }.padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 24)
@@ -138,8 +140,19 @@ struct ConversationView: View {
                 Button { info = true } label: {
                     HStack(spacing: 9) {
                         BotAvatar(color: bot.color, size: 28, appearance: bot.appearance)
-                        Text(bot.name).font(.headline).lineLimit(1)
-                    }.padding(.horizontal, 14).padding(.vertical, 10).glassChrome(in: Capsule())
+                            .overlay {
+                                if remote.running.contains(bot.id) {
+                                    Circle().stroke(Palette.working, lineWidth: 2).padding(-3)
+                                }
+                            }
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(bot.name).font(.headline).lineLimit(1)
+                            if remote.running.contains(bot.id) {
+                                Text(remote.approval != nil ? "Needs your OK" : "Thinking it through…").font(.caption2)
+                                    .foregroundStyle(remote.approval != nil ? Palette.attention : Color.secondary)
+                            }
+                        }
+                    }.padding(.horizontal, 14).padding(.vertical, 8).frame(minHeight: 46).glassChrome(in: Capsule())
                 }.buttonStyle(.plain).frame(maxWidth: 220).accessibilityLabel("Bot details for \(bot.name)")
             }.padding(.horizontal, 20).padding(.top, 8)
             if !remote.online { RemoteConnectionBanner() }
@@ -252,6 +265,13 @@ struct ConversationView: View {
         }.padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 4)
     }
 
+    private func row(_ entry: Entry, lastTalkID: UUID?) -> MessageRow {
+        let answerable = lastTalkID == entry.id && entry.kind == .bot && entry.state != .streaming && !remote.running.contains(bot.id) && remote.online
+        let sender: Bot? = entry.senderBotID.flatMap { id in model.workspace.bots.first { $0.id == id } }
+        return MessageRow(entry: entry, canRetry: canRetryMessage(entry), online: remote.online, canAnswer: answerable,
+                          sender: sender, botName: bot.name, isGroup: bot.memberIDs != nil, actions: messageActions(for: entry))
+    }
+
     private func canRetryMessage(_ entry: Entry) -> Bool { model.entries(for: bot).last?.id == entry.id && !remote.running.contains(bot.id) }
 
     private func messageActions(for entry: Entry) -> MessageActions {
@@ -264,7 +284,9 @@ struct ConversationView: View {
             },
             react: { emoji in Task { _ = await remote.command(RemoteCommand(action: "react", botID: current.id, text: emoji ?? "", taskID: entry.id)) } },
             retry: { Task { _ = await remote.command(RemoteCommand(action: "retry", botID: current.id)) } },
-            delete: { Task { _ = await remote.command(RemoteCommand(action: "delete_entry", botID: current.id, taskID: entry.id)) } })
+            delete: { Task { _ = await remote.command(RemoteCommand(action: "delete_entry", botID: current.id, taskID: entry.id)) } },
+            answer: { text in Task { _ = await remote.send(text, bot: current) } },
+            other: { composing = true })
     }
 
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
@@ -332,65 +354,125 @@ private struct MessageActions: @unchecked Sendable {
     var react: (String?) -> Void = { _ in }
     var retry: () -> Void = {}
     var delete: () -> Void = {}
+    var answer: (String) -> Void = { _ in }
+    var other: () -> Void = {}
 }
 
 private struct MessageRow: View, Equatable {
     let entry: Entry
-    var canRetry = false
-    var online = true
-    var actions = MessageActions()
-    nonisolated static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.entry == rhs.entry && lhs.canRetry == rhs.canRetry && lhs.online == rhs.online }
-    private var formattedText: AttributedString {
-        (try? AttributedString(markdown: entry.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(entry.text)
+    let canRetry: Bool
+    let online: Bool
+    let canAnswer: Bool
+    let sender: Bot?
+    let botName: String
+    let isGroup: Bool
+    let actions: MessageActions
+    nonisolated static func == (lhs: MessageRow, rhs: MessageRow) -> Bool {
+        lhs.entry == rhs.entry && lhs.canRetry == rhs.canRetry && lhs.online == rhs.online && lhs.canAnswer == rhs.canAnswer
+            && lhs.sender == rhs.sender && lhs.botName == rhs.botName && lhs.isGroup == rhs.isGroup
+    }
+    private func formatted(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+    @ViewBuilder private var senderAvatar: some View {
+        if let sender { BotAvatar(color: sender.color, size: 26, appearance: sender.appearance) }
+        else { Image(systemName: "person.crop.circle.fill").font(.system(size: 24)).foregroundStyle(.tertiary).frame(width: 26, height: 26) }
     }
     var body: some View {
-        if entry.kind == .activity || entry.delivery == "scheduled" {
-            Label(entry.text, systemImage: entry.delivery == "scheduled" ? "clock" : "arrow.triangle.branch")
-                .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 5)
-                .textSelection(.enabled)
+        if entry.kind == .activity, entry.senderBotID != nil, entry.text.hasPrefix("Message from ") {
+            botToBot
+        } else if entry.kind == .activity || entry.delivery == "scheduled" {
+            ActivityPill(text: entry.text, routine: entry.delivery == "scheduled")
         } else {
-            HStack(alignment: .top, spacing: 0) {
-                if entry.kind == .user { Spacer(minLength: 42) }
-                VStack(alignment: .leading, spacing: 10) {
-                    if let sender = entry.senderName {
-                        Label("Message from \(sender)", systemImage: "paperplane").font(.caption).foregroundStyle(.secondary)
-                    }
-                    if entry.state == .failed, let provider = entry.provider, !provider.isEmpty {
-                        Text(provider).font(.caption).foregroundStyle(.secondary)
-                    }
-                    if entry.text.isEmpty, entry.state == .streaming {
-                        HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Thinking…").foregroundStyle(.secondary) }
-                    } else {
-                        Text(formattedText).font(.system(size: 16)).lineSpacing(5).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 19).padding(.vertical, 17)
-                .background(entry.kind == .user ? Palette.userBubble : Palette.card, in: RoundedRectangle(cornerRadius: 26))
-                .overlay(alignment: entry.kind == .user ? .bottomLeading : .bottomTrailing) {
-                    if let reaction = entry.reaction, !reaction.isEmpty {
-                        Text(reaction).font(.system(size: 14)).padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(Palette.background, in: Capsule()).overlay(Capsule().stroke(.primary.opacity(0.1)))
-                            .offset(y: 12).accessibilityLabel("Reaction \(reaction)")
-                    }
-                }
-                .padding(.bottom, entry.reaction?.isEmpty == false ? 12 : 0)
-                .contextMenu {
-                    Button("Copy text", systemImage: "doc.on.doc") { UIPasteboard.general.string = entry.text }
-                    Button("Copy as Markdown", systemImage: "doc.richtext") { UIPasteboard.general.string = (entry.kind == .user ? "**You:** " : "") + entry.text }
-                    Button("Reply", systemImage: "arrowshape.turn.up.left") { actions.reply() }
-                    Menu("React", systemImage: "face.smiling") {
-                        ForEach(["👍", "👎", "❤️", "😂", "🎉", "🤔"], id: \.self) { emoji in
-                            Button(entry.reaction == emoji ? "\(emoji)  Remove" : emoji) { actions.react(entry.reaction == emoji ? nil : emoji) }
-                        }
-                    }.disabled(!online)
-                    if entry.kind == .bot, canRetry { Button("Retry", systemImage: "arrow.clockwise") { actions.retry() }.disabled(!online) }
-                    ShareLink(item: entry.text) { Label("Share text", systemImage: "square.and.arrow.up") }
-                    if entry.state != .streaming { Button("Delete message", systemImage: "trash", role: .destructive) { actions.delete() }.disabled(!online) }
-                }
-                if entry.kind == .bot { Spacer(minLength: 26) }
-            }
+            bubbleRow
         }
+    }
+
+    /// Another Bot asking this Bot something: the sender's face, an arrow to this Bot, and a dashed bubble.
+    private var botToBot: some View {
+        let parts = entry.text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let message = parts.count > 1 ? String(parts[1]) : entry.text
+        let from = entry.senderName ?? "Another Bot"
+        return HStack(alignment: .top, spacing: 8) {
+            senderAvatar.padding(.top, 20)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 4) {
+                    Text(from).fontWeight(.semibold)
+                    Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+                    Text(botName)
+                }.font(.caption).foregroundStyle(.secondary).padding(.leading, 4)
+                Text(formatted(message)).font(.system(size: 16)).lineSpacing(4).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 15).padding(.vertical, 11)
+                    .background(Palette.card.opacity(0.5), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            }
+            Spacer(minLength: 30)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Message from \(from) to \(botName): \(message)")
+    }
+
+    private var bubbleRow: some View {
+        let split: (text: String, prompt: ChoicePrompt?) = entry.kind == .bot ? ChoicePrompt.split(entry.text) : (entry.text, nil)
+        let fromOtherBot = entry.kind == .bot && entry.senderBotID != nil
+        let isUser = entry.kind == .user
+        return HStack(alignment: .top, spacing: 8) {
+            if isUser { Spacer(minLength: 48) }
+            if fromOtherBot { senderAvatar.padding(.top, 20) }
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
+                if fromOtherBot {
+                    Text(isGroup ? (entry.senderName ?? "Bot") : "\(entry.senderName ?? "Another Bot") replied")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.leading, 4)
+                }
+                if entry.text.isEmpty, entry.state == .streaming {
+                    HStack(spacing: 10) {
+                        TypingDots().padding(.horizontal, 16).padding(.vertical, 14)
+                            .background(Palette.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        Text("Thinking it through").font(.footnote).foregroundStyle(.secondary)
+                    }
+                } else if !split.text.isEmpty {
+                    bubble(split.text)
+                }
+                if let prompt = split.prompt {
+                    QuestionCard(prompt: prompt, canAnswer: canAnswer, answer: { actions.answer($0) }, other: { actions.other() })
+                }
+                if entry.state == .failed {
+                    Label(entry.provider.map { "Couldn’t finish · \($0)" } ?? "Couldn’t finish", systemImage: "exclamationmark.circle")
+                        .font(.caption).foregroundStyle(Color.red.opacity(0.85)).padding(.horizontal, 6)
+                }
+            }
+            if !isUser { Spacer(minLength: 30) }
+        }
+    }
+
+    private func bubble(_ text: String) -> some View {
+        Text(formatted(text)).font(.system(size: 16)).lineSpacing(4).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 15).padding(.vertical, 11)
+            .background(entry.kind == .user ? Palette.userBubble : Palette.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(alignment: entry.kind == .user ? .bottomLeading : .bottomTrailing) {
+                if let reaction = entry.reaction, !reaction.isEmpty {
+                    Text(reaction).font(.system(size: 14)).padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Palette.background, in: Capsule()).overlay(Capsule().stroke(.primary.opacity(0.1)))
+                        .offset(y: 12).accessibilityLabel("Reaction \(reaction)")
+                }
+            }
+            .padding(.bottom, entry.reaction?.isEmpty == false ? 12 : 0)
+            .contextMenu {
+                Button("Copy text", systemImage: "doc.on.doc") { UIPasteboard.general.string = entry.text }
+                Button("Copy as Markdown", systemImage: "doc.richtext") { UIPasteboard.general.string = (entry.kind == .user ? "**You:** " : "") + entry.text }
+                Button("Reply", systemImage: "arrowshape.turn.up.left") { actions.reply() }
+                Menu("React", systemImage: "face.smiling") {
+                    ForEach(["👍", "👎", "❤️", "😂", "🎉", "🤔"], id: \.self) { emoji in
+                        Button(entry.reaction == emoji ? "\(emoji)  Remove" : emoji) { actions.react(entry.reaction == emoji ? nil : emoji) }
+                    }
+                }.disabled(!online)
+                if entry.kind == .bot, canRetry { Button("Retry", systemImage: "arrow.clockwise") { actions.retry() }.disabled(!online) }
+                if entry.kind == .bot, let provider = entry.provider { Text("Answered by \(provider)") }
+                ShareLink(item: entry.text) { Label("Share text", systemImage: "square.and.arrow.up") }
+                if entry.state != .streaming { Button("Delete message", systemImage: "trash", role: .destructive) { actions.delete() }.disabled(!online) }
+            }
     }
 }
 

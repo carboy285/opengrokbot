@@ -13,6 +13,7 @@ struct MacConversationView: View {
     @State private var voiceOn = false
     @StateObject private var voice = VoiceConversation()
     @StateObject private var dictation = MacDictation()
+    @ObservedObject private var approval = MacApproval.shared
     @State private var pasteMonitor: Any?
     @State private var scrollTask: Task<Void,Never>?
 
@@ -32,18 +33,22 @@ struct MacConversationView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 25) {
+                    LazyVStack(spacing: 12) {
                         let messages = app.entries(for: bot)
                         let lastBotID = messages.last(where: { $0.kind == .bot })?.id
+                        let lastUserID = messages.last(where: { $0.kind == .user && $0.delivery != "scheduled" })?.id
+                        // A question card can be answered while nothing has been said after it.
+                        let lastTalkID = messages.last(where: { $0.kind != .activity })?.id
+                        let bots = app.workspace.bots
                         ForEach(messages) { entry in
                             // Equatable rows: a streaming reply redraws only the message that changed, not every message in the chat.
-                            MacMessageRow(entry: entry, canReact: desktop.gateway == nil, isLastBot: lastBotID == entry.id, actions: messageActions).equatable().id(entry.id)
+                            row(entry, lastBotID: lastBotID, lastUserID: lastUserID, lastTalkID: lastTalkID, bots: bots).equatable().id(entry.id)
                         }
                         if messages.isEmpty { emptyConversation.padding(.top, 120) }
                         Color.clear.frame(height: 1).id("bottom")
                     }
-                    .padding(.horizontal, 24).padding(.top, 85).padding(.bottom, 24)
-                    .frame(maxWidth: 760).frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24).padding(.top, 80).padding(.bottom, 20)
+                    .frame(maxWidth: 780).frame(maxWidth: .infinity)
                     .background(ChatScrollMonitor(onUserScroll: { nearBottom in followLatest = nearBottom },
                         onLayout: { if followLatest { scrollToLatest(proxy) } }))
                 }
@@ -61,11 +66,20 @@ struct MacConversationView: View {
                 if desktop.gateway != nil { desktop.sendFeedback[bot.id] = "Bot details aren’t available while viewing another computer yet. Provider and model are in the header menu, and its settings are under “You”."; return }
                 desktop.showBotInspector.toggle()
             } label: {
-                HStack(spacing: 11) {
-                    MacBotAvatar(color: bot.color, size: 27, appearance: bot.appearance)
-                    Text(bot.name).font(.system(size: 18, weight: .medium)).lineLimit(1)
+                HStack(spacing: 10) {
+                    MacBotAvatar(color: bot.color, size: 26, appearance: bot.appearance, status: headerStatus)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(bot.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                        if let line = headerLine {
+                            Text(line).font(.system(size: 11)).foregroundStyle(headerStatus == .attention ? MacTheme.attention : MacTheme.secondary).lineLimit(1)
+                                .transition(.opacity)
+                        }
+                    }
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(MacTheme.tertiary)
+                        .rotationEffect(.degrees(desktop.showBotInspector ? 180 : 0))
                 }
-                .padding(.horizontal, 15).padding(.vertical, 10)
+                .animation(.easeOut(duration: 0.15), value: headerLine)
+                .padding(.leading, 9).padding(.trailing, 14).padding(.vertical, 7).frame(minHeight: 42)
                 .contentShape(Capsule()).glassChrome(in: Capsule())
             }
             .buttonStyle(.plain)
@@ -86,8 +100,39 @@ struct MacConversationView: View {
         }
     }
 
+    private func row(_ entry: Entry, lastBotID: UUID?, lastUserID: UUID?, lastTalkID: UUID?, bots: [Bot]) -> MacMessageRow {
+        let running = desktop.runningBots.contains(bot.id)
+        let answerable = lastTalkID == entry.id && entry.kind == .bot && entry.state != .streaming && !running
+        let sender: Bot? = entry.senderBotID.flatMap { id in bots.first { $0.id == id } }
+        return MacMessageRow(entry: entry, canReact: desktop.gateway == nil, isLastBot: lastBotID == entry.id,
+                             isLastUser: lastUserID == entry.id, canAnswer: answerable, sender: sender,
+                             botName: bot.name, isGroup: bot.memberIDs != nil, actions: messageActions)
+    }
+
+    /// The avatar ring in the header: working while a reply runs, orange while this Bot waits for your OK.
+    private var headerStatus: MacBotStatus {
+        if approval.isWaiting(on: bot.name) { return .attention }
+        return desktop.runningBots.contains(bot.id) ? .working : .idle
+    }
+    private var headerLine: String? {
+        switch headerStatus {
+        case .attention: return "Needs your OK"
+        case .working: return "Thinking it through…"
+        case .idle:
+            guard let members = bot.memberIDs else { return nil }
+            return "\(members.count) Bots"
+        }
+    }
+
     private var composer: some View {
         VStack(spacing: 8) {
+            if let request = approval.pending {
+                MacApprovalCard(request: request, bot: app.workspace.bots.first { request.title.hasPrefix("Let \($0.name) ") }) { allowed in
+                    approval.answer(id: request.id, approved: allowed)
+                }
+                .frame(maxWidth: 740)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if let recovery = desktop.recoverableDrafts[bot.id]?.first {
                 HStack {
                     Text("An interrupted or failed message is available to restore. Check the chat before resending.").font(.caption)
@@ -170,24 +215,27 @@ struct MacConversationView: View {
                     }.buttonStyle(.plain).help("Start voice mode").accessibilityLabel("Start voice mode")
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 5).frame(minHeight: 46).background { RoundedRectangle(cornerRadius: 31).fill(.clear).glassChrome(in: RoundedRectangle(cornerRadius: 31), interactive: false).allowsHitTesting(false) }
+            .padding(.leading, 10).padding(.trailing, 8).padding(.vertical, 6).frame(minHeight: 52)
+            .background { RoundedRectangle(cornerRadius: 26, style: .continuous).fill(MacTheme.panel.opacity(0.55)).glassChrome(in: RoundedRectangle(cornerRadius: 26, style: .continuous), interactive: false).allowsHitTesting(false) }
+            .frame(maxWidth: 780)
             .onAppear { installPasteMonitor() }
             .onChange(of: bot.id) { _, _ in installPasteMonitor(); dictation.stop() }
             .onDisappear { removePasteMonitor(); dictation.stop() }
-            HStack(spacing: 9) {
-                if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
-                if desktop.needsProvider(bot) {
-                    Button("Choose a provider") { desktop.showBotInspector = true }.buttonStyle(.link)
+            // Quiet by default: the model is in the header menu. This line only appears when something needs doing.
+            if desktop.scanningCLIs || desktop.needsProvider(bot) || desktop.runningBots.contains(bot.id) {
+                HStack(spacing: 8) {
+                    if desktop.scanningCLIs { ProgressView().controlSize(.mini) }
+                    if desktop.needsProvider(bot) {
+                        Button("Choose a provider") { desktop.showBotInspector = true }.buttonStyle(.link)
+                    }
+                    Spacer()
+                    if desktop.runningBots.contains(bot.id) {
+                        Text(approval.isWaiting(on: bot.name) ? "Waiting for your OK" : "Thinking it through…")
+                        Button("Stop") { desktop.stop(botID: bot.id) }.buttonStyle(.link)
+                    }
                 }
-                Spacer()
-                if desktop.runningBots.contains(bot.id) {
-                    ProgressView().controlSize(.mini)
-                    Text("Working…")
-                    Button("Stop") { desktop.stop(botID: bot.id) }.buttonStyle(.link)
-                } else if let line = desktop.providerLine(for: bot) {
-                    Text(line).lineLimit(1).help("Current provider and model for the next response")
-                } else { Text("Choose a provider") }
-            }.font(.system(size: 11)).foregroundStyle(MacTheme.secondary)
+                .font(.system(size: 11)).foregroundStyle(MacTheme.secondary).frame(maxWidth: 760)
+            }
             if let feedback = desktop.sendFeedback[bot.id] {
                 HStack { Text(feedback).font(.caption); Button("AI CLI setup") { desktop.panel = .setup } }.foregroundStyle(.secondary)
             }
@@ -205,16 +253,20 @@ struct MacConversationView: View {
                     Button("Retry") { desktop.retry(bot: bot, app: app) }
                 }.foregroundStyle(MacTheme.secondary)
             }
-        }.padding(.horizontal, 20).padding(.bottom, 12).padding(.top, 8)
+        }
+        .padding(.horizontal, 20).padding(.bottom, 14).padding(.top, 6)
+        .animation(.spring(response: 0.3, dampingFraction: 1), value: approval.pending)
     }
 
     private var emptyConversation: some View {
-        VStack(spacing: 18) {
-            MacBotAvatar(color: bot.color, size: 70, appearance: bot.appearance)
-            Text(bot.name).font(.system(size: 24, weight: .medium))
-            Text(bot.purpose).foregroundStyle(MacTheme.secondary)
-            Text("Send your first message to start chatting with your selected local AI CLI.")
-                .font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+        VStack(spacing: 14) {
+            MacBotAvatar(color: bot.color, size: 72, appearance: bot.appearance)
+                .padding(.bottom, 6)
+            Text(bot.name).font(.system(size: 26, weight: .semibold))
+            Text(bot.purpose).font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
+                .multilineTextAlignment(.center).frame(maxWidth: 420)
+            Text("Say hi to get started.")
+                .font(.system(size: 13)).foregroundStyle(MacTheme.tertiary)
         }.frame(maxWidth: .infinity)
     }
 
@@ -312,7 +364,9 @@ struct MacConversationView: View {
             reply: { entry in reply(to: entry) },
             react: { entry, emoji in _ = model.setReaction(emoji, for: entry.id) },
             delete: { entry in _ = model.deleteEntry(entry.id) },
-            retry: { _ in desktopModel.retry(bot: current, app: model) })
+            retry: { _ in desktopModel.retry(bot: current, app: model) },
+            answer: { text in _ = desktopModel.send(text, to: current, app: model) },
+            other: { composing = true })
     }
 
     private func sendMessage() {
@@ -336,16 +390,30 @@ struct MacMessageActions: @unchecked Sendable {
     var react: (Entry, String?) -> Void = { _, _ in }
     var delete: (Entry) -> Void = { _ in }
     var retry: (Entry) -> Void = { _ in }
+    /// Sends the human's answer to a question card.
+    var answer: (String) -> Void = { _ in }
+    /// "Something else…" on a question card: puts the cursor in the message box.
+    var other: () -> Void = {}
 }
 
 struct MacMessageRow: View, Equatable {
     let entry: Entry
     let canReact: Bool
     let isLastBot: Bool
+    let isLastUser: Bool
+    let canAnswer: Bool
+    let sender: Bot?
+    let botName: String
+    let isGroup: Bool
     let actions: MacMessageActions
-    nonisolated static func == (lhs: MacMessageRow, rhs: MacMessageRow) -> Bool { lhs.entry == rhs.entry && lhs.canReact == rhs.canReact && lhs.isLastBot == rhs.isLastBot }
+    nonisolated static func == (lhs: MacMessageRow, rhs: MacMessageRow) -> Bool {
+        lhs.entry == rhs.entry && lhs.canReact == rhs.canReact && lhs.isLastBot == rhs.isLastBot && lhs.isLastUser == rhs.isLastUser
+            && lhs.canAnswer == rhs.canAnswer && lhs.sender == rhs.sender && lhs.botName == rhs.botName && lhs.isGroup == rhs.isGroup
+    }
     var body: some View {
-        MacMessageView(entry: entry, onReply: actions.reply, onReact: canReact ? actions.react : nil, onDelete: canReact ? actions.delete : nil, onRetry: isLastBot ? actions.retry : nil)
+        MacMessageView(entry: entry, onReply: actions.reply, onReact: canReact ? actions.react : nil, onDelete: canReact ? actions.delete : nil, onRetry: isLastBot ? actions.retry : nil,
+                       isLastUser: isLastUser, canAnswer: canAnswer, sender: sender, botName: botName, isGroup: isGroup,
+                       onAnswer: actions.answer, onOther: actions.other)
     }
 }
 
@@ -355,14 +423,28 @@ struct MacMessageView: View {
     var onReact: ((Entry, String?) -> Void)? = nil
     var onDelete: ((Entry) -> Void)? = nil
     var onRetry: ((Entry) -> Void)? = nil
+    var isLastUser = false
+    var canAnswer = false
+    /// The Bot that wrote this message when it is not the chat's own Bot (a group member, or a Bot answering a request).
+    var sender: Bot? = nil
+    var botName = ""
+    var isGroup = false
+    var onAnswer: ((String) -> Void)? = nil
+    var onOther: (() -> Void)? = nil
     @State private var copied = false
     @State private var hovering = false
     @State private var reacting = false
     private static let reactions = ["👍", "👎", "❤️", "😂", "🎉", "🤔"]
 
-    /// React, reply and more: shown under a message while the pointer is over it. The space is always reserved so nothing jumps.
+    private func copy() {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.text, forType: .string)
+        copied = true
+    }
+
+    /// Copy, react, reply and more: shown under a message while the pointer is over it. The space is always reserved so nothing jumps.
     private var actionRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {
+            Button { copy() } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }.help("Copy")
             if onReact != nil {
                 Button { reacting.toggle() } label: { Image(systemName: "face.smiling") }.help("React")
                     .popover(isPresented: $reacting) {
@@ -374,54 +456,131 @@ struct MacMessageView: View {
                     }
             }
             if onReply != nil { Button { onReply?(entry) } label: { Image(systemName: "arrowshape.turn.up.left") }.help("Reply") }
+            if entry.kind == .bot, let onRetry { Button { onRetry(entry) } label: { Image(systemName: "arrow.clockwise") }.help("Retry") }
             Menu {
                 Button("Copy text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.text, forType: .string) }
                 Button("Copy as Markdown") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString((entry.kind == .user ? "**You:** " : "") + entry.text, forType: .string) }
-                if entry.kind == .bot, let onRetry { Button("Retry") { onRetry(entry) } }
                 if let onDelete { Divider(); Button("Delete message", role: .destructive) { onDelete(entry) } }
             } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More")
+            if entry.kind == .bot, let provider = entry.provider {
+                Text(provider).font(.system(size: 11)).foregroundStyle(MacTheme.tertiary).lineLimit(1).help("Answered by \(provider)")
+            }
         }
-        .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
-        .padding(.horizontal, 6).frame(height: 22)
+        .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+        .padding(.horizontal, 6).frame(height: 20)
         .opacity(hovering && entry.state != .streaming ? 1 : 0)
-        .animation(.easeOut(duration: 0.1), value: hovering)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+
+    private var bubbleColor: Color { entry.kind == .user ? MacTheme.userBubble : MacTheme.panel }
+
+    @ViewBuilder private var senderAvatar: some View {
+        if let sender { MacBotAvatar(color: sender.color, size: 28, appearance: sender.appearance) }
+        else {
+            Image(systemName: "person.crop.circle.fill").font(.system(size: 26)).foregroundStyle(MacTheme.tertiary)
+                .frame(width: 28, height: 28).accessibilityHidden(true)
+        }
+    }
+
+    /// Dots in a bubble while the Bot has not written anything yet, with Grok Bot's status phrase beside it.
+    private var thinkingBubble: some View {
+        HStack(spacing: 10) {
+            MacTypingDots()
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            Text("Thinking it through").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+        }
     }
 
     var body: some View {
-        if entry.kind == .activity || entry.delivery == "scheduled" {
-            Text((entry.delivery == "scheduled" ? "Routine · " : "") + entry.text).font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
-                .textSelection(.enabled).frame(maxWidth: .infinity).padding(.vertical, 2)
-                .accessibilityLabel("Activity: \(entry.text)")
+        if entry.kind == .activity, entry.senderBotID != nil, entry.text.hasPrefix("Message from ") {
+            botToBotMessage
+        } else if entry.kind == .activity || entry.delivery == "scheduled" {
+            MacActivityPill(text: entry.text, routine: entry.delivery == "scheduled").padding(.leading, 2)
         } else {
-            HStack(alignment: .top) {
-                if entry.kind == .user { Spacer(minLength: 90) }
-                VStack(alignment: .leading, spacing: 6) {
-                    if let sender = entry.senderName { Text("Message from \(sender)").font(.system(size: 12, weight: .medium)).foregroundStyle(MacTheme.secondary) }
-                    if entry.kind == .bot, let provider = entry.provider {
-                        Text(provider).font(.system(size: 11)).foregroundStyle(MacTheme.secondary).padding(.horizontal, 5)
-                    }
-                    MacMessageContent(text: entry.text.isEmpty && entry.state == .streaming ? "Thinking…" : entry.text, markdown: entry.kind == .bot)
-                    .font(.system(size: 16)).lineSpacing(6).textSelection(.enabled)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    .background(entry.kind == .user ? MacTheme.userBubble : MacTheme.panel, in: RoundedRectangle(cornerRadius: entry.kind == .user ? 24 : 23))
-                    .overlay(RoundedRectangle(cornerRadius: 23).stroke(Color.white.opacity(0.025), lineWidth: 1))
-                    .contextMenu {
-                        Button(copied ? "Copied" : "Copy text") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(entry.text, forType: .string)
-                            copied = true
-                        }
-                    }
-                    .accessibilityIdentifier("conversation-message")
-                    .accessibilityLabel("\(entry.kind == .user ? "You" : "AI reply"): \(entry.text)")
-                    if let reaction = entry.reaction { Text(reaction).font(.system(size: 14)).padding(.horizontal, 8).padding(.vertical, 3).background(MacTheme.raised, in: Capsule()).accessibilityLabel("Reaction \(reaction)") }
-                    actionRow
-                    if entry.kind == .user { Text("Delivered").font(.caption2).foregroundStyle(.secondary) }
-                }
-                .onHover { hovering = $0 }
-                if entry.kind == .bot { Spacer(minLength: 90) }
-            }.frame(maxWidth: .infinity)
+            bubbleRow
         }
+    }
+
+    /// Another Bot asking this Bot something. Shown with the sender's face and a dashed outline: Bots talking, not you.
+    private var botToBotMessage: some View {
+        let parts = entry.text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let message = parts.count > 1 ? String(parts[1]) : entry.text
+        let from = entry.senderName ?? "Another Bot"
+        return HStack(alignment: .top, spacing: 10) {
+            senderAvatar.padding(.top, 21)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    Text(from).font(.system(size: 12, weight: .semibold))
+                    Image(systemName: "arrow.right").font(.system(size: 9, weight: .bold)).foregroundStyle(MacTheme.tertiary)
+                    Text(botName.isEmpty ? "this Bot" : botName).font(.system(size: 12))
+                }
+                .foregroundStyle(MacTheme.secondary).padding(.leading, 4)
+                MacMessageContent(text: message, markdown: true)
+                    .font(.system(size: 15)).lineSpacing(5).textSelection(.enabled)
+                    .padding(.horizontal, 15).padding(.vertical, 10)
+                    .background(MacTheme.panel.opacity(0.45), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(MacTheme.tertiary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            }
+            Spacer(minLength: 90)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Message from \(from) to \(botName.isEmpty ? "this Bot" : botName): \(message)")
+    }
+
+    private var bubbleRow: some View {
+        let split: (text: String, prompt: ChoicePrompt?) = entry.kind == .bot ? ChoicePrompt.split(entry.text) : (entry.text, nil)
+        let fromOtherBot = entry.kind == .bot && entry.senderBotID != nil
+        let thinking = entry.text.isEmpty && entry.state == .streaming
+        let isUser = entry.kind == .user
+        return HStack(alignment: .top, spacing: 10) {
+            if isUser { Spacer(minLength: 90) }
+            if fromOtherBot { senderAvatar.padding(.top, 21) }
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
+                if fromOtherBot {
+                    Text(isGroup ? (entry.senderName ?? "Bot") : "\(entry.senderName ?? "Another Bot") replied")
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(MacTheme.secondary).padding(.leading, 4)
+                }
+                if thinking {
+                    thinkingBubble
+                } else if !split.text.isEmpty {
+                    MacMessageContent(text: split.text, markdown: entry.kind == .bot)
+                        .font(.system(size: 15.5)).lineSpacing(5).textSelection(.enabled)
+                        .padding(.horizontal, 15).padding(.vertical, 10)
+                        .background(bubbleColor, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .overlay {
+                            if entry.state == .failed {
+                                RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(MacTheme.danger.opacity(0.45), lineWidth: 1)
+                            }
+                        }
+                        .contextMenu {
+                            Button(copied ? "Copied" : "Copy text") { copy() }
+                        }
+                        .accessibilityIdentifier("conversation-message")
+                        .accessibilityLabel("\(isUser ? "You" : "AI reply"): \(entry.text)")
+                }
+                if let prompt = split.prompt {
+                    MacQuestionCard(prompt: prompt, canAnswer: canAnswer, answer: { onAnswer?($0) }, other: { onOther?() })
+                }
+                if entry.state == .failed {
+                    Label("Couldn’t finish", systemImage: "exclamationmark.circle").font(.system(size: 11.5)).foregroundStyle(MacTheme.danger.opacity(0.9)).padding(.horizontal, 6)
+                } else if entry.state == .stopped {
+                    Text("Stopped").font(.system(size: 11.5)).foregroundStyle(MacTheme.tertiary).padding(.horizontal, 6)
+                }
+                if let reaction = entry.reaction {
+                    Text(reaction).font(.system(size: 14)).padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(MacTheme.raised, in: Capsule()).accessibilityLabel("Reaction \(reaction)")
+                }
+                HStack(spacing: 8) {
+                    actionRow
+                    if isUser, isLastUser { Text("Delivered").font(.system(size: 11)).foregroundStyle(MacTheme.tertiary) }
+                }
+            }
+            .onHover { inside in hovering = inside; if !inside { copied = false } }
+            if !isUser { Spacer(minLength: 90) }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -483,12 +642,24 @@ private struct MacMessageContent: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(segments) { segment in
                 if segment.code {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Button("Copy code") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(segment.text, forType: .string) }.font(.caption)
-                        ScrollView(.horizontal) {
-                            Text(segment.text).font(.system(.body, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("Code").font(.system(size: 11, weight: .medium)).foregroundStyle(MacTheme.secondary)
+                            Spacer()
+                            Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(segment.text, forType: .string) } label: {
+                                Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11))
+                            }.buttonStyle(.plain).foregroundStyle(MacTheme.secondary).help("Copy code")
                         }
-                    }.padding(10).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Color.primary.opacity(0.04))
+                        ScrollView(.horizontal) {
+                            Text(segment.text).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+                                .padding(12)
+                        }
+                    }
+                    .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(MacTheme.line, lineWidth: 1))
                 } else if markdown {
                     markdownLines(segment.text)
                 } else { Text(segment.text).fixedSize(horizontal: false, vertical: true) }

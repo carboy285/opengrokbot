@@ -103,4 +103,17 @@ final class BotTeamworkTests: XCTestCase {
         XCTAssertTrue(BotTeamwork.parse("{\"action\":\"create_bot\"}").actions.isEmpty)
         XCTAssertTrue(BotTeamwork.parse("```opengrokbot-action\n{\"action\":\"create_bot\"}").actions.isEmpty)
     }
+
+    func testChoicesBlockBecomesAQuestionCard() {
+        let single = ChoicePrompt.split("Which port?\n```choices\nGalveston, TX\n- Miami, FL\n```")
+        XCTAssertEqual(single.text, "Which port?")
+        XCTAssertEqual(single.prompt, ChoicePrompt(options: ["Galveston, TX", "Miami, FL"], multiple: false))
+        let several = ChoicePrompt.split("Pick any\n```choices\nmultiple\nA\nB\nC\n```")
+        XCTAssertEqual(several.prompt?.multiple, true)
+        XCTAssertEqual(several.prompt?.options, ["A", "B", "C"])
+        // One option, an unfinished block or an ordinary code block stay plain text.
+        XCTAssertNil(ChoicePrompt.split("```choices\nOnly one\n```").prompt)
+        XCTAssertNil(ChoicePrompt.split("```choices\nA\nB").prompt)
+        XCTAssertNil(ChoicePrompt.split("```swift\nlet a = 1\n```").prompt)
+    }
 }

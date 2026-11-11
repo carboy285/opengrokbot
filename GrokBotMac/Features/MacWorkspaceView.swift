@@ -13,6 +13,12 @@ struct MacWorkspaceView: View {
     private func pinned(_ bot: Bot) -> Bool { desktop.gateway?.isPinned(bot) ?? bot.isPinned ?? (bot.isMain == true) }
     private func touch(_ bot: Bot) { if let gateway = desktop.gateway { gateway.touch(bot.id) } else { _ = app.touchBot(bot.id); _ = app.setUnread(false, for: bot.id) } }
     @FocusState private var searchFocused: Bool
+    @ObservedObject private var approval = MacApproval.shared
+    /// The avatar carries what a Bot is doing, as in Grok Bot's roster.
+    private func status(_ bot: Bot) -> MacBotStatus {
+        if approval.isWaiting(on: bot.name) { return .attention }
+        return desktop.runningBots.contains(bot.id) ? .working : .idle
+    }
     @AppStorage("profileName") private var profileName = "You"
 
     /// Every pinned Bot is a tile at the top, with the main Bot first.
@@ -69,6 +75,10 @@ struct MacWorkspaceView: View {
             .animation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 1), value: desktop.panel)
             .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1), value: desktop.showBotInspector)
             .background(MacTheme.canvas)
+            .onChange(of: approval.pending?.id) { _, id in
+                // An approval card lives in the chat: make sure nothing covers it.
+                if id != nil { desktop.panel = nil; desktop.showPalette = false }
+            }
             .onExitCommand { if desktop.showPalette { desktop.showPalette = false } else if desktop.panel != nil { desktop.panel = nil } else if desktop.showBotInspector { desktop.showBotInspector = false } else { desktop.showSearch = false } }
         }
         .alert("Rename Bot", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -118,31 +128,25 @@ struct MacWorkspaceView: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
                             ForEach(heroBots) { bot in
                                 Button { desktop.selectedID = bot.id; touch(bot) } label: {
-                                    VStack(spacing: 12) {
-                                        MacBotAvatar(color: bot.color, size: 64, starred: true, appearance: bot.appearance)
-                                        Text(bot.name).font(.system(size: 14)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
-                                    }.padding(14).frame(maxWidth: .infinity).background(desktop.selected(in: app)?.id == bot.id ? MacTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 18))
+                                    VStack(spacing: 10) {
+                                        MacBotAvatar(color: bot.color, size: 58, starred: true, appearance: bot.appearance, status: status(bot))
+                                        HStack(spacing: 5) {
+                                            if bot.unread == true { Circle().fill(MacTheme.unread).frame(width: 7, height: 7).accessibilityLabel("Unread") }
+                                            Text(bot.name).font(.system(size: 13, weight: bot.unread == true ? .semibold : .regular)).multilineTextAlignment(.center).lineLimit(2).help(bot.name)
+                                        }
+                                    }
+                                    .padding(.vertical, 14).padding(.horizontal, 8).frame(maxWidth: .infinity)
+                                    .background(desktop.selected(in: app)?.id == bot.id ? MacTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    .contentShape(RoundedRectangle(cornerRadius: 18))
                                 }.buttonStyle(.plain).contextMenu { botMenu(bot) }.draggable(bot.id.uuidString)
                                     .dropDestination(for: String.self) { values, _ in guard let value = values.first.flatMap(UUID.init(uuidString:)) else { return false }; return app.moveBot(value, before: bot.id) }
                             }
-                        }.padding(.horizontal, 18).padding(.vertical, 20)
+                        }.padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 10)
                     }
                     ForEach(listBots) { bot in
                         Button { desktop.selectedID = bot.id; touch(bot) } label: {
-                            HStack(spacing: 16) {
-                                MacBotAvatar(color: bot.color, size: 34, appearance: bot.appearance)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
-                                        Text(bot.name).font(.system(size: 16, weight: .medium)).lineLimit(1).help(bot.name)
-                                        if bot.unread == true { Circle().fill(Color(hex: 0x2F7BFF)).frame(width: 8, height: 8).accessibilityLabel("Unread") }
-                                    }
-                                    Text(app.latest(for: bot)).font(.system(size: 13)).foregroundStyle(MacTheme.secondary).lineLimit(1)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.horizontal, 14).padding(.vertical, 11)
-                            .background(desktop.selected(in: app)?.id == bot.id ? Color.white.opacity(0.045) : .clear, in: RoundedRectangle(cornerRadius: 14))
-                            .contentShape(RoundedRectangle(cornerRadius: 14))
+                            MacRosterRow(bot: bot, status: status(bot), latest: app.latest(for: bot),
+                                         selected: desktop.selected(in: app)?.id == bot.id)
                         }
                         .buttonStyle(.plain)
                         .draggable(bot.id.uuidString)
@@ -152,9 +156,10 @@ struct MacWorkspaceView: View {
                     if !app.search.isEmpty && app.visibleBots.isEmpty {
                         Text("No Bots match “\(app.search)”.").foregroundStyle(MacTheme.secondary).padding(20)
                     }
-                }.padding(.horizontal, 8)
+                }.padding(.horizontal, 8).padding(.bottom, 8)
             }
-            Spacer(minLength: 10)
+            .scrollIndicators(.hidden)
+            Spacer(minLength: 6)
             if desktop.gateway == nil, !desktop.canChat {
                 Button { desktop.panel = .setup } label: {
                     HStack(spacing: 6) {
@@ -259,5 +264,51 @@ struct MacWorkspaceView: View {
             Text("Create a Bot to start a separate AI conversation.").foregroundStyle(MacTheme.secondary)
             MacPillButton(title: "Create Bot", prominent: true) { desktop.panel = .newBot }
         })
+    }
+}
+
+/// One Bot in the sidebar roster: face, name, and one line that says what it is doing or what it last said.
+struct MacRosterRow: View {
+    let bot: Bot
+    let status: MacBotStatus
+    let latest: String
+    let selected: Bool
+    @State private var hovering = false
+
+    private var subtitle: String {
+        switch status {
+        case .attention: return "Needs your OK"
+        case .working: return "Thinking it through…"
+        case .idle:
+            // One clean line: no question-card block, no blank lines.
+            let clean = ChoicePrompt.split(latest).text
+            return clean.split(separator: "\n").first.map { String($0) } ?? clean
+        }
+    }
+    private var subtitleColor: Color {
+        switch status {
+        case .attention: return MacTheme.attention
+        case .working: return MacTheme.working
+        case .idle: return MacTheme.secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 13) {
+            MacBotAvatar(color: bot.color, size: 36, appearance: bot.appearance, status: status)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(bot.name).font(.system(size: 14.5, weight: bot.unread == true ? .semibold : .medium)).lineLimit(1).help(bot.name)
+                Text(subtitle).font(.system(size: 12.5)).foregroundStyle(subtitleColor).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if bot.unread == true {
+                Circle().fill(MacTheme.unread).frame(width: 8, height: 8).accessibilityLabel("Unread")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(selected ? MacTheme.selection : (hovering ? MacTheme.hover : .clear), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
     }
 }

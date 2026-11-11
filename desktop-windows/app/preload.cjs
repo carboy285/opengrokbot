@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
   vmCommands:(id,value)=>ipcRenderer.invoke('vm:commands',id,value),
   vmShare:(id,value)=>ipcRenderer.invoke('vm:share',id,value),
+  onApproval:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('approval:request',listener);return ()=>ipcRenderer.removeListener('approval:request',listener);},
+  answerApproval:(id,approved)=>ipcRenderer.invoke('approval:answer',id,approved),
+  pendingApprovals:()=>ipcRenderer.invoke('approval:pending'),
   onVMHandoff:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('vm:handoff',listener);return ()=>ipcRenderer.removeListener('vm:handoff',listener);},
   vmHandoffDone:(id,outcome)=>ipcRenderer.invoke('vm:handoff-done',id,outcome),
   vmHandoffPreview:()=>ipcRenderer.invoke('vm:handoff-preview'),

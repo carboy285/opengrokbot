@@ -96,6 +96,19 @@ struct RootView: View {
     }
 
     var body: some View {
+        rootStack
+            // 0.9.2: a Bot asking for your OK shows as a card over whatever you are looking at, like Grok Bot.
+            .overlay(alignment: .bottom) {
+                if let request = remote.approval {
+                    PhoneApprovalCard(request: request) { allowed in Task { await remote.answerApproval(allowed) } }
+                        .padding(.horizontal, 14).padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.9), value: remote.approval)
+    }
+
+    private var rootStack: some View {
         NavigationStack(path: $chatPath) {
             Group {
                 if remote.hasSnapshot { roster }
@@ -108,10 +121,6 @@ struct RootView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $settings) { SettingsView() }
-            .alert(remote.approval?.title ?? "Approve?", isPresented: Binding(get: { remote.approval != nil }, set: { _ in }), presenting: remote.approval) { _ in
-                Button("Approve") { Task { await remote.answerApproval(true) } }
-                Button("Deny", role: .cancel) { Task { await remote.answerApproval(false) } }
-            } message: { request in Text(request.detail + "\n\nYour Mac is waiting for your answer.") }
             .onAppear { openPendingVoice(); sendPendingAsk() }
             .onChange(of: pendingVoice) { _, _ in openPendingVoice() }
             .onChange(of: remote.hasSnapshot) { _, _ in openPendingVoice(); sendPendingAsk() }
@@ -234,7 +243,12 @@ struct RootView: View {
         let latest = model.entries(for: bot).last
         return HStack(spacing: 18) {
             BotAvatar(color: bot.color, size: 46, appearance: bot.appearance)
-            VStack(alignment: .leading, spacing: 7) {
+                .overlay {
+                    if remote.running.contains(bot.id) {
+                        Circle().stroke(remote.approval != nil ? Palette.attention : Palette.working, lineWidth: 2.5).padding(-4)
+                    }
+                }
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(bot.name).font(.system(.body, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                     Spacer(minLength: 0)
@@ -244,17 +258,20 @@ struct RootView: View {
                 }
                 HStack(spacing: 5) {
                     if remote.running.contains(bot.id) {
-                        Image(systemName: "sparkles").font(.caption).foregroundStyle(.secondary)
-                    } else if latest?.senderBotID != nil {
-                        Image(systemName: "paperplane").font(.caption).foregroundStyle(.secondary)
+                        Text(remote.approval != nil ? "Needs your OK" : "Thinking it through…")
+                            .font(.subheadline).foregroundStyle(remote.approval != nil ? Palette.attention : Palette.working).lineLimit(1)
+                    } else {
+                        if latest?.senderBotID != nil {
+                            Image(systemName: "arrow.left.arrow.right").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(ChoicePrompt.split(model.latest(for: bot)).text.split(separator: "\n").first.map { String($0) } ?? "")
+                            .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Text(remote.running.contains(bot.id) ? "Working…" : model.latest(for: bot))
-                        .font(.body).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium)).foregroundStyle(.quaternary)
         }
-        .padding(.horizontal, 24).padding(.vertical, 19).contentShape(Rectangle())
+        .padding(.horizontal, 22).padding(.vertical, 14).contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
