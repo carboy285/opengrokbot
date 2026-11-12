@@ -54,6 +54,8 @@ struct MacWorkspaceView: View {
                 .allowsHitTesting(desktop.panel == nil)
                 .accessibilityHidden(desktop.panel != nil)
                 MacVMHandoffOverlay(handoff: MacVMHandoff.shared).zIndex(60)
+                // Voice mode floats above every chat so it keeps going while you open other Bots.
+                MacVoiceOverlay(hub: MacVoiceHub.shared).zIndex(55)
                 if desktop.showPalette {
                     MacCommandPalette().transition(.opacity).zIndex(5)
                 }

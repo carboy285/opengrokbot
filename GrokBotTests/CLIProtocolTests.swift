@@ -82,7 +82,7 @@ final class CLIProtocolTests: XCTestCase {
     }
 
     func testSpecificModelsArePassedAsArgumentsForEveryProvider() {
-        for provider in CLIProvider.allCases {
+        for provider in CLIProvider.allCases where !provider.isLocalServer {
             let command = CLICommand.chat(provider: provider, prompt: "private", session: "saved-session", promptFile: "/private/prompt.txt", model: "provider/specific-model")
             let index = command.arguments.firstIndex(of: "--model")!
             XCTAssertEqual(command.arguments[index + 1], "provider/specific-model")
@@ -99,11 +99,22 @@ final class CLIProtocolTests: XCTestCase {
     }
 
     func testCommandsKeepPromptsOutOfArgumentsAndResumeExplicitSessions() {
-        for provider in CLIProvider.allCases {
+        for provider in CLIProvider.allCases where !provider.isLocalServer {
             let command = CLICommand.chat(provider: provider, prompt: "private prompt; $(echo never)", session: "my-session", promptFile: "/private/prompt.txt")
             XCTAssertFalse(command.arguments.contains(where: { $0.contains("private prompt") }))
             XCTAssertTrue(command.arguments.contains("my-session"))
             XCTAssertFalse(command.arguments.contains(where: { $0.contains("bypass") || $0 == "--yolo" }))
         }
+    }
+
+    func testLocalModelServersNeverBuildAProcessCommandAndCodexCanThinkLessForVoice() {
+        for provider in CLIProvider.allCases where provider.isLocalServer {
+            XCTAssertTrue(CLICommand.chat(provider: provider, prompt: "private", session: nil).arguments.isEmpty)
+        }
+        let fast = CLICommand.chat(provider: .codex, prompt: "x", session: nil, fast: true).arguments
+        XCTAssertEqual(fast.prefix(5), ["exec", "--sandbox", "read-only", "-c", "model_reasoning_effort=low"])
+        XCTAssertEqual(BotTeamwork.voiceModel(provider: .claude, chatModel: "opus", custom: nil), "haiku")
+        XCTAssertEqual(BotTeamwork.voiceModel(provider: .codex, chatModel: "gpt-x", custom: nil), "gpt-x")
+        XCTAssertEqual(BotTeamwork.voiceModel(provider: .ollama, chatModel: "llama3.2", custom: "qwen3:4b"), "qwen3:4b")
     }
 }

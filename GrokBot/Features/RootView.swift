@@ -8,6 +8,7 @@ private enum RosterFilter: String, CaseIterable, Identifiable {
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var remote: RemoteController
+    @StateObject private var voiceHub = PhoneVoiceHub()
     @State private var settings = false
     @State private var createBot = false
     @State private var filter = RosterFilter.all
@@ -97,6 +98,9 @@ struct RootView: View {
 
     var body: some View {
         rootStack
+            .environmentObject(voiceHub)
+            // Voice mode floats above every chat so it keeps going while you open other Bots.
+            .overlay { voiceOverlay }
             // 0.9.2: a Bot asking for your OK shows as a card over whatever you are looking at, like Grok Bot.
             .overlay(alignment: .bottom) {
                 if let request = remote.approval {
@@ -106,6 +110,21 @@ struct RootView: View {
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.9), value: remote.approval)
+    }
+
+    @ViewBuilder private var voiceOverlay: some View {
+        if let id = voiceHub.botID, let bot = model.workspace.bots.first(where: { $0.id == id }) {
+            let color = bot.appearance?.color ?? bot.color
+            let plain = bot.appearance == nil && bot.color == "white"
+            VoiceModeView(conversation: voiceHub.conversation, botName: bot.name,
+                          tint: plain ? Color.primary : AvatarArtwork.color(color),
+                          ink: plain ? Palette.background : (["white", "amber", "orange", "green", "teal", "gray"].contains(color) ? Color.black : Color.white),
+                          face: AnyView(BotAvatar(color: bot.color, size: 26, appearance: bot.appearance)),
+                          layout: $voiceHub.layout,
+                          openBot: { if chatPath.last != id { chatPath = [id] }; if voiceHub.layout == .full { voiceHub.layout = .card } },
+                          close: { voiceHub.stop() })
+            .transition(.opacity)
+        }
     }
 
     private var rootStack: some View {

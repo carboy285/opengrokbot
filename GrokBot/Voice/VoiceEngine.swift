@@ -8,10 +8,11 @@ import SwiftUI
 // Optional cloud engines (Groq / OpenAI / ElevenLabs) use keys stored in the Keychain.
 
 enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
-    case apple, groq, openAI, elevenLabs, nvidiaNIM, nvidiaCloud, gemini
+    case apple, groq, openAI, elevenLabs, nvidiaNIM, nvidiaCloud, gemini, local
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .local: "On this Mac — Whisper / Kokoro (free, open-source)"
         case .apple: "Apple (free, on-device)"
         case .groq: "Groq"
         case .openAI: "OpenAI"
@@ -24,20 +25,92 @@ enum VoiceProvider: String, CaseIterable, Identifiable, Sendable {
     /// The NVIDIA and Gemini options here are speech output only.
     var supportsTranscription: Bool { self != .nvidiaNIM && self != .nvidiaCloud && self != .gemini }
     var supportsSpeech: Bool { true }
-    var needsKey: Bool { self != .apple && self != .nvidiaNIM }
+    var needsKey: Bool { self != .apple && self != .nvidiaNIM && self != .local }
     /// A NIM you run yourself needs no key; a gateway in front of it may.
     var keyIsOptional: Bool { self == .nvidiaNIM }
     /// Longest text one speech request should carry. Longer replies are split at natural pauses.
     var maxSpeechCharacters: Int? {
         switch self {
         case .groq: 190
-        case .nvidiaNIM, .nvidiaCloud: 400
+        case .nvidiaNIM, .nvidiaCloud, .local: 400
         default: nil
         }
     }
-    static var transcribers: [VoiceProvider] { allCases.filter(\.supportsTranscription) }
-    static var speakers: [VoiceProvider] { allCases.filter(\.supportsSpeech) }
+    static var transcribers: [VoiceProvider] { allCases.filter { $0.supportsTranscription && ($0 != .local || LocalVoice.supported) } }
+    static var speakers: [VoiceProvider] { allCases.filter { $0.supportsSpeech && ($0 != .local || LocalVoice.supported) } }
 }
+
+/// Open-source voice that runs on this computer (0.9.3): Whisper listens and Kokoro speaks.
+/// The Mac app provides the engine; the iPhone uses Apple's on-device voice instead.
+@MainActor
+protocol LocalVoiceBackend: AnyObject {
+    /// Downloads (once) and loads the models. `progress` gets short status lines for the voice card.
+    func prepare(listening: Bool, speaking: Bool, progress: @escaping @MainActor (String) -> Void) async throws
+    /// A WAV file of `text` spoken with the chosen Kokoro voice.
+    func speak(_ text: String) async throws -> Data
+    /// Text for mono samples recorded at `sampleRate`.
+    func transcribe(_ samples: [Float], sampleRate: Double, language: String) async throws -> String
+}
+
+enum LocalVoice {
+    #if os(macOS)
+    static let supported = true
+    #else
+    static let supported = false
+    #endif
+    @MainActor static var backend: (any LocalVoiceBackend)?
+}
+
+/// How voice mode decides you have finished talking, and what it says while a Bot works. Mirrors voice-core.mjs on Windows.
+enum VoiceTurns {
+    /// Seconds of quiet before what you said is sent.
+    static func silence(_ patience: String) -> Double { patience == "quick" ? 0.55 : patience == "relaxed" ? 1.3 : 0.8 }
+
+    private static let trailing: Set<String> = ["and", "or", "but", "so", "because", "cause", "um", "uh", "er", "like", "the", "a", "an", "to", "of", "for", "with", "my", "your", "if", "then", "that", "which", "when", "about", "also", "actually", "is", "are", "was", "i", "i'm", "we", "in", "on", "at", "just", "maybe", "could", "can", "should", "would", "what", "how", "where"]
+
+    /// True when what you said so far sounds unfinished (a trailing "and", "um", a comma).
+    static func continuesThought(_ text: String) -> Bool {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let last = clean.last else { return false }
+        if ",;:-–—…".contains(last) || clean.hasSuffix("...") { return true }
+        if ".?!".contains(last) { return false }
+        let word = (clean.split(separator: " ").last.map(String.init) ?? "").filter { $0.isLetter || $0 == "'" }
+        return trailing.contains(word)
+    }
+
+    /// How long to wait after the latest words before sending them.
+    static func delay(after text: String, patience: String) -> Double {
+        let base = silence(patience)
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if continuesThought(clean) { return max(base * 2.2, 1.6) }
+        if clean.hasSuffix("?") { return base * 0.85 }
+        if clean.split(separator: " ").count <= 2 { return base * 1.3 }
+        return base
+    }
+
+    private static let acks = ["Mm-hm, one sec.", "Okay, give me a moment.", "Sure, let me check.", "Got it. One moment.", "Okay, thinking."]
+    static func acknowledgement() -> String { acks.randomElement() ?? "One sec." }
+
+    /// What to say out loud for a tool step, or "" to stay quiet.
+    static func stepPhrase(_ text: String) -> String {
+        let first = text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        let lower = first.lowercased()
+        if first.isEmpty || ["couldn", "could not", "failed", "declined", "not sent", "stopped"].contains(where: { lower.contains($0) }) { return "" }
+        if lower.hasPrefix("linux vm result") { return "Running that on the computer." }
+        if first.hasPrefix("Queued message · ") { return "Asking " + String(first.dropFirst("Queued message · ".count)) + "." }
+        if lower.hasPrefix("read ") { return "Reading a page." }
+        if lower.contains("search") { return "Searching the web." }
+        if lower.contains("calendar") || lower.contains("event") { return "Checking your calendar." }
+        if lower.contains("mail") || lower.contains("email") { return "Looking at your email." }
+        return ""
+    }
+}
+
+/// A tool step a Bot took, for voice mode to mention.
+struct VoiceStep: Sendable { var id: UUID; var text: String; var date: Date }
+
+/// How voice mode looks: a small card, the whole window, or a small pill while you do other things.
+enum VoiceLayout: String, Sendable { case card, full, mini }
 
 enum VoiceSettings {
     /// Voice choices that apply only while one Bot's voice chat is open. They never overwrite the saved app-wide settings.
@@ -56,6 +129,39 @@ enum VoiceSettings {
     }
     private static let overrideBox = OverrideBox()
     static var sessionOverride: SessionOverride? { get { overrideBox.value } set { overrideBox.value = newValue } }
+
+    // 0.9.3 conversation feel
+    static var patience: String {
+        get { let value = UserDefaults.standard.string(forKey: "voicePatience") ?? "normal"; return ["quick", "normal", "relaxed"].contains(value) ? value : "normal" }
+        set { UserDefaults.standard.set(newValue, forKey: "voicePatience") }
+    }
+    static var acknowledge: Bool {
+        get { UserDefaults.standard.object(forKey: "voiceAcknowledge") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceAcknowledge") }
+    }
+    static var narrate: Bool {
+        get { UserDefaults.standard.object(forKey: "voiceNarrate") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceNarrate") }
+    }
+    /// Apple's server recognition is more accurate than on-device; off by default so audio stays on the device.
+    static var accurateRecognition: Bool {
+        get { UserDefaults.standard.bool(forKey: "voiceAccurateRecognition") }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceAccurateRecognition") }
+    }
+    /// Voice turns use a quicker model and a spoken style (read by the computer that runs the Bot).
+    static var fastModel: Bool {
+        get { UserDefaults.standard.object(forKey: "voiceFastModel") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceFastModel") }
+    }
+    static var layout: VoiceLayout {
+        get { VoiceLayout(rawValue: UserDefaults.standard.string(forKey: "voiceLayout") ?? "") ?? .card }
+        set { if newValue != .mini { UserDefaults.standard.set(newValue.rawValue, forKey: "voiceLayout") } }
+    }
+    static let kokoroVoices: [(id: String, name: String)] = [("af_heart", "Heart (US, warm)"), ("af_bella", "Bella (US)"), ("af_nicole", "Nicole (US, soft)"), ("af_sarah", "Sarah (US)"), ("am_michael", "Michael (US)"), ("am_fenrir", "Fenrir (US)"), ("am_puck", "Puck (US)"), ("bf_emma", "Emma (UK)"), ("bm_george", "George (UK)"), ("bm_fable", "Fable (UK)")]
+    static var kokoroVoice: String {
+        get { let value = UserDefaults.standard.string(forKey: "voiceKokoroVoice") ?? "af_heart"; return kokoroVoices.contains { $0.id == value } ? value : "af_heart" }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceKokoroVoice") }
+    }
 
     static var transcriber: VoiceProvider {
         get { VoiceProvider(rawValue: UserDefaults.standard.string(forKey: "voiceTranscriber") ?? "") ?? .apple }
@@ -283,6 +389,17 @@ final class VoiceSession: ObservableObject {
     @Published var message: String?
     /// While muted nothing you say is heard. The Bot can still speak.
     @Published private(set) var muted = false
+    /// While held (orb or Space), the app waits however long you pause, and sends when you let go.
+    @Published private(set) var holding = false
+    /// What you last said, for captions.
+    @Published var heard = ""
+    /// The piece of the reply being spoken right now, for captions. Empty while the Bot is still working.
+    @Published private(set) var speakingText = ""
+    /// Names and words recognition should expect (Bot names, for example).
+    var vocabulary: [String] = []
+    /// What you said that sounded unfinished ("…and"), waiting for the rest.
+    private var pendingText = ""
+    private var pendingTimer: Timer?
     /// Called with each finished thing the user said. The owner sends it and later calls `speak`.
     var onUtterance: ((String) -> Void)?
 
@@ -324,6 +441,17 @@ final class VoiceSession: ObservableObject {
     func begin() async -> Bool {
         guard !active else { return true }
         transcriber = VoiceSettings.transcriber
+        if transcriber == .local || VoiceSettings.speaker == .local {
+            guard let backend = LocalVoice.backend else { message = "Open-source voice runs in the Mac app. Choose Apple in voice settings."; return false }
+            state = .thinking; message = "Getting the voice ready…"
+            do {
+                try await backend.prepare(listening: transcriber == .local, speaking: VoiceSettings.speaker == .local) { [weak self] line in self?.message = line }
+            } catch {
+                message = "The open-source voice isn’t ready: \(error.localizedDescription) Choose Apple in voice settings to keep going."
+                state = .idle; return false
+            }
+            message = nil
+        }
         if transcriber.needsKey, VoiceKeys.get(transcriber).isEmpty {
             message = "Add your \(transcriber.title) key in voice settings, or switch listening back to Apple."; return false
         }
@@ -344,6 +472,7 @@ final class VoiceSession: ObservableObject {
     func end() {
         active = false
         silenceTimer?.invalidate(); silenceTimer = nil
+        pendingTimer?.invalidate(); pendingTimer = nil; pendingText = ""; holding = false
         generation += 1
         task?.cancel(); task = nil; sink.set(nil)
         stopOutput()
@@ -354,6 +483,7 @@ final class VoiceSession: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
         partial = ""; level = 0; utterance = []; preRoll = []; inSpeech = false; speechQueue = []; muted = false
+        heard = ""; speakingText = ""
         state = .idle
     }
 
@@ -368,10 +498,32 @@ final class VoiceSession: ObservableObject {
         guard active, on != muted else { return }
         muted = on
         if on {
+            holding = false
             silenceTimer?.invalidate(); silenceTimer = nil
             generation += 1; task?.cancel(); task = nil; sink.set(nil)
             partial = ""; utterance = []; preRoll = []; inSpeech = false
         } else if state == .listening, transcriber == .apple { startRecognition() }
+    }
+
+    /// Hold to keep talking. Letting go sends what you said right away.
+    func hold(_ on: Bool) {
+        guard active, !muted, on != holding else { return }
+        if on {
+            holding = true
+            silenceTimer?.invalidate(); silenceTimer = nil
+            pendingTimer?.invalidate(); pendingTimer = nil
+            if state == .speaking { interrupt() }
+            if state == .listening, transcriber == .apple, task == nil { startRecognition() }
+            return
+        }
+        holding = false
+        guard state == .listening else { return }
+        if transcriber == .apple {
+            let text = partial.isEmpty ? pendingText : partial
+            if !text.isEmpty { commit(text) }
+        } else if inSpeech {
+            finishCloudUtterance(held: true)
+        }
     }
 
     nonisolated static func requestAccess(needsSpeech: Bool) async -> Bool {
@@ -452,7 +604,7 @@ final class VoiceSession: ObservableObject {
             bargeSeconds = 0
             if inSpeech {
                 utterance.append(contentsOf: samples)
-                if Date().timeIntervalSince(lastVoice) > 0.5 { finishCloudUtterance() }
+                if !holding, Date().timeIntervalSince(lastVoice) > VoiceTurns.silence(VoiceSettings.patience) { finishCloudUtterance() }
             }
         }
         if !inSpeech {
@@ -462,24 +614,51 @@ final class VoiceSession: ObservableObject {
         }
     }
 
-    private func finishCloudUtterance() {
+    private func finishCloudUtterance(held: Bool = false) {
         let recorded = utterance
         inSpeech = false; utterance = []; preRoll = []
-        guard Double(recorded.count) / sampleRate > 0.4 else { return }
+        guard Double(recorded.count) / sampleRate > 0.4 else { if !pendingText.isEmpty { sendPending() }; return }
         state = .thinking; partial = "Transcribing…"
         let provider = transcriber, key = VoiceKeys.get(transcriber), rate = sampleRate
+        let language = VoiceSettings.locale.identifier
         Task {
             do {
-                let wav = VoiceWAV.encode(recorded, sampleRate: rate)
-                let text = try await VoiceCloud.transcribe(wav: wav, provider: provider, key: key)
+                let text: String
+                if provider == .local, let backend = LocalVoice.backend {
+                    text = try await backend.transcribe(recorded, sampleRate: rate, language: language)
+                } else {
+                    let wav = VoiceWAV.encode(recorded, sampleRate: rate)
+                    text = try await VoiceCloud.transcribe(wav: wav, provider: provider, key: key)
+                }
                 guard active else { return }
                 partial = ""
-                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { resumeListening() } else { onUtterance?(text) }
+                let said = [pendingText, text.trimmingCharacters(in: .whitespacesAndNewlines)].filter { !$0.isEmpty }.joined(separator: " ")
+                if said.isEmpty { resumeListening(); return }
+                // Sounds unfinished: keep listening a little longer before sending.
+                if !held, VoiceTurns.continuesThought(said) {
+                    pendingText = said; partial = said; state = .listening
+                    pendingTimer?.invalidate()
+                    pendingTimer = Timer.scheduledTimer(withTimeInterval: max(1.4, VoiceTurns.silence(VoiceSettings.patience) * 1.8), repeats: false) { [weak self] _ in
+                        DispatchQueue.main.async { MainActor.assumeIsolated { self?.sendPending() } }
+                    }
+                    return
+                }
+                pendingText = ""
+                onUtterance?(said)
             } catch {
                 guard active else { return }
                 message = error.localizedDescription; resumeListening()
             }
         }
+    }
+
+    /// Sends what was waiting for the rest of a sentence, if you have not started talking again.
+    private func sendPending() {
+        pendingTimer?.invalidate(); pendingTimer = nil
+        guard active, !pendingText.isEmpty, !inSpeech, !holding, state == .listening else { return }
+        let text = pendingText; pendingText = ""
+        state = .thinking; partial = text
+        onUtterance?(text)
     }
 
     // MARK: Apple speech recognition
@@ -490,8 +669,10 @@ final class VoiceSession: ObservableObject {
         let current = generation
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+        if recognizer.supportsOnDeviceRecognition, !VoiceSettings.accurateRecognition { request.requiresOnDeviceRecognition = true }
         request.addsPunctuation = true
+        // Names the Bot and its friends go by, so "Calendar Agent" is not heard as "calendar a gent".
+        if !vocabulary.isEmpty { request.contextualStrings = Array(vocabulary.prefix(100)) }
         sink.set(request)
         let handler = Self.makeRecognitionHandler { [weak self] text, done in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.recognized(text, done: done, generation: current) } }
@@ -509,21 +690,27 @@ final class VoiceSession: ObservableObject {
             return
         }
         guard state == .listening else { return }
-        if !text.isEmpty { partial = text; armSilenceTimer(text) }
-        if done { if text.isEmpty { startRecognition() } else { commit(text) } }
+        let full = [pendingText, text].filter { !$0.isEmpty }.joined(separator: " ")
+        if !text.isEmpty { partial = full; armSilenceTimer(full) }
+        guard done else { return }
+        if text.isEmpty { startRecognition(); return }
+        // Recognition ended on a pause, but you are holding, or it sounds unfinished: keep listening and keep the words.
+        if holding || VoiceTurns.continuesThought(full) { pendingText = full; startRecognition(); return }
+        commit(full)
     }
 
     private func armSilenceTimer(_ text: String) {
-        silenceTimer?.invalidate()
-        // A finished sentence is a likely stopping point, so commit sooner; otherwise give a short pause.
-        let finished = text.trimmingCharacters(in: .whitespaces).last.map { ".?!".contains($0) } ?? false
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: finished ? 0.4 : 0.6, repeats: false) { [weak self] _ in
+        silenceTimer?.invalidate(); silenceTimer = nil
+        guard !holding else { return }
+        // Wait longer after "and…" or "um", a little less after a question (see VoiceTurns).
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: VoiceTurns.delay(after: text, patience: VoiceSettings.patience), repeats: false) { [weak self] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.commit(text) } }
         }
     }
 
     private func commit(_ text: String) {
         silenceTimer?.invalidate(); silenceTimer = nil
+        pendingText = ""; pendingTimer?.invalidate(); pendingTimer = nil
         guard state == .listening || state == .speaking else { return }
         let spoken = text.trimmingCharacters(in: .whitespacesAndNewlines)
         generation += 1; task?.cancel(); task = nil; sink.set(nil)
@@ -544,7 +731,7 @@ final class VoiceSession: ObservableObject {
     /// Starts a spoken reply that arrives in pieces. Call `enqueue` for each piece and `endSpeaking` at the end.
     func beginSpeaking() {
         guard active else { return }
-        state = .speaking; partial = ""; bargeSeconds = 0; preRoll = []
+        state = .speaking; partial = ""; bargeSeconds = 0; preRoll = []; speakingText = ""
         speechQueue = []; streamFinished = false
         if transcriber == .apple, !muted { startRecognition() }
     }
@@ -571,8 +758,11 @@ final class VoiceSession: ObservableObject {
     /// Starts fetching audio for a piece right away, so the next sentence is ready when the current one ends.
     private func fetch(_ text: String) -> Fetch {
         let provider = VoiceSettings.speaker
+        if provider == .local, let backend = LocalVoice.backend {
+            return Fetch(text: text, audio: Task { try await backend.speak(text) }, provider: provider)
+        }
         let key = VoiceKeys.get(provider)
-        guard provider != .apple, provider.supportsSpeech, provider.keyIsOptional || !key.isEmpty else { return Fetch(text: text, audio: nil, provider: provider) }
+        guard provider != .apple, provider != .local, provider.supportsSpeech, provider.keyIsOptional || !key.isEmpty else { return Fetch(text: text, audio: nil, provider: provider) }
         return Fetch(text: text, audio: Task { try await VoiceCloud.synthesize(text: text, provider: provider, key: key) }, provider: provider)
     }
 
@@ -586,11 +776,12 @@ final class VoiceSession: ObservableObject {
             await speakPiece(pipeline.removeFirst())
         }
         for item in pipeline { item.audio?.cancel() }
-        draining = false
+        draining = false; speakingText = ""
         if state == .speaking, active, streamFinished, speechQueue.isEmpty { resumeListening() }
     }
 
     private func speakPiece(_ item: Fetch) async {
+        speakingText = item.text
         guard let audio = item.audio else { await speakWithApple(item.text); return }
         do {
             let data = try await audio.value
@@ -701,10 +892,13 @@ final class VoiceConversation: ObservableObject {
     var isRunning: Bool { running }
 
     private var stopReply: (() -> Void)?
+    private var activity: (() -> [VoiceStep])?
 
-    func start(botVoice: BotVoice? = nil, send: @escaping (String) async -> Bool, latestReply: @escaping () -> VoiceReply?, stopReply: (() -> Void)? = nil) async {
+    func start(botVoice: BotVoice? = nil, send: @escaping (String) async -> Bool, latestReply: @escaping () -> VoiceReply?, stopReply: (() -> Void)? = nil,
+               activity: (() -> [VoiceStep])? = nil, vocabulary: [String] = []) async {
         VoiceSettings.sessionOverride = botVoice.map { VoiceSettings.SessionOverride($0) }
-        self.send = send; self.latestReply = latestReply; self.stopReply = stopReply
+        self.send = send; self.latestReply = latestReply; self.stopReply = stopReply; self.activity = activity
+        session.vocabulary = vocabulary
         session.onUtterance = { [weak self] text in self?.handle(text) }
         running = await session.begin()
     }
@@ -718,6 +912,8 @@ final class VoiceConversation: ObservableObject {
 
     private func handle(_ text: String) {
         let previous = latestReply?()?.id
+        let sentAt = Date()
+        session.heard = text
         waiting?.cancel()
         waiting = Task { [weak self] in
             guard let self, let send = self.send else { return }
@@ -725,29 +921,51 @@ final class VoiceConversation: ObservableObject {
                 session.message = "That message couldn’t be sent. Check the Bot and try again."
                 session.resumeListening(); return
             }
-            // Speak finished sentences while the reply is still being written.
-            var offset = 0, started = false, waited = 0.0
+            // Speak finished sentences while the reply is still being written. Before it starts, say a short
+            // "one sec" and what the Bot is doing (reading a page, asking another Bot) so the wait never feels dead.
+            var offset = 0, speaking = false, replyStarted = false, acknowledged = false, waited = 0.0
+            var lastStep = Date.distantPast, seen = Set<UUID>()
             while running, !Task.isCancelled, waited < 180 {
                 try? await Task.sleep(nanoseconds: 40_000_000); waited += 0.04
-                guard let reply = latestReply?(), reply.id != previous else { continue }
-                if started, session.state != .speaking {
+                if speaking, session.state != .speaking {
                     // You talked over the Bot: stop generating so your next message can be sent.
-                    if !reply.finished { stopReply?() }
+                    if let reply = latestReply?(), reply.id != previous, !reply.finished { stopReply?() }
                     return
                 }
-                let piece = VoiceText.nextChunk(reply.text, from: offset, final: reply.finished, eager: !started)
+                let reply = latestReply?()
+                let fresh: VoiceReply? = (reply?.id != previous) ? reply : nil
+                if !replyStarted, (fresh?.text ?? "").isEmpty {
+                    if VoiceSettings.narrate, let steps = activity?() {
+                        for step in steps where step.date >= sentAt.addingTimeInterval(-0.5) && !seen.contains(step.id) {
+                            seen.insert(step.id)
+                            let phrase = VoiceTurns.stepPhrase(step.text)
+                            if !phrase.isEmpty, Date().timeIntervalSince(lastStep) > 3.5 {
+                                lastStep = Date()
+                                if !speaking { session.beginSpeaking(); speaking = true }
+                                session.enqueue(phrase)
+                            }
+                        }
+                    }
+                    if VoiceSettings.acknowledge, !acknowledged, waited > 1.3 {
+                        acknowledged = true
+                        if !speaking { session.beginSpeaking(); speaking = true; session.enqueue(VoiceTurns.acknowledgement()) }
+                    }
+                }
+                guard let fresh else { continue }
+                let piece = VoiceText.nextChunk(fresh.text, from: offset, final: fresh.finished, eager: !replyStarted)
                 offset = piece.next
                 let spoken = VoiceText.speakable(piece.chunk)
                 if !spoken.isEmpty {
-                    if !started { session.beginSpeaking(); started = true }
+                    replyStarted = true
+                    if !speaking { session.beginSpeaking(); speaking = true }
                     session.enqueue(spoken)
                 }
-                if reply.finished {
-                    if started { session.endSpeaking() } else { session.resumeListening() }
+                if fresh.finished {
+                    if speaking { session.endSpeaking() } else { session.resumeListening() }
                     return
                 }
             }
-            if running { if started { session.endSpeaking() } else { session.resumeListening() } }
+            if running { if speaking { session.endSpeaking() } else { session.resumeListening() } }
         }
     }
 }

@@ -1,13 +1,18 @@
 import SwiftUI
 
-/// Hands-free voice mode: a compact card that floats over the chat, with an orb, a live waveform and four round controls
-/// (voice settings, captions, mute, end). It follows the app's theme and the Bot's color. On the Mac it can be dragged anywhere
-/// (grab the top of the card) and remembers where you left it; on iPhone it sits just under the agent's name.
+/// Hands-free voice mode. 0.9.3: three layouts you can switch between at any time: a compact card over the chat (draggable
+/// on the Mac), the whole window with a big orb and large captions, or a small pill while you look at other Bots.
+/// Voice keeps running in all three, and when you open another Bot.
 struct VoiceModeView: View {
     @ObservedObject var conversation: VoiceConversation
     let botName: String
     let tint: Color
     let ink: Color
+    /// The Bot's face, shown in the header and the pill.
+    var face: AnyView = AnyView(EmptyView())
+    @Binding var layout: VoiceLayout
+    /// Opens the Bot this voice chat belongs to (voice keeps running while you look at other Bots).
+    var openBot: (() -> Void)? = nil
     let close: () -> Void
     @State private var showSettings = false
     @State private var showCaptions = true
@@ -18,6 +23,12 @@ struct VoiceModeView: View {
     @State private var drag = CGSize.zero
     #endif
 
+    init(conversation: VoiceConversation, botName: String, tint: Color, ink: Color, face: AnyView = AnyView(EmptyView()),
+         layout: Binding<VoiceLayout>, openBot: (() -> Void)? = nil, close: @escaping () -> Void) {
+        self._conversation = ObservedObject(wrappedValue: conversation); self.botName = botName; self.tint = tint; self.ink = ink; self.face = face
+        self._layout = layout; self.openBot = openBot; self.close = close
+    }
+
     private var session: VoiceSession { conversation.session }
     private static let danger = Color(red: 0.92, green: 0.24, blue: 0.24)
 
@@ -25,60 +36,83 @@ struct VoiceModeView: View {
         if session.muted { return "Muted" }
         switch session.state {
         case .idle: return "Starting…"
-        case .listening: return "Listening…"
+        case .listening: return session.holding ? "Listening — let go to send" : "Listening…"
         case .thinking: return "Thinking…"
-        case .speaking: return "Speaking · tap the orb to interrupt"
+        case .speaking: return session.speakingText.isEmpty ? "Thinking…" : "Speaking"
         }
     }
-    private var caption: String {
-        if let message = session.message { return message }
-        return session.partial.isEmpty ? status : session.partial
-    }
+    private var youText: String { session.state == .listening && !session.partial.isEmpty ? session.partial : session.heard }
     private var border: Color { session.state == .listening && !session.muted ? tint.opacity(0.55) : Color.primary.opacity(0.12) }
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(spacing: 0) {
-                card(in: proxy.size)
-                    #if os(macOS)
-                    .offset(cardOffset(in: proxy.size))
+            Group {
+                switch layout {
+                case .card:
+                    VStack(spacing: 0) {
+                        card(in: proxy.size)
+                            #if os(macOS)
+                            .offset(cardOffset(in: proxy.size))
+                            #endif
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    #if os(iOS)
+                    .padding(.top, 60) // below the chat's header
                     #endif
-                Spacer(minLength: 0)
+                case .full:
+                    full
+                case .mini:
+                    VStack {
+                        Spacer(minLength: 0)
+                        HStack { Spacer(minLength: 0); pill }
+                    }
+                    .padding(.trailing, 20).padding(.bottom, 92)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.9), value: layout)
         .sheet(isPresented: $showSettings) { VoiceSettingsView() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Voice mode with \(botName)")
+    }
+
+    // MARK: Pieces
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Button { openBot?() } label: {
+                HStack(spacing: 8) {
+                    face.frame(width: layout == .full ? 30 : 24, height: layout == .full ? 30 : 24)
+                    Text(botName).font(.system(size: layout == .full ? 15 : 13, weight: .semibold)).lineLimit(1)
+                    Text(status).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Open \(botName)")
+            Spacer(minLength: 0)
+            small(layout == .full ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", label: layout == .full ? "Small card" : "Full screen") {
+                layout = layout == .full ? .card : .full
+                VoiceSettings.layout = layout
+            }
+            small("minus", label: "Minimize") { layout = .mini }
+        }
     }
 
     private func card(in size: CGSize) -> some View {
         VStack(spacing: 12) {
             #if os(macOS)
             grip.gesture(dragGesture(in: size))
+            header.gesture(dragGesture(in: size))
+            #else
+            header
             #endif
             HStack(spacing: 14) {
-                orb
+                orb(diameter: 46)
                 VoiceWaveform(state: session.state, level: session.level, muted: session.muted, reduceMotion: reduceMotion, color: tint).frame(height: 38)
             }
-            #if os(macOS)
-            .gesture(dragGesture(in: size))
-            #endif
-            if showCaptions {
-                Text(caption).font(.system(size: 13)).lineLimit(2).multilineTextAlignment(.leading)
-                    .foregroundStyle(session.message == nil ? Color.secondary : Color.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel(session.partial.isEmpty ? status : "You said: " + session.partial)
-            }
-            HStack(spacing: 12) {
-                control("gearshape", label: "Voice settings") { showSettings = true }
-                Spacer(minLength: 0)
-                control("bubble.left", label: showCaptions ? "Hide captions" : "Show captions", highlighted: showCaptions) { showCaptions.toggle() }
-                Spacer(minLength: 0)
-                control(session.muted ? "mic.slash.fill" : "mic.fill", label: session.muted ? "Unmute microphone" : "Mute microphone", highlighted: session.muted) { session.setMuted(!session.muted) }
-                Spacer(minLength: 0)
-                control("xmark", label: "End voice mode", danger: true, action: close)
-            }
+            if showCaptions { captions(large: false) }
+            controls(size: 46)
         }
         .padding(16)
         .frame(maxWidth: 440)
@@ -89,28 +123,119 @@ struct VoiceModeView: View {
         .padding(.top, 8).padding(.horizontal, 16)
     }
 
-    private var orb: some View {
-        Button { if session.state == .speaking { session.interrupt() } } label: {
-            ZStack {
-                Circle().fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.6)], startPoint: .top, endPoint: .bottom)).frame(width: 46, height: 46)
-                HStack(spacing: 5) {
-                    Capsule().fill(ink).frame(width: 5, height: 15)
-                    Capsule().fill(ink).frame(width: 5, height: 15)
-                }
-            }
-            .scaleEffect(reduceMotion ? 1 : 1 + CGFloat(min(session.level, 1)) * 0.12)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: session.level)
+    /// The whole window: a big orb, large captions and the controls along the bottom.
+    private var full: some View {
+        VStack(spacing: 0) {
+            header.frame(maxWidth: 900).padding(.horizontal, 28).padding(.top, 18)
+            Spacer(minLength: 20)
+            orb(diameter: 180)
+            VoiceWaveform(state: session.state, level: session.level, muted: session.muted, reduceMotion: reduceMotion, color: tint)
+                .frame(width: 300, height: 48).padding(.top, 30)
+            Spacer(minLength: 20)
+            if showCaptions { captions(large: true).frame(maxWidth: 760).padding(.horizontal, 28) }
+            controls(size: 56).frame(maxWidth: 520).padding(.horizontal, 28).padding(.top, 18).padding(.bottom, 28)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(status)
-        .accessibilityHint(session.state == .speaking ? "Stops the spoken reply" : "")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.ultraThickMaterial)
+        .transition(.opacity)
     }
 
-    private func control(_ symbol: String, label: String, highlighted: Bool = false, danger: Bool = false, action: @escaping () -> Void) -> some View {
+    /// Small and out of the way: voice keeps listening and speaking.
+    private var pill: some View {
+        HStack(spacing: 6) {
+            Button { openBot?() } label: {
+                HStack(spacing: 8) {
+                    face.frame(width: 26, height: 26)
+                    Text(botName).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    VoiceWaveform(state: session.state, level: session.level, muted: session.muted, reduceMotion: reduceMotion, color: tint, bars: 5)
+                        .frame(width: 26, height: 16)
+                    Text(session.muted ? "Muted" : session.state == .speaking && !session.speakingText.isEmpty ? "Speaking" : session.state == .listening ? "Listening" : "Thinking")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(minWidth: 58, alignment: .leading)
+                }
+                .padding(.leading, 4).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Open \(botName)")
+            small("arrow.up.left.and.arrow.down.right", label: "Expand voice mode") { layout = VoiceSettings.layout }
+            Button(action: close) {
+                Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 28, height: 28).background(Self.danger, in: Circle())
+            }
+            .buttonStyle(.plain).accessibilityLabel("End voice mode")
+        }
+        .padding(5)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
+        .shadow(color: .black.opacity(0.3), radius: 16, y: 6)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func captions(large: Bool) -> some View {
+        VStack(alignment: large ? .center : .leading, spacing: large ? 10 : 4) {
+            if !youText.isEmpty {
+                Text(youText).font(.system(size: large ? 17 : 13)).foregroundStyle(.secondary)
+                    .lineLimit(large ? 3 : 2).multilineTextAlignment(large ? .center : .leading)
+                    .accessibilityLabel("You said: " + youText)
+            }
+            if !session.speakingText.isEmpty {
+                Text(session.speakingText).font(.system(size: large ? 24 : 13, weight: large ? .medium : .regular))
+                    .lineLimit(large ? 4 : 2).multilineTextAlignment(large ? .center : .leading)
+            }
+            Text(session.message ?? status).font(.system(size: large ? 14 : 12))
+                .foregroundStyle(session.message == nil ? Color.secondary : Color.orange)
+                .lineLimit(2).multilineTextAlignment(large ? .center : .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: large ? .center : .leading)
+        .frame(minHeight: large ? 120 : nil, alignment: .bottom)
+    }
+
+    private func controls(size: CGFloat) -> some View {
+        HStack(spacing: 12) {
+            control("gearshape", label: "Voice settings", size: size) { showSettings = true }
+            control("bubble.left", label: showCaptions ? "Hide captions" : "Show captions", highlighted: showCaptions, size: size) { showCaptions.toggle() }
+            Spacer(minLength: 0)
+            Text("Hold the orb to keep talking").font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+            control(session.muted ? "mic.slash.fill" : "mic.fill", label: session.muted ? "Unmute microphone" : "Mute microphone", highlighted: session.muted, size: size) { session.setMuted(!session.muted) }
+            control("xmark", label: "End voice mode", danger: true, size: size, action: close)
+        }
+    }
+
+    /// Press and hold to keep talking (it sends when you let go). A press while the Bot speaks interrupts it.
+    private func orb(diameter: CGFloat) -> some View {
+        ZStack {
+            Circle().fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+                .frame(width: diameter, height: diameter)
+                .shadow(color: tint.opacity(diameter > 100 ? 0.45 : 0), radius: diameter > 100 ? 30 + CGFloat(min(session.level, 1)) * 40 : 0)
+            HStack(spacing: diameter * 0.11) {
+                Capsule().fill(ink).frame(width: diameter * 0.11, height: diameter * 0.32)
+                Capsule().fill(ink).frame(width: diameter * 0.11, height: diameter * 0.32)
+            }
+            if session.holding { Circle().strokeBorder(tint.opacity(0.6), lineWidth: 4).frame(width: diameter + 10, height: diameter + 10) }
+        }
+        .scaleEffect(reduceMotion ? 1 : 1 + CGFloat(min(session.level, 1)) * 0.12)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: session.level)
+        .contentShape(Circle())
+        .onLongPressGesture(minimumDuration: 30, perform: {}, onPressingChanged: { pressing in session.hold(pressing) })
+        .accessibilityElement()
+        .accessibilityLabel(status)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Press and hold to keep talking. While the Bot speaks, press to interrupt.")
+        .accessibilityAction { if session.state == .speaking { session.interrupt() } }
+    }
+
+    private func small(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 16, weight: .medium))
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                .frame(width: 28, height: 28).background(Color.primary.opacity(0.06), in: Circle()).contentShape(Circle())
+        }
+        .buttonStyle(.plain).accessibilityLabel(label).help(label)
+    }
+
+    private func control(_ symbol: String, label: String, highlighted: Bool = false, danger: Bool = false, size: CGFloat = 46, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: size * 0.35, weight: .medium))
                 .foregroundStyle(danger ? Color.white : Color.primary.opacity(0.85))
-                .frame(width: 46, height: 46)
+                .frame(width: size, height: size)
                 .background(danger ? Self.danger : Color.primary.opacity(highlighted ? 0.18 : 0.08), in: Circle())
                 .contentShape(Circle())
         }
@@ -119,7 +244,7 @@ struct VoiceModeView: View {
     }
 
     #if os(macOS)
-    /// A handle at the top of the card. Dragging it (or the orb and waveform row) moves the whole card.
+    /// A handle at the top of the card. Dragging it (or the header) moves the whole card.
     private var grip: some View {
         Capsule().fill(Color.primary.opacity(0.25)).frame(width: 38, height: 4)
             .frame(maxWidth: .infinity, minHeight: 12).contentShape(Rectangle())
@@ -149,13 +274,13 @@ struct VoiceWaveform: View {
     let muted: Bool
     let reduceMotion: Bool
     var color: Color = Color(red: 0.43, green: 0.31, blue: 0.95)
-    private static let bars = 32
+    var bars = 32
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 3) {
-                ForEach(0..<Self.bars, id: \.self) { index in
+            HStack(spacing: bars < 10 ? 2 : 3) {
+                ForEach(0..<bars, id: \.self) { index in
                     Capsule().fill(barColor).frame(width: 3, height: height(index, time))
                 }
             }
@@ -170,7 +295,7 @@ struct VoiceWaveform: View {
     private func height(_ index: Int, _ time: Double) -> CGFloat {
         let low: CGFloat = 4, high: CGFloat = 36
         let phase = Double(index) * 0.55
-        let bump = 0.45 + 0.55 * sin(Double.pi * Double(index) / Double(Self.bars - 1))
+        let bump = 0.45 + 0.55 * sin(Double.pi * Double(index) / Double(max(bars - 1, 1)))
         let wave = abs(sin(time * 6 + phase))
         switch state {
         case .listening: return muted ? low : low + CGFloat(min(Double(level), 1) * (0.35 + 0.65 * wave)) * (high - low)
@@ -199,6 +324,12 @@ struct VoiceSettingsView: View {
     @State private var cloudFunction = VoiceSettings.nvidiaCloudFunctionID
     @State private var cloudVoice = VoiceSettings.nvidiaCloudVoice
     @State private var keys: [VoiceProvider: String] = Dictionary(uniqueKeysWithValues: VoiceProvider.allCases.map { ($0, VoiceKeys.get($0)) })
+    @State private var patience = VoiceSettings.patience
+    @State private var acknowledge = VoiceSettings.acknowledge
+    @State private var narrate = VoiceSettings.narrate
+    @State private var accurate = VoiceSettings.accurateRecognition
+    @State private var fastModel = VoiceSettings.fastModel
+    @State private var layout = VoiceSettings.layout
 
     var body: some View {
         NavigationStack {
@@ -213,6 +344,30 @@ struct VoiceSettingsView: View {
                         Slider(value: $speed, in: 0.75...1.5, step: 0.05)
                         Text(String(format: "%.2g×", speed)).monospacedDigit().foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
                     }
+                } footer: {
+                    Text(LocalVoice.supported ? "“On this Mac” runs free open-source models (Whisper listens, Kokoro speaks) on your Mac: nothing leaves it. Apple voices also run on your device with no key." : "Apple voices run on your device with no key.")
+                }
+                #if os(macOS)
+                MacLocalVoiceSection()
+                #endif
+                Section {
+                    Picker("Wait before sending", selection: $patience) {
+                        Text("Quick — answers fast").tag("quick"); Text("Normal").tag("normal"); Text("Relaxed — time to think").tag("relaxed")
+                    }
+                    Toggle("Say “one sec” while thinking", isOn: $acknowledge)
+                    Toggle("Say what the Bot is doing", isOn: $narrate)
+                    Toggle("More accurate recognition (uses Apple’s servers)", isOn: $accurate)
+                    Picker("Opens as", selection: $layout) { Text("Small card").tag(VoiceLayout.card); Text("Full screen").tag(VoiceLayout.full) }
+                } header: { Text("Conversation") } footer: {
+                    Text("Voice mode waits longer when you trail off (“and…”, “um”). Press and hold the orb to keep talking as long as you like; it sends when you let go.")
+                }
+                Section {
+                    Toggle("Use a quick model in voice mode", isOn: $fastModel)
+                } header: { Text("Faster answers") } footer: {
+                    Text("In voice mode Bots answer in a short, spoken style. With this on, Claude Code uses Haiku, Gemini CLI uses Gemini Flash and Codex thinks less. Ollama and LM Studio already run on your computer.")
+                }
+                Section {
+                    EmptyView()
                 } footer: {
                     Text("Apple voices run on your device with no key. Cloud providers send audio or reply text to that provider and use your own account and free-tier quota. Groq and ElevenLabs voices are usually the quickest to start speaking. Without headphones, talking over a reply may pick up the Bot’s own voice.")
                 }
@@ -262,6 +417,8 @@ struct VoiceSettingsView: View {
         VoiceSettings.groqVoice = groqVoice; VoiceSettings.nimBaseURL = nimURL; VoiceSettings.nimVoice = nimVoice
         VoiceSettings.geminiModel = geminiModel; VoiceSettings.geminiVoice = geminiVoice; VoiceSettings.geminiBaseURL = geminiBase
         VoiceSettings.nvidiaCloudServer = cloudServer; VoiceSettings.nvidiaCloudFunctionID = cloudFunction; VoiceSettings.nvidiaCloudVoice = cloudVoice
+        VoiceSettings.patience = patience; VoiceSettings.acknowledge = acknowledge; VoiceSettings.narrate = narrate
+        VoiceSettings.accurateRecognition = accurate; VoiceSettings.fastModel = fastModel; VoiceSettings.layout = layout
     }
 }
 

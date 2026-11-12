@@ -1,5 +1,16 @@
 # Voice mode and image attachments
 
+## 0.9.3: a voice that sounds and behaves like a person
+- **Open-source voice on your computer (Mac and Windows):** Whisper listens and Kokoro-82M speaks, with no key and nothing sent anywhere. Settings → Voice recommends models for your machine (memory, cores, Apple silicon or a graphics chip) and downloads them once (about 160–600 MB). You can choose smaller or larger Whisper models, three Kokoro sizes and ten Kokoro voices, preview a voice, or remove the models. The iPhone keeps Apple's on-device voice.
+- **Turn-taking:** voice mode waits longer when you trail off (“and…”, “um”, a comma) and less after a question. Choose Quick, Normal or Relaxed. Press and hold the orb (or Space on a computer) to keep talking as long as you like; it sends when you let go.
+- **No dead air:** while the Bot starts its answer you hear a short “one sec”, and what it is doing (“Reading a page.”, “Asking Calendar Agent.”). Both can be turned off.
+- **Faster, human replies:** in voice mode Bots are told they are being heard, so they answer in one to three short spoken sentences, and use a quicker model: Claude Code uses Haiku, Gemini CLI uses Gemini Flash, Codex thinks less (low reasoning effort). Each provider's voice model can be changed (Windows: Settings → Voice; Mac: defaults key voiceModels). The phone tells the computer when its voice mode is on.
+- **Better recognition:** Bot names are given to the recognizer as hints; on Apple devices you can opt in to Apple's more accurate server recognition.
+- **Layouts:** a small card, full screen (big orb, large captions) or a small pill. Minimize and expand at any time. Voice keeps running when you open another Bot; click its name to go back.
+- **Self-hosted chat models:** Ollama and LM Studio can answer for any Bot (pick them in the Bot's side panel). They run on your computer, so they are also quick in voice mode.
+
+Not tried on real devices yet: model downloads, WebGPU speed, recognition quality and echo behaviour.
+
 ## Voice mode (iPhone, Mac, Windows)
 Tap the waveform button in the message box. Voice mode is hands-free: it listens, sends what you said after a pause, speaks the Bot's reply, then listens again. Talk over a reply to interrupt it (tap the orb as a fallback).
 

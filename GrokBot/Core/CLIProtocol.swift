@@ -1,11 +1,14 @@
 import Foundation
 
 enum CLIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
-    case codex, claude, grok, opencode, gemini
+    case codex, claude, grok, opencode, gemini, ollama, lmstudio
     var id: String { rawValue }
-    var name: String { switch self { case .codex: "Codex"; case .claude: "Claude Code"; case .grok: "Grok Build"; case .opencode: "OpenCode"; case .gemini: "Gemini CLI" } }
+    var name: String { switch self { case .codex: "Codex"; case .claude: "Claude Code"; case .grok: "Grok Build"; case .opencode: "OpenCode"; case .gemini: "Gemini CLI"; case .ollama: "Ollama"; case .lmstudio: "LM Studio" } }
+    /// 0.9.3: Ollama and LM Studio are not CLIs. The app talks to the OpenAI-compatible server they run on this computer.
+    var isLocalServer: Bool { self == .ollama || self == .lmstudio }
+    var defaultServer: String { self == .lmstudio ? "http://127.0.0.1:1234" : "http://127.0.0.1:11434" }
     var executable: String { rawValue }
-    var loginCommand: String { switch self { case .codex: "codex login"; case .opencode: "opencode auth login"; default: executable } }
+    var loginCommand: String { switch self { case .codex: "codex login"; case .opencode: "opencode auth login"; case .ollama: "ollama pull llama3.2"; case .lmstudio: "lms server start"; default: executable } }
     var guideURL: URL {
         let address: String
         switch self {
@@ -14,6 +17,8 @@ enum CLIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .grok: address = "https://github.com/xai-org/grok-build#installing-the-released-binary"
         case .opencode: address = "https://opencode.ai/docs/"
         case .gemini: address = "https://geminicli.com/docs/get-started/installation/"
+        case .ollama: address = "https://ollama.com/download"
+        case .lmstudio: address = "https://lmstudio.ai/"
         }
         return URL(string: address)!
     }
@@ -24,6 +29,8 @@ enum CLIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .opencode: "npm install -g opencode-ai"
         case .gemini: "npm install -g @google/gemini-cli"
         case .grok: "See the official Grok Build install guide."
+        case .ollama: "Download Ollama from ollama.com, then run: ollama pull llama3.2"
+        case .lmstudio: "Download LM Studio from lmstudio.ai, load a model, and start its server (Developer tab)."
         }
     }
 
@@ -91,11 +98,13 @@ struct CLICommand: Sendable {
     /// The name Bots' connected apps (Composio) are registered under in each CLI.
     static let connectedAppsServer = "opengrokbot-composio"
     /// `allowConnectedApps` pre-approves only the connected-apps tools for Claude Code, which cannot ask for permission in the background.
-    static func chat(provider: CLIProvider, prompt: String, session: String?, promptFile: String? = nil, model: String = "", allowConnectedApps: Bool = false) -> CLICommand {
+    /// `fast` (voice mode) asks Codex to think less, which is most of its wait.
+    static func chat(provider: CLIProvider, prompt: String, session: String?, promptFile: String? = nil, model: String = "", allowConnectedApps: Bool = false, fast: Bool = false) -> CLICommand {
         let modelArguments = model.isEmpty ? [String]() : ["--model", model]
         switch provider {
         case .codex:
             var args = ["exec", "--sandbox", "read-only"]
+            if fast { args += ["-c", "model_reasoning_effort=low"] }
             if let session { args += ["resume", session] }
             args += modelArguments + ["--json", "--skip-git-repo-check", "-"]
             return CLICommand(arguments: args, input: prompt)
@@ -116,6 +125,9 @@ struct CLICommand: Sendable {
             var args = ["--prompt-file", promptFile ?? "prompt.txt", "--output-format", "streaming-messages-json", "--include-partial-messages"]
             if let session { args += ["--resume", session] }
             return CLICommand(arguments: args + modelArguments, input: "")
+        case .ollama, .lmstudio:
+            // Not a process: LocalCLIRun sends these to the local server over HTTP.
+            return CLICommand(arguments: [], input: prompt)
         }
     }
 }

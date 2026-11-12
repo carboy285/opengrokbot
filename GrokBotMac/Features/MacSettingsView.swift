@@ -46,6 +46,7 @@ struct MacSettingsView: View {
                         case .apiKeys: MacAPIKeysView()
                         case .secureLogins: MacSecureLoginsView()
                         case .vault: MacVaultView()
+                        case .voice: MacVoiceSettingsPage()
                         case .usage: MacUsageView()
                         case .updates: updates
                         }

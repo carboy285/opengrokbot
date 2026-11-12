@@ -4,6 +4,9 @@ import Foundation
 /// Queries the local CLI's own catalog. Model selection never triggers inference.
 enum CLIModelCatalog {
     static func models(for cli: InstalledCLI) -> [AvailableCLIModel] {
+        if cli.provider.isLocalServer {
+            return (LocalModelServer.modelsBlocking(cli.path, timeout: 4) ?? []).filter(validID).map { AvailableCLIModel(id: $0, name: $0) }
+        }
         if cli.provider == .opencode {
             let result = CLIInstallationScanner.capture(path: cli.path, arguments: ["models"], timeout: 12, limit: 262_144)
             guard result.exit == 0 else { return [] }

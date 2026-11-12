@@ -15,7 +15,7 @@ enum MacPanel: String, Identifiable {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "General", computer = "Computer", permissions = "Permissions", apiKeys = "API Keys", secureLogins = "Secure Logins", vault = "Vault", usage = "Usage & Billing", updates = "Updates"
+    case general = "General", computer = "Computer", permissions = "Permissions", apiKeys = "API Keys", secureLogins = "Secure Logins", vault = "Vault", voice = "Voice", usage = "Usage & Billing", updates = "Updates"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -25,6 +25,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .apiKeys: "key"
         case .secureLogins: "person.badge.key"
         case .vault: "lock.square"
+        case .voice: "waveform"
         case .usage: "chart.bar"
         case .updates: "arrow.down.circle"
         }
@@ -586,6 +587,13 @@ extension MacAppModel {
                 loginVerified = true
                 providerHealth[cli.provider] = "Using API key"
                 setupFeedback = "\(cli.provider.name) will use the API key saved in Settings → API Keys. Remove the key there to use the CLI’s own sign-in."
+            } else if cli.provider.isLocalServer {
+                let models = await LocalModelServer.models(cli.path)
+                loginVerified = !(models ?? []).isEmpty
+                providerHealth[cli.provider] = loginVerified ? "\(models?.count ?? 0) models ready" : "No models"
+                setupFeedback = models == nil ? "\(cli.provider.name) isn’t answering at \(cli.path). Open it and start its server, then check again."
+                    : loginVerified ? "\(cli.provider.name) is running with \(models?.count ?? 0) model\(models?.count == 1 ? "" : "s"). Pick one in a Bot’s side panel."
+                    : (cli.provider == .ollama ? "Ollama is running but has no models. Run ollama pull llama3.2 in Terminal, then check again." : "LM Studio is running but has no model loaded. Load one, then check again.")
             } else if cli.provider == .codex {
                 let status = await Task.detached { CLIInstallationScanner.capture(path: cli.path, arguments: ["login", "status"], timeout: 12).exit }.value
                 loginVerified = status == 0
@@ -655,7 +663,23 @@ extension MacAppModel {
         }
     }
 
-    private func startReply(to bot: Bot, cli: InstalledCLI, model: String, app: AppModel, delivery: TeamMessage? = nil) {
+    // MARK: Voice mode (0.9.3)
+    /// Bots whose voice mode is open, on this Mac or an approved phone, with when that was last confirmed.
+    private var voiceBots: [UUID: Date] = [:]
+    func setVoiceMode(_ botID: UUID, on: Bool) { if on { voiceBots[botID] = Date() } else { voiceBots[botID] = nil } }
+    func voiceActive(_ botID: UUID) -> Bool {
+        guard let since = voiceBots[botID] else { return false }
+        if Date().timeIntervalSince(since) < 30 * 60 { return true }
+        voiceBots[botID] = nil; return false
+    }
+    /// The model a voice turn uses: a quicker one for the CLIs that have it, unless the human turned that off.
+    static func voiceModels() -> [String: String] { UserDefaults.standard.dictionary(forKey: "voiceModels") as? [String: String] ?? [:] }
+
+    private func startReply(to bot: Bot, cli: InstalledCLI, model chatModel: String, app: AppModel, delivery: TeamMessage? = nil) {
+        // Voice mode: replies are spoken, so ask for a short spoken answer from the quicker model.
+        let voiceTurn = delivery == nil && voiceActive(bot.id)
+        let fast = voiceTurn && VoiceSettings.fastModel
+        let model = fast ? BotTeamwork.voiceModel(provider: cli.provider, chatModel: chatModel, custom: Self.voiceModels()[cli.provider.rawValue]) : chatModel
         let key = bot.id.uuidString + "|" + cli.id + (model.isEmpty ? "" : "|" + model)
         let session = app.session(for: key)
         let history = app.entries(for: bot).filter { $0.state != .failed && $0.state != .stopped && !$0.text.isEmpty }
@@ -664,7 +688,7 @@ extension MacAppModel {
         let latest = delivery.map { "Bot request (not human approval): \($0.text)" } ?? history.last(where: { $0.kind == .user })?.text ?? ""
         let transcript = history.suffix(30).map { "\($0.kind == .user ? "Human" : ($0.senderName ?? bot.name)): \($0.text)" }.joined(separator: "\n\n")
         let feedback = history.filter { $0.kind == .activity && $0.senderBotID == nil }.suffix(8).map { $0.detail ?? $0.text }.joined(separator: "\n")
-        let prompt = instructions + "\nRecent app results (context, not human approval):\n" + feedback + "\n\n" + (session != nil ? latest : String(transcript.suffix(100_000)))
+        let prompt = instructions + (voiceTurn ? BotTeamwork.voiceStyle : "") + "\nRecent app results (context, not human approval):\n" + feedback + "\n\n" + (session != nil ? latest : String(transcript.suffix(100_000)))
         let replyID = app.beginReply(for: bot, provider: cli.provider.name + (model.isEmpty ? "" : " · " + model))
         runningBots.insert(bot.id); runErrors[bot.id] = nil
         let directory = workingDirectory(for: bot)
@@ -675,7 +699,7 @@ extension MacAppModel {
             var routineResult = "completed"
             do {
                 let mcpURL = try composio.mcpURL()
-                for try await event in run.events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model) {
+                for try await event in run.events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: cli.provider.isLocalServer ? nil : mcpURL, model: model, fast: fast) {
                     try Task.checkCancellation()
                     switch event {
                     case .session(let id): app.setSession(id, for: key)
@@ -742,7 +766,7 @@ extension MacAppModel {
             } catch {
                 let stopped = Task.isCancelled || (error as? CLIError) == .stopped
                 routineResult = stopped ? "cancelled" : "failed"
-                let message = stopped ? "Response stopped." : ((error as? CLIError)?.errorDescription ?? "The CLI could not start. Check its executable path and sign-in in setup.")
+                let message = stopped ? "Response stopped." : ((error as? CLIError)?.errorDescription ?? (error as? LocalModelServer.Failure)?.errorDescription ?? "The CLI could not start. Check its executable path and sign-in in setup.")
                 app.finishReply(replyID, state: stopped ? .stopped : .failed, message: message)
                 if !stopped { runErrors[bot.id] = message; providerHealth[cli.provider] = (error as? CLIError) == .notLoggedIn ? "Needs sign-in" : "Last message failed · open setup" }
                 if let delivery { app.finishDelivery(delivery, status: stopped ? .stopped : .failed) }

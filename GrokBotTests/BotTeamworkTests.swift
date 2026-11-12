@@ -116,4 +116,18 @@ final class BotTeamworkTests: XCTestCase {
         XCTAssertNil(ChoicePrompt.split("```choices\nA\nB").prompt)
         XCTAssertNil(ChoicePrompt.split("```swift\nlet a = 1\n```").prompt)
     }
+
+    func testVoiceTurnsWaitThroughTrailingWordsAndSpeakToolSteps() {
+        XCTAssertTrue(VoiceTurns.continuesThought("I want to book a trip and"))
+        XCTAssertTrue(VoiceTurns.continuesThought("so um"))
+        XCTAssertTrue(VoiceTurns.continuesThought("Book it for Tuesday,"))
+        XCTAssertFalse(VoiceTurns.continuesThought("What is on my calendar?"))
+        XCTAssertFalse(VoiceTurns.continuesThought("Book the flight"))
+        XCTAssertGreaterThan(VoiceTurns.delay(after: "and then", patience: "normal"), VoiceTurns.delay(after: "Book the flight now", patience: "normal"))
+        XCTAssertLessThan(VoiceTurns.delay(after: "Is it raining today?", patience: "normal"), VoiceTurns.silence("normal"))
+        XCTAssertEqual(VoiceTurns.stepPhrase("Queued message · Calendar Agent"), "Asking Calendar Agent.")
+        XCTAssertEqual(VoiceTurns.stepPhrase("Read “Weather” · weather.com"), "Reading a page.")
+        XCTAssertEqual(VoiceTurns.stepPhrase("Couldn’t open example.com"), "")
+        XCTAssertTrue(BotTeamwork.voiceStyle.contains("VOICE MODE"))
+    }
 }

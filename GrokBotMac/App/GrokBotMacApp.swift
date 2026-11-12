@@ -19,6 +19,8 @@ struct GrokBotMacApp: App {
                 .background(WindowConfigurator())
                 .onAppear {
                     if !app.previewEnabled { app.enterPreview() }
+                    // Open-source voice (Kokoro + Whisper) runs in the Mac app; voice mode finds it here.
+                    LocalVoice.backend = MacLocalVoiceEngine.shared
                     desktop.remote.attach(app: app, desktop: desktop)
                     MacIntentHub.shared.attach(app: app, desktop: desktop)
                     desktop.localApp = app

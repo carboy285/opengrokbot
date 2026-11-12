@@ -10,8 +10,7 @@ struct MacConversationView: View {
     @FocusState private var composing: Bool
     @State private var followLatest = true
     @State private var showActions = false
-    @State private var voiceOn = false
-    @StateObject private var voice = VoiceConversation()
+    @ObservedObject private var voiceHub = MacVoiceHub.shared
     @StateObject private var dictation = MacDictation()
     @ObservedObject private var approval = MacApproval.shared
     @State private var pasteMonitor: Any?
@@ -91,9 +90,6 @@ struct MacConversationView: View {
         }
         .overlay(alignment: .topTrailing) { MacModelMenu(bot: bot).padding(.top, 14).padding(.trailing, 18) }
         .background(MacTheme.canvas)
-        .overlay { if voiceOn { VoiceModeView(conversation: voice, botName: bot.name, tint: tint, ink: ink) { stopVoice() }.transition(.opacity) } }
-        .onChange(of: bot.id) { _, _ in stopVoice() }
-        .onDisappear { stopVoice() }
         .dropDestination(for: URL.self) { urls, _ in
             guard urls.allSatisfy(\.isFileURL), bot.memberIDs == nil else { return false }
             desktop.importAttachments(urls, for: bot); return true
@@ -280,27 +276,8 @@ struct MacConversationView: View {
         }
     }
 
-    private func startVoice() {
-        withAnimation { voiceOn = true }
-        let current = bot, model = desktop, workspace = app
-        Task {
-            await voice.start(
-                botVoice: current.voice,
-                send: { text in model.send(text, to: current, app: workspace) },
-                latestReply: {
-                    guard let entry = workspace.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
-                    let finished = entry.state != .streaming && !model.runningBots.contains(current.id)
-                    return VoiceReply(id: entry.id, text: entry.text, finished: finished)
-                },
-                stopReply: { model.stop(botID: current.id) })
-        }
-    }
-
-    private func stopVoice() {
-        guard voiceOn || voice.isRunning else { return }
-        voice.stop()
-        withAnimation { voiceOn = false }
-    }
+    /// Voice mode lives in the window (MacVoiceHub), so it keeps going when you open another Bot.
+    private func startVoice() { voiceHub.start(bot: bot, desktop: desktop, app: app) }
 
     private var attachDisabled: Bool { bot.memberIDs != nil || desktop.gateway != nil || desktop.importingAttachments.contains(bot.id) }
 

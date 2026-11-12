@@ -14,6 +14,7 @@ enum VoiceCloud {
         case .openAI: endpoint = "https://api.openai.com/v1/audio/transcriptions"; model = "whisper-1"
         case .elevenLabs: endpoint = "https://api.elevenlabs.io/v1/speech-to-text"; model = "scribe_v1"
         case .apple: throw Failure("Apple recognition runs on the device.")
+        case .local: throw Failure("Local listening runs on this computer.")
         case .nvidiaNIM, .nvidiaCloud, .gemini: throw Failure("\(provider.title) is used for speaking only. Choose another provider for listening.")
         }
         guard let url = URL(string: endpoint) else { throw Failure("Invalid speech service address.") }

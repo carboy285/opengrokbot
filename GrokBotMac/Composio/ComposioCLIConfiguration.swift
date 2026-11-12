@@ -47,6 +47,8 @@ struct ComposioCLIConfiguration {
                 config.environment["OPENCODE_CONFIG"] = directory.appendingPathComponent(filename).path
             case .gemini:
                 try write(".gemini/settings.json", bytes: json(["mcpServers":[name:server]]))
+            case .ollama, .lmstudio:
+                break // Local model servers have no MCP client; connected apps are not offered to them.
             }
             return config
         } catch { config.cleanup(); throw error }

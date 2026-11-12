@@ -16,11 +16,10 @@ struct ConversationView: View {
     @State private var info = false
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
-    @State private var voiceOn = false
+    @EnvironmentObject private var voiceHub: PhoneVoiceHub
     @State private var attachNotice: String?
     @State private var clipboardHasImage = false
     @AppStorage("autoVoiceBotID") private var autoVoiceBotID = ""
-    @StateObject private var voice = VoiceConversation()
     @StateObject private var dictation = PhoneDictation()
     @State private var nearBottom = true
     @State private var userScrolling = false
@@ -99,14 +98,6 @@ struct ConversationView: View {
                 photoItems = []
             }
         }
-        .overlay(alignment: .top) {
-            if voiceOn {
-                VoiceModeView(conversation: voice, botName: bot.name, tint: composerTint, ink: composerInk) { voice.stop(); voiceOn = false }
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: voiceOn)
-        .onDisappear { if voiceOn { voice.stop(); voiceOn = false } }
         .simultaneousGesture(DragGesture(minimumDistance: 24, coordinateSpace: .global).onEnded { value in
             if value.startLocation.x < 28, value.translation.width > 80, abs(value.translation.height) < 70 { dismiss() }
         })
@@ -308,21 +299,8 @@ struct ConversationView: View {
         list.append(attachment); remote.draftImages[bot.id] = list; attachNotice = nil
     }
 
-    private func startVoice() {
-        voiceOn = true
-        let current = bot
-        Task {
-            await voice.start(
-                botVoice: current.voice,
-                send: { text in await remote.send(text, bot: current) },
-                latestReply: {
-                    guard let entry = model.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
-                    let finished = entry.state != .streaming && !remote.running.contains(current.id)
-                    return VoiceReply(id: entry.id, text: entry.text, finished: finished)
-                },
-                stopReply: { Task { _ = await remote.command(RemoteCommand(action: "stop", botID: current.id)) } })
-        }
-    }
+    /// Voice mode lives at the app's root (PhoneVoiceHub), so it keeps going when you open another Bot.
+    private func startVoice() { voiceHub.start(bot: bot, model: model, remote: remote) }
 
     private func send() {
         dictation.stop()
@@ -563,4 +541,44 @@ final class PhoneDictation: ObservableObject {
 private final class DictationRequestBox: @unchecked Sendable {
     let request: SFSpeechAudioBufferRecognitionRequest
     init(_ request: SFSpeechAudioBufferRecognitionRequest) { self.request = request }
+}
+
+/// Voice mode belongs to the app, not one chat (0.9.3): it keeps listening and speaking while you open other Bots,
+/// and shows as a card, full screen, or a small pill. The computer that runs the Bot is told voice mode is on,
+/// so replies come back short, spoken-style and from a quick model.
+@MainActor
+final class PhoneVoiceHub: ObservableObject {
+    let conversation = VoiceConversation()
+    @Published private(set) var botID: UUID?
+    @Published var layout: VoiceLayout = VoiceSettings.layout
+    private weak var remote: RemoteController?
+
+    func start(bot: Bot, model: AppModel, remote: RemoteController) {
+        if botID == bot.id { if layout == .mini { layout = VoiceSettings.layout }; return }
+        if botID != nil { stop() }
+        self.remote = remote
+        botID = bot.id; layout = VoiceSettings.layout
+        let current = bot
+        Task { _ = await remote.command(RemoteCommand(action: "voice_mode", botID: current.id, text: "on")) }
+        Task {
+            await conversation.start(
+                botVoice: current.voice,
+                send: { text in await remote.send(text, bot: current) },
+                latestReply: {
+                    guard let entry = model.entries(for: current).last(where: { $0.kind == .bot }) else { return nil }
+                    let finished = entry.state != .streaming && !remote.running.contains(current.id)
+                    return VoiceReply(id: entry.id, text: entry.text, finished: finished)
+                },
+                stopReply: { Task { _ = await remote.command(RemoteCommand(action: "stop", botID: current.id)) } },
+                activity: { model.entries(for: current).suffix(12).filter { $0.kind == .activity }.map { VoiceStep(id: $0.id, text: $0.text, date: $0.date) } },
+                vocabulary: model.workspace.bots.map(\.name))
+        }
+    }
+
+    func stop() {
+        guard let id = botID else { return }
+        conversation.stop()
+        botID = nil
+        if let remote { Task { _ = await remote.command(RemoteCommand(action: "voice_mode", botID: id, text: "off")) } }
+    }
 }

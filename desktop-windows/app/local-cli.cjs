@@ -14,7 +14,7 @@ const providers = [
   { id:'gemini',name:'Gemini CLI',install:'npm install -g @google/gemini-cli',login:'gemini',guide:'https://geminicli.com/docs/get-started/installation/',package:'@google/gemini-cli' },
   // 0.9.3: self-hosted models. No CLI: the app talks to their local server (see local-llm.cjs).
   { id:'ollama',name:'Ollama',install:null,login:'ollama pull llama3.2',guide:'https://ollama.com/download',local:true },
-  { id:'lmstudio',name:'LM Studio',install:null,login:'Load a model and start the server in LM Studio',guide:'https://lmstudio.ai/',local:true }
+  { id:'lmstudio',name:'LM Studio',install:null,login:'lms server start',guide:'https://lmstudio.ai/',local:true }
 ];
 const localLLM=require('./local-llm.cjs');
 const isLocal=id=>providers.some(x=>x.id===id&&x.local);

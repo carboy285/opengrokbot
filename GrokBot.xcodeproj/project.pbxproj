@@ -377,8 +377,8 @@
 				"INFOPLIST_FILE" = "GrokBot/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "31";
-				"MARKETING_VERSION" = "0.9.2";
+				"CURRENT_PROJECT_VERSION" = "32";
+				"MARKETING_VERSION" = "0.9.3";
 				"TARGETED_DEVICE_FAMILY" = "1";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -400,8 +400,8 @@
 				"INFOPLIST_FILE" = "GrokBot/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "31";
-				"MARKETING_VERSION" = "0.9.2";
+				"CURRENT_PROJECT_VERSION" = "32";
+				"MARKETING_VERSION" = "0.9.3";
 				"TARGETED_DEVICE_FAMILY" = "1";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"SUPPORTS_MACCATALYST" = "NO";
@@ -748,6 +748,8 @@
 				"D42190AB321F4E1303BCF0FF",
 				"1BC4BA355E16ACC96C4605D6",
 				"5B1865B379D5FA54681B5596",
+				"10844AF1F3A791297CC2033B",
+				"4EAE415170749847F2A6B68C",
 				"90BC61D7B1A3A1612A8BDF1C",
 				"FE020D269952A37167260049",
 				"5DBF3E02C0D47FE8DC70957E",
@@ -785,6 +787,7 @@
 				"8B4322010C9EAA5209B347E0",
 				"0F5B17094854229F4639D1E7",
 				"2CD85C05820661ABC1377867",
+				"F7B42D4953D10AFD6971454C",
 			);
 			"name" = "GrokBotMac";
 			"sourceTree" = "<group>";
@@ -804,8 +807,8 @@
 				"PRODUCT_MODULE_NAME" = "GrokBotMac";
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
-				"CURRENT_PROJECT_VERSION" = "31";
-				"MARKETING_VERSION" = "0.9.2";
+				"CURRENT_PROJECT_VERSION" = "32";
+				"MARKETING_VERSION" = "0.9.3";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
@@ -831,8 +834,8 @@
 				"PRODUCT_MODULE_NAME" = "GrokBotMac";
 				"INFOPLIST_FILE" = "GrokBotMac/Resources/Info.plist";
 				"GENERATE_INFOPLIST_FILE" = "NO";
-				"CURRENT_PROJECT_VERSION" = "31";
-				"MARKETING_VERSION" = "0.9.2";
+				"CURRENT_PROJECT_VERSION" = "32";
+				"MARKETING_VERSION" = "0.9.3";
 				"CODE_SIGN_ENTITLEMENTS" = "GrokBotMac/Resources/GrokBotMac.entitlements";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
@@ -984,6 +987,26 @@
 		"5A7C5FBC54E845C9F3F0A30A" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "5B1865B379D5FA54681B5596";
+		};
+		"10844AF1F3A791297CC2033B" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/Features/MacVoice.swift";
+			"sourceTree" = "<group>";
+		};
+		"D7D1AD66ED2AF34B713E3484" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "10844AF1F3A791297CC2033B";
+		};
+		"4EAE415170749847F2A6B68C" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "GrokBotMac/CLI/LocalModelServer.swift";
+			"sourceTree" = "<group>";
+		};
+		"F094F7C77B5D7483E96598F6" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4EAE415170749847F2A6B68C";
 		};
 		"90BC61D7B1A3A1612A8BDF1C" = {
 			"isa" = "PBXFileReference";
@@ -1326,6 +1349,8 @@
 				"A00D89FA4A8867714FD4EA32",
 				"11C6327260FC7C9DA9A9039B",
 				"5A7C5FBC54E845C9F3F0A30A",
+				"D7D1AD66ED2AF34B713E3484",
+				"F094F7C77B5D7483E96598F6",
 				"ECE986E317B4D56E5DAC22A2",
 				"1C6C1F69A4EDF2B42A77EA75",
 				"1806E9FB241D6D0D8E2089B2",
@@ -1392,6 +1417,16 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "2CD85C05820661ABC1377867";
 		};
+		"F7B42D4953D10AFD6971454C" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.javascript";
+			"path" = "GrokBotMac/Resources/local-voice-engine.js";
+			"sourceTree" = "<group>";
+		};
+		"23CA80344BE343476299C878" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F7B42D4953D10AFD6971454C";
+		};
 		"FCF516EA981A858C96EEFC61" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "CFC363919F9F7413947BFD12";
@@ -1402,6 +1437,7 @@
 			"files" = (
 				"A808AC4ECC6CC4AED5D945D3",
 				"FCF516EA981A858C96EEFC61",
+				"23CA80344BE343476299C878",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};

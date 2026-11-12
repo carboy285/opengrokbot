@@ -9,13 +9,17 @@ final class LocalCLIRun: @unchecked Sendable {
     private let process = Process()
     private var cancelled = false
     private var timedOut = false
+    /// Ollama and LM Studio replies run as an HTTP task instead of a process.
+    private var serverTask: Task<Void, Never>?
 
     func cancel(timeout: Bool = false, immediately: Bool = false) {
         lock.lock()
         cancelled = true
         timedOut = timedOut || timeout
         let running = process.isRunning
+        let server = serverTask
         lock.unlock()
+        server?.cancel()
         if running {
             if immediately { Darwin.kill(process.processIdentifier, SIGKILL); return }
             process.interrupt()
@@ -32,12 +36,24 @@ final class LocalCLIRun: @unchecked Sendable {
         LocalCLIRun(keys: keys).events(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model)
     }
 
-    func events(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil, model: String = "") -> AsyncThrowingStream<CLIEvent, Error> {
+    func events(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String? = nil, model: String = "", fast: Bool = false) -> AsyncThrowingStream<CLIEvent, Error> {
         let run = self
+        if cli.provider.isLocalServer {
+            return AsyncThrowingStream { continuation in
+                let task = Task<Void, Never> {
+                    do {
+                        let text = try await LocalModelServer.chat(provider: cli.provider, base: cli.path, prompt: prompt, model: model) { partial in continuation.yield(.text(partial)) }
+                        continuation.yield(.text(text)); continuation.finish()
+                    } catch { continuation.finish(throwing: error) }
+                }
+                run.lock.lock(); run.serverTask = task; run.lock.unlock()
+                continuation.onTermination = { @Sendable _ in task.cancel() }
+            }
+        }
         return AsyncThrowingStream { continuation in
             continuation.onTermination = { @Sendable _ in run.cancel() }
             DispatchQueue.global(qos: .userInitiated).async {
-                run.execute(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model, continuation: continuation)
+                run.execute(cli: cli, prompt: prompt, session: session, directory: directory, mcpURL: mcpURL, model: model, fast: fast, continuation: continuation)
             }
         }
     }
@@ -54,7 +70,7 @@ final class LocalCLIRun: @unchecked Sendable {
         }
     }
 
-    private func execute(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String?, model: String, continuation: AsyncThrowingStream<CLIEvent, Error>.Continuation) {
+    private func execute(cli: InstalledCLI, prompt: String, session: String?, directory: URL, mcpURL: String?, model: String, fast: Bool = false, continuation: AsyncThrowingStream<CLIEvent, Error>.Continuation) {
         var promptFile: URL?
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -67,7 +83,7 @@ final class LocalCLIRun: @unchecked Sendable {
             defer { if let promptFile { try? FileManager.default.removeItem(at: promptFile) } }
             let mcp = try ComposioCLIConfiguration.make(provider: cli.provider, directory: directory, sessionURL: mcpURL)
             defer { mcp.cleanup() }
-            let command = CLICommand.chat(provider: cli.provider, prompt: prompt, session: session, promptFile: promptFile?.path, model: model, allowConnectedApps: mcpURL != nil && UserDefaults.standard.bool(forKey: "claudeAllowConnectedApps"))
+            let command = CLICommand.chat(provider: cli.provider, prompt: prompt, session: session, promptFile: promptFile?.path, model: model, allowConnectedApps: mcpURL != nil && UserDefaults.standard.bool(forKey: "claudeAllowConnectedApps"), fast: fast)
             let input = Pipe(), output = Pipe(), error = Pipe()
             process.executableURL = URL(fileURLWithPath: cli.path)
             process.arguments = command.arguments + mcp.arguments
@@ -159,6 +175,12 @@ enum CLIInstallationScanner {
 
     static func scan(overrides: [String:String]) -> [InstalledCLI] {
         CLIProvider.allCases.compactMap { provider in
+            if provider.isLocalServer {
+                // Ollama and LM Studio: found when their local server answers.
+                let base = LocalModelServer.origin(overrides[provider.rawValue] ?? "") ?? provider.defaultServer
+                guard let models = LocalModelServer.modelsBlocking(base) else { return nil }
+                return InstalledCLI(provider: provider, path: base, version: "\(models.count) model\(models.count == 1 ? "" : "s") · \(base.replacingOccurrences(of: "http://", with: ""))")
+            }
             let custom = overrides[provider.rawValue] ?? ""
             let candidates = custom.isEmpty ? directories.map { $0 + "/" + provider.executable } : [custom]
             guard let path = candidates.first(where: { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) }) else { return nil }
@@ -210,7 +232,7 @@ enum ProviderAPIKeys {
         case .claude: Info(variables: ["ANTHROPIC_API_KEY"], console: URL(string: "https://console.anthropic.com/settings/keys")!, example: "sk-ant-…", billing: "Claude Code uses a configured API key instead of your Claude subscription, so usage is billed per token to your Anthropic API account.")
         case .grok: Info(variables: ["XAI_API_KEY"], console: URL(string: "https://console.x.ai")!, example: "xai-…", billing: "xAI API usage is billed per token to your xAI account, separately from any X or Grok subscription.")
         case .gemini: Info(variables: ["GEMINI_API_KEY"], console: URL(string: "https://aistudio.google.com/apikey")!, example: "AIza…", billing: "Gemini API usage follows your Google AI Studio plan and quota.")
-        case .opencode: nil
+        case .opencode, .ollama, .lmstudio: nil
         }
     }
 
