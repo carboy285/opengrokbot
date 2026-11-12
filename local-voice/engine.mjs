@@ -6,7 +6,8 @@
 import { KokoroTTS } from 'kokoro-js';
 import { pipeline, env } from '@huggingface/transformers';
 
-const BASE = 'ogb-models://local/';
+// The apps serve models through ogb-models:; scripts/diagnose-local-voice.mjs points this at a local test server instead.
+const BASE = globalThis.OGB_MODELS_BASE || 'ogb-models://local/';
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
 env.remoteHost = BASE + 'hf/';
