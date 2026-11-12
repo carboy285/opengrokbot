@@ -7,7 +7,10 @@
 // Usage (from the repository root):
 //   npm install --no-save playwright@1.56.1 && npx playwright install chromium webkit
 //   node scripts/diagnose-local-voice.mjs [--cache <dir>] [--out <dir>] [--browsers chromium,webkit]
-//        [--tts q8,fp32] [--stt onnx-community/whisper-base.en,...] [--download] [--timeout 600]
+//        [--tts q8,fp32] [--stt onnx-community/whisper-base.en,...] [--download] [--timeout 600] [--headed]
+//
+// The apps use Kokoro q8 and Whisper base on the processor by default (0.9.4), so that is what this tests by default.
+// --headed shows the browser windows: headless browsers often run WebGPU in slow software emulation, so use it to judge the graphics chip.
 //
 // --cache    The app's model folder. Default: Mac ~/Library/Application Support/OpenGrokBot/LocalVoice,
 //            Windows %APPDATA%/OpenGrokBot/local-voice.
@@ -66,14 +69,14 @@ for (const [name, hash] of Object.entries(RUNTIME)) {
   catch { runtimeChecks[name] = 'missing'; }
 }
 const cachedSTT = [...new Set(cacheFiles.map(f => /^hf\/(onnx-community\/whisper-[^/]+)\//.exec(f.path)?.[1]).filter(Boolean))];
-const sttModels = args.stt ? String(args.stt).split(',') : (cachedSTT.length ? cachedSTT : ['onnx-community/whisper-base.en']);
+const sttModels = args.stt ? String(args.stt).split(',') : ['onnx-community/whisper-base.en'];
 const ttsDtypes = args.tts ? String(args.tts).split(',') : ['q8'];
 
 // ---- A server that serves the engine and the models exactly where the engine asks for them ----
 const requests = [];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://local');
-  const send = (status, body = '', type = 'text/plain') => { res.writeHead(status, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy': 'cross-origin' }); res.end(body); };
+  const send = (status, body = '', type = 'text/plain') => { res.writeHead(status, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body), 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy': 'cross-origin', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }); res.end(body); };
   if (url.pathname === '/' || url.pathname === '/index.html') return send(200, `<!doctype html><meta charset="utf-8"><script>globalThis.OGB_MODELS_BASE=location.origin+'/m/';</script><script src="/engine.js"></script>`, 'text/html');
   if (url.pathname === '/engine.js') return send(200, await fs.readFile(path.join(root, 'desktop-windows/renderer/local-voice-engine.js')), 'text/javascript');
   if (!url.pathname.startsWith('/m/')) return send(404);
@@ -165,7 +168,7 @@ for (const name of browsers) {
   report.runs.push(run);
   let browser;
   try {
-    browser = await playwright[name].launch({ ...(name === 'chromium' ? { args: ['--enable-unsafe-webgpu'] } : {}), ...(process.env.OGB_BROWSER_PATH && name === 'chromium' ? { executablePath: process.env.OGB_BROWSER_PATH } : {}) });
+    browser = await playwright[name].launch({ headless: args.headed !== true, ...(name === 'chromium' ? { args: ['--enable-unsafe-webgpu'] } : {}), ...(process.env.OGB_BROWSER_PATH && name === 'chromium' ? { executablePath: process.env.OGB_BROWSER_PATH } : {}) });
     const page = await browser.newPage();
     page.setDefaultTimeout(timeoutMs);
     page.on('console', message => { if (run.console.length < 200) run.console.push(`${message.type()}: ${message.text().slice(0, 400)}`); });
@@ -225,7 +228,8 @@ for (const run of report.runs) {
   if (noisy.length) lines.push('Console:', ...noisy.map(line => '    ' + line));
   lines.push('');
 }
-if (report.requests.missing.length) lines.push('Files the engine asked for but could not get:', ...report.requests.missing.map(r => `- ${r.status} ${r.path} (${r.from})`), '');
+if (report.requests.missing.length) lines.push('Files the engine asked for but could not get:', ...report.requests.missing.map(r => `- ${r.status} ${r.path} (${r.from})`), '', download ? '' : 'These models are not in the app’s cache. Run again with --download to fetch them into the output folder (the app is not changed).', '');
+lines.push('Notes: a headless browser may run WebGPU in software emulation, which is very slow; run with --headed to measure the real graphics chip. Real-time factor below 0.5 feels instant.');
 await fs.writeFile(path.join(out, 'report.md'), lines.join('\n'));
 console.log(lines.join('\n'));
 console.log(`\nFull report: ${path.join(out, 'report.json')}\nSpoken samples (listen to these): ${out}`);

@@ -188,7 +188,9 @@ final class MacModelSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private func respond(_ task: any WKURLSchemeTask, url: URL, data: Data, type: String) {
         guard live.remove(ObjectIdentifier(task)) != nil else { return }
-        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": type, "Access-Control-Allow-Origin": "*", "Content-Length": String(data.count)])!
+        // COOP/COEP make the engine page cross-origin isolated, so the WebAssembly runtime can use several cores.
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": type, "Access-Control-Allow-Origin": "*", "Content-Length": String(data.count),
+            "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Resource-Policy": "cross-origin"])!
         task.didReceive(response); task.didReceive(data); task.didFinish()
     }
     private func fail(_ task: any WKURLSchemeTask, status: Int) {
@@ -223,31 +225,27 @@ final class MacLocalVoiceEngine: NSObject, LocalVoiceBackend, WKNavigationDelega
         var tier: String, why: String, downloadMB: Int
     }
 
-    /// Picks models for this Mac. Apple silicon runs the larger models comfortably; memory decides how large.
+    /// Picks models for this Mac (0.9.4). Speaking: Kokoro q8 on the processor, which is quick and works everywhere;
+    /// the graphics chip is used only after "Test speed" shows it is faster. Listening: Apple's on-device recognizer is the
+    /// fastest on a Mac and gives live captions, so Whisper is optional (base, or tiny on small Macs).
     static func recommendation(webgpu: Bool) -> Plan {
         let memoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
-        let cores = ProcessInfo.processInfo.activeProcessorCount
         #if arch(arm64)
         let appleSilicon = true
         #else
         let appleSilicon = false
         #endif
         let english = (Locale.current.language.languageCode?.identifier ?? "en") == "en"
-        let strong = (appleSilicon || webgpu) && memoryGB >= 16, decent = appleSilicon || webgpu || (memoryGB >= 8 && cores >= 6)
-        let size = strong ? "small" : decent ? "base" : "tiny"
-        let gpu = webgpu
-        let tts = gpu ? "fp32" : "q8"
-        let sizes = ["q8": 92, "fp32": 326, "tiny": 45, "base": 80, "small": 250]
-        let why = strong ? "Your Mac has \(Int(memoryGB.rounded())) GB of memory\(appleSilicon ? " and Apple silicon" : ""), so it gets the most accurate listening model that still answers quickly."
-            : decent ? "Your Mac runs the balanced models comfortably: accurate listening and natural speech without slowing other apps."
-            : "Your Mac gets the light models, which stay quick on modest hardware. You can pick larger ones below."
-        return Plan(ttsDtype: tts, ttsDevice: gpu ? "webgpu" : "wasm", sttModel: "onnx-community/whisper-\(size)\(english ? ".en" : "")", sttDevice: gpu ? "webgpu" : "wasm",
-                    tier: strong ? "fast" : decent ? "balanced" : "light", why: why, downloadMB: (sizes[tts] ?? 92) + (sizes[size] ?? 80) + 22)
+        let size = appleSilicon || memoryGB >= 8 ? "base" : "tiny"
+        let why = appleSilicon ? "Kokoro’s small model speaks faster than real time on Apple silicon. For listening, Apple’s own recognizer is quicker on a Mac and shows live captions; Whisper is optional."
+            : "Kokoro’s small model keeps speech quick on this Mac. For listening, Apple’s recognizer is the fastest; Whisper is optional."
+        return Plan(ttsDtype: "q8", ttsDevice: "wasm", sttModel: "onnx-community/whisper-\(size)\(english ? ".en" : "")", sttDevice: "wasm",
+                    tier: appleSilicon ? "fast" : memoryGB >= 8 ? "balanced" : "light", why: why, downloadMB: 92 + 22)
     }
 
     /// The plan in use: the recommendation, with any sizes the human chose.
     func plan() async -> Plan {
-        var plan = Self.recommendation(webgpu: await webGPU())
+        var plan = Self.recommendation(webgpu: false)
         let defaults = UserDefaults.standard
         if let dtype = defaults.string(forKey: "localVoiceTTSDtype"), ["q8", "fp16", "fp32"].contains(dtype) { plan.ttsDtype = dtype }
         if let model = defaults.string(forKey: "localVoiceSTTModel"), MacLocalVoiceStore.sttRepos.contains(model) { plan.sttModel = model }
@@ -318,7 +316,10 @@ final class MacLocalVoiceEngine: NSObject, LocalVoiceBackend, WKNavigationDelega
         progressLine = progress
         defer { progressLine = nil }
         let plan = await plan()
-        if speaking { _ = try await call("await OGBLocalVoice.loadTTS({dtype, device}); return 'ok';", ["dtype": plan.ttsDtype, "device": plan.ttsDevice]) }
+        if speaking {
+            let used = try await call("const r = await OGBLocalVoice.loadTTS({dtype, device}); return r.device;", ["dtype": plan.ttsDtype, "device": plan.ttsDevice])
+            if used != plan.ttsDevice { UserDefaults.standard.set("wasm", forKey: "localVoiceDevice") } // The graphics chip failed: stay on the processor.
+        }
         if listening { _ = try await call("await OGBLocalVoice.loadSTT({model, device}); return 'ok';", ["model": plan.sttModel, "device": plan.sttDevice]) }
     }
 
@@ -347,6 +348,30 @@ final class MacLocalVoiceEngine: NSObject, LocalVoiceBackend, WKNavigationDelega
     }
 
     func reset() { webView = nil; loadTask = nil; gpuChecked = nil }
+
+    struct Speed { var speakingRTF: Double?; var listeningRTF: Double?; var heard: String; var threads: Int; var device: String }
+
+    /// Times Kokoro (and Whisper, when listening uses it) on this Mac with the current settings.
+    func measure(listening: Bool) async throws -> Speed {
+        try await prepare(listening: listening, speaking: true) { _ in }
+        let json = try await call("return JSON.stringify(await OGBLocalVoice.benchmark());")
+        let object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
+        let tts = object["tts"] as? [String: Any], stt = object["stt"] as? [String: Any]
+        return Speed(speakingRTF: (tts?["realTimeFactor"] as? NSNumber)?.doubleValue, listeningRTF: (stt?["realTimeFactor"] as? NSNumber)?.doubleValue,
+                     heard: stt?["heard"] as? String ?? "", threads: (object["threads"] as? NSNumber)?.intValue ?? 1, device: await plan().ttsDevice)
+    }
+
+    /// Tries the graphics chip and the processor and keeps whichever speaks faster on this Mac.
+    func pickFastestDevice() async throws -> Speed {
+        UserDefaults.standard.set("wasm", forKey: "localVoiceDevice")
+        let processor = try await measure(listening: false)
+        guard await webGPU() else { return processor }
+        UserDefaults.standard.set("webgpu", forKey: "localVoiceDevice")
+        guard let graphics = try? await measure(listening: false), let fast = graphics.speakingRTF, let slow = processor.speakingRTF, fast < slow * 0.8 else {
+            UserDefaults.standard.set("wasm", forKey: "localVoiceDevice"); return processor
+        }
+        return graphics
+    }
 }
 
 // MARK: - Settings section
@@ -358,6 +383,7 @@ struct MacLocalVoiceSection: View {
     @State private var status: String?
     @State private var working = false
     @State private var voice = VoiceSettings.kokoroVoice
+    @State private var speed: String?
     private var engine: MacLocalVoiceEngine { MacLocalVoiceEngine.shared }
 
     var body: some View {
@@ -366,15 +392,22 @@ struct MacLocalVoiceSection: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Recommended for this Mac · \(recommended.tier)").font(.caption.weight(.semibold)).foregroundStyle(MacTheme.working)
                     Text(recommended.why).font(.callout)
-                    Text("Speaking: Kokoro-82M (\(plan.ttsDtype)) · Listening: \(plan.sttModel.replacingOccurrences(of: "onnx-community/", with: "").replacingOccurrences(of: "-", with: " ").capitalized)")
+                    Text("Speaking: Kokoro-82M (\(plan.ttsDtype), \(plan.ttsDevice == "webgpu" ? "graphics chip" : "processor")) · Listening: Apple, or \(plan.sttModel.replacingOccurrences(of: "onnx-community/", with: "").replacingOccurrences(of: "-", with: " ").capitalized)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                let ready = engine.store.installed(MacLocalVoiceStore.ttsRepo) && engine.store.installed(plan.sttModel)
+                let speaking = engine.store.installed(MacLocalVoiceStore.ttsRepo)
+                let listening = engine.store.installed(plan.sttModel)
                 HStack {
-                    Button(working ? "Working…" : ready ? "Check models" : "Download recommended (\(recommended.downloadMB) MB)") { download() }
+                    Button(working ? "Working…" : speaking ? "Check Kokoro" : "Download Kokoro voice (\(recommended.downloadMB) MB)") { download(listening: false) }
                         .disabled(working)
-                    if ready { Text("Ready · works offline").font(.caption).foregroundStyle(.secondary) }
+                    Button(listening ? "Use Whisper for listening" : "Also download Whisper for listening") { download(listening: true) }
+                        .disabled(working)
                 }
+                HStack {
+                    Button("Test speed") { test() }.disabled(working || !speaking)
+                    Button("Use the graphics chip if it’s faster") { pickDevice() }.disabled(working || !speaking)
+                }
+                if let speed { Text(speed).font(.caption).foregroundStyle(.secondary) }
                 Picker("Listening model", selection: Binding(get: { plan.sttModel }, set: { UserDefaults.standard.set($0, forKey: "localVoiceSTTModel"); refresh() })) {
                     Text("Whisper tiny · English · fastest").tag("onnx-community/whisper-tiny.en")
                     Text("Whisper base · English").tag("onnx-community/whisper-base.en")
@@ -400,7 +433,7 @@ struct MacLocalVoiceSection: View {
             }
             if let status { Text(status).font(.caption).foregroundStyle(.secondary) }
         } header: { Text("Open-source voice on this Mac") } footer: {
-            Text("Whisper listens and Kokoro speaks, both running on your Mac with nothing sent anywhere. Models download once from Hugging Face; then choose “On this Mac” for Listening and Speaking above.")
+            Text("Kokoro speaks and (optionally) Whisper listens, running on your Mac with nothing sent anywhere. Models download once from Hugging Face. “Test speed” shows how fast they run here: below 0.5× real time feels instant.")
         }
         .task { refresh() }
     }
@@ -408,20 +441,47 @@ struct MacLocalVoiceSection: View {
     private func refresh() {
         Task {
             let current = await engine.plan()
-            recommended = MacLocalVoiceEngine.recommendation(webgpu: await engine.webGPU())
+            recommended = MacLocalVoiceEngine.recommendation(webgpu: false)
             plan = current
         }
     }
 
-    private func download() {
+    private func download(listening: Bool) {
         working = true; status = "Starting download…"
-        UserDefaults.standard.removeObject(forKey: "localVoiceTTSDtype"); UserDefaults.standard.removeObject(forKey: "localVoiceSTTModel"); UserDefaults.standard.removeObject(forKey: "localVoiceDevice")
+        UserDefaults.standard.removeObject(forKey: "localVoiceTTSDtype")
         Task {
             do {
-                try await engine.prepare(listening: true, speaking: true) { line in status = line }
-                VoiceSettings.transcriber = .local; VoiceSettings.speaker = .local
-                status = "The open-source voice is ready. Listening and Speaking now use it."
+                try await engine.prepare(listening: listening, speaking: true) { line in status = line }
+                VoiceSettings.speaker = .local
+                if listening { VoiceSettings.transcriber = .local }
+                status = listening ? "Kokoro speaks and Whisper listens now." : "Kokoro speaks now. Listening stays with \(VoiceSettings.transcriber.title)."
             } catch { status = error.localizedDescription }
+            working = false; refresh()
+        }
+    }
+
+    private func describe(_ result: MacLocalVoiceEngine.Speed) -> String {
+        func pace(_ value: Double?) -> String {
+            guard let value else { return "not tested" }
+            return String(format: "%.2f× real time", value) + (value < 0.5 ? " (instant)" : value < 1 ? " (good)" : " (slow: try a smaller model)")
+        }
+        var line = "Speaking: \(pace(result.speakingRTF)) on the \(result.device == "webgpu" ? "graphics chip" : "processor") · \(result.threads) core\(result.threads == 1 ? "" : "s")"
+        if result.listeningRTF != nil { line += " · Listening: \(pace(result.listeningRTF)) · heard “\(result.heard)”" }
+        return line
+    }
+
+    private func test() {
+        working = true; speed = "Testing…"
+        Task {
+            do { speed = describe(try await engine.measure(listening: VoiceSettings.transcriber == .local)) } catch { speed = error.localizedDescription }
+            working = false
+        }
+    }
+
+    private func pickDevice() {
+        working = true; speed = "Comparing the processor and the graphics chip…"
+        Task {
+            do { speed = describe(try await engine.pickFastestDevice()) } catch { speed = error.localizedDescription }
             working = false; refresh()
         }
     }

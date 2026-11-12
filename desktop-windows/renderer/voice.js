@@ -411,7 +411,19 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, ac
       });
       const remove = el('button', 'pill', 'Remove downloaded models'); remove.type = 'button';
       remove.addEventListener('click', async () => { try { await result(bridge.localVoiceRemove()); toast('Voice models removed.'); drawLocal(); } catch (error) { toast(error.message); } });
-      local.append(append2(el('div', 'row-actions'), download), progress,
+      // Measure here: below 0.5× real time feels instant. The graphics chip is kept only if it is clearly faster.
+      const speed = el('p', 'muted');
+      const pace = value => value == null ? 'not tested' : `${value.toFixed(2)}× real time${value < 0.5 ? ' (instant)' : value < 1 ? ' (good)' : ' (slow: try a smaller model)'}`;
+      const describe = r => `Speaking: ${pace(r.tts?.realTimeFactor)} on the ${r.device === 'webgpu' ? 'graphics chip' : 'processor'} · ${r.threads} core${r.threads === 1 ? '' : 's'}` + (r.stt ? ` · Listening: ${pace(r.stt.realTimeFactor)} · heard “${r.stt.heard}”` : '');
+      const measure = compare => async () => {
+        speed.textContent = compare ? 'Comparing the processor and the graphics chip…' : 'Testing…';
+        try { speed.textContent = describe(await result(bridge.localVoiceBenchmark(settings.transcriber === 'local', compare))); if (compare) drawLocal(); }
+        catch (error) { speed.textContent = error.message; }
+      };
+      const testSpeed = el('button', 'pill', 'Test speed'); testSpeed.type = 'button'; testSpeed.addEventListener('click', measure(false));
+      const tryGPU = el('button', 'pill', 'Use the graphics chip if it’s faster'); tryGPU.type = 'button'; tryGPU.addEventListener('click', measure(true));
+      if (!ready) { testSpeed.disabled = true; tryGPU.disabled = true; }
+      local.append(append2(el('div', 'row-actions'), download), progress, append2(el('div', 'row-actions'), testSpeed, tryGPU), speed,
         row('Kokoro voice', append2(el('div', 'voice-key'), voiceSelect, preview)),
         row('Listening model', whisper), row('Speaking model', kokoro), row('Run on', device), append2(el('div', 'row-actions'), remove));
     };

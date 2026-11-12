@@ -21,15 +21,16 @@ const SIZES = { 'tts:q8': 92, 'tts:fp16': 163, 'tts:fp32': 326, 'stt:tiny': 45, 
  * Kokoro-82M is the speaking model everywhere (best quality for its speed); only its precision changes.
  */
 function recommend({ memoryGB = 8, cores = 4, webgpu = false, language = 'en' } = {}) {
+  // 0.9.4: the processor with the small (q8) models is the default everywhere: quick, and it works on every PC.
+  // The graphics chip is used only after "Use the graphics chip if it's faster" measures it. Whisper small was too slow.
   const english = String(language || 'en').toLowerCase().startsWith('en');
-  const strong = webgpu && memoryGB >= 16, decent = webgpu || (memoryGB >= 8 && cores >= 6);
-  const size = strong ? 'small' : decent ? 'base' : 'tiny';
-  const tts = webgpu ? { dtype: 'fp32', device: 'webgpu' } : { dtype: 'q8', device: 'wasm' };
-  const stt = { model: `onnx-community/whisper-${size}${english ? '.en' : ''}`, device: webgpu ? 'webgpu' : 'wasm' };
-  const tier = strong ? 'fast' : decent ? 'balanced' : 'light';
-  const why = strong ? `Your PC has a graphics chip the voice can use and ${Math.round(memoryGB)} GB of memory, so it gets the most accurate listening model that still answers quickly.`
-    : decent ? 'Your PC can run the balanced models comfortably: accurate listening and natural speech without slowing other apps.'
-      : 'Your PC gets the light models, which stay quick on modest hardware. You can pick larger ones below.';
+  const decent = memoryGB >= 8 && cores >= 4;
+  const size = decent ? 'base' : 'tiny';
+  const tts = { dtype: 'q8', device: 'wasm' };
+  const stt = { model: `onnx-community/whisper-${size}${english ? '.en' : ''}`, device: 'wasm' };
+  const tier = decent ? (webgpu && memoryGB >= 16 ? 'fast' : 'balanced') : 'light';
+  const why = decent ? 'Your PC runs Kokoro and Whisper base comfortably on the processor: natural speech and accurate listening without slowing other apps. Use “Test speed” to see how fast, and try the graphics chip if you have one.'
+    : 'Your PC gets the light models, which stay quick on modest hardware. You can pick larger ones below.';
   const downloadMB = SIZES[`tts:${tts.dtype}`] + SIZES[`stt:${size}`] + SIZES.runtime;
   return { tier, tts, stt, why, downloadMB, speaker: `Kokoro-82M (${tts.dtype}, ${tts.device === 'webgpu' ? 'graphics chip' : 'processor'})`, listener: `Whisper ${size}${english ? ' (English)' : ''}` };
 }

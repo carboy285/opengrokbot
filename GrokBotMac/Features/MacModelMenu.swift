@@ -16,6 +16,14 @@ struct MacModelMenu: View {
         return active.provider.name + (active.model.isEmpty ? "" : " · " + active.model)
     }
 
+    /// The model name without its provider prefix ("opencode/gim-5.3-flash-free" → "gim-5.3-flash-free").
+    private var shortTitle: String {
+        guard let active else { return "Choose a model" }
+        if configuration.replyMode == .compare, configuration.providers.count > 1 { return "Comparing \(configuration.providers.count)" }
+        guard !active.model.isEmpty else { return active.provider.name }
+        return active.model.split(separator: "/").last.map(String.init) ?? active.model
+    }
+
     var body: some View {
         if let gateway = desktop.gateway { remoteMenu(gateway) } else { localMenu }
     }
@@ -41,12 +49,15 @@ struct MacModelMenu: View {
             Divider()
             Button("Providers & models…") { desktop.showBotInspector = true }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "cpu").font(.system(size: 11))
-                Text(title).font(.system(size: 12)).lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            // 0.9.4: a quiet label in the header row, short enough never to reach the messages.
+            HStack(spacing: 5) {
+                Text(shortTitle).font(.system(size: 11.5, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
             }
-            .padding(.horizontal, 11).padding(.vertical, 7).contentShape(Capsule()).glassChrome(in: Capsule())
+            .foregroundStyle(MacTheme.secondary)
+            .padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: 220)
+            .background(MacTheme.panel.opacity(0.7), in: Capsule())
+            .contentShape(Capsule())
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .accessibilityLabel("Model for \(bot.name): \(title)")

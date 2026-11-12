@@ -3,8 +3,8 @@ const os = require('node:os'), path = require('node:path'), fs = require('node:f
 const lv = require('./local-voice.cjs');
 
 test('recommends models that fit the machine', () => {
-  assert.equal(lv.recommend({ memoryGB: 32, cores: 12, webgpu: true }).stt.model, 'onnx-community/whisper-small.en');
-  assert.equal(lv.recommend({ memoryGB: 32, cores: 12, webgpu: true }).tts.device, 'webgpu');
+  assert.equal(lv.recommend({ memoryGB: 32, cores: 12, webgpu: true }).stt.model, 'onnx-community/whisper-base.en');
+  assert.equal(lv.recommend({ memoryGB: 32, cores: 12, webgpu: true }).tts.device, 'wasm');
   assert.equal(lv.recommend({ memoryGB: 16, cores: 8, webgpu: false }).stt.model, 'onnx-community/whisper-base.en');
   assert.equal(lv.recommend({ memoryGB: 4, cores: 2, webgpu: false }).stt.model, 'onnx-community/whisper-tiny.en');
   assert.equal(lv.recommend({ memoryGB: 4, cores: 2, webgpu: false, language: 'de-DE' }).stt.model, 'onnx-community/whisper-tiny');

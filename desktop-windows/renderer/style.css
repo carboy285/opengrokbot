@@ -359,3 +359,6 @@ body.voice-full .window-actions{z-index:70}
 .local-badge{display:inline-block;justify-self:start;font-size:11px!important;font-weight:600;color:var(--working);background:color-mix(in srgb,var(--working) 14%,transparent);padding:3px 10px;border-radius:99px;text-transform:capitalize}
 .voice-settings h3{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 2px}
 @media (prefers-reduced-motion:reduce){.voice-overlay[data-layout="full"],.voice-overlay[data-layout="mini"] .voice-pill{animation:none}.voice-orb{transition:none}}
+
+/* 0.9.4: dictation, voice and send read as one control */
+.composer-actions{display:flex;align-items:center;gap:2px;padding:2px 2px 2px 4px;border-radius:99px;background:color-mix(in srgb,var(--text) 6%,transparent);flex:none}

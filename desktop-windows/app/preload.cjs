@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('desktop', {
   localVoiceSpeak:(text,voice,speed)=>ipcRenderer.invoke('localvoice:speak',text,voice,speed),
   localVoiceTranscribe:(samples,language)=>ipcRenderer.invoke('localvoice:transcribe',samples,language),
   localVoiceRemove:()=>ipcRenderer.invoke('localvoice:remove'),
+  localVoiceBenchmark:(listening,compare)=>ipcRenderer.invoke('localvoice:benchmark',listening,compare),
   onLocalVoiceProgress:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('localvoice:progress',listener);return ()=>ipcRenderer.removeListener('localvoice:progress',listener);},
   setupServer:(provider,address)=>ipcRenderer.invoke('setup:server',provider,address),
   voiceSave:patch=>ipcRenderer.invoke('voice:save',patch),

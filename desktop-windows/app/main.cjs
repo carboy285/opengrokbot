@@ -401,7 +401,7 @@ async function engineWindow(){
  voiceEngine=new BrowserWindow({show:false,width:320,height:240,title:'OpenGrokBot voice engine',webPreferences:{preload:path.join(__dirname,'voice-engine-preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:false}});
  voiceEngine.webContents.setWindowOpenHandler(()=>({action:'deny'}));voiceEngine.webContents.on('will-navigate',event=>event.preventDefault());
  voiceEngine.on('closed',()=>{voiceEngine=null;});
- await voiceEngine.loadFile(path.join(__dirname,'..','renderer','voice-engine.html'));
+ await voiceEngine.loadURL('ogb-models://local/engine.html');
  return voiceEngine;
 }
 async function engineCall(expression){const engine=await engineWindow();try{return await engine.webContents.executeJavaScript(expression,true);}catch(error){throw new PublicError(String(error?.message||error).replace(/^Error:\s*/,'').slice(0,300)||'The local voice could not run.');}}
@@ -447,7 +447,7 @@ function configureIPC() {
   if(choice==='recommended'){const saved=await loadJSON('voice-settings.json',{});delete saved.localModels;await atomicJSON('voice-settings.json',saved);return true;}
   const saved=await loadJSON('voice-settings.json',{});saved.localModels=next;await atomicJSON('voice-settings.json',saved);return true;});
  handle('localvoice:prepare',async which=>{const plan=await localVoicePlan();
-  if(which!=='stt')await engineCall(`OGBLocalVoice.loadTTS(${JSON.stringify(plan.tts)})`);
+  if(which!=='stt'){const used=await engineCall(`OGBLocalVoice.loadTTS(${JSON.stringify(plan.tts)})`);if(used?.fellBack){const saved=await loadJSON('voice-settings.json',{});saved.localModels={...(saved.localModels||{}),tts:{...plan.tts,dtype:'q8',device:'wasm'},stt:{...plan.stt,device:'wasm'}};await atomicJSON('voice-settings.json',saved);}}
   if(which!=='tts')await engineCall(`OGBLocalVoice.loadSTT(${JSON.stringify(plan.stt)})`);
   return true;});
  handle('localvoice:speak',async(text,voiceName,speed)=>{if(typeof text!=='string'||!text.trim()||text.length>2000)throw new PublicError('Nothing to say.');const plan=await localVoicePlan();
@@ -457,6 +457,17 @@ function configureIPC() {
  handle('localvoice:transcribe',async(samples,language)=>{if(typeof samples!=='string'||samples.length>16_000_000)throw new PublicError('That recording is too long.');const plan=await localVoicePlan();
   await engineCall(`OGBLocalVoice.loadSTT(${JSON.stringify(plan.stt)})`);
   return engineCall(`OGBLocalVoice.transcribe(${JSON.stringify(samples)},${JSON.stringify({language:String(language||'en').slice(0,2)})})`);});
+ // Times the loaded models here; with compare=true, also tries the graphics chip and keeps the faster one.
+ handle('localvoice:benchmark',async(listening,compare)=>{
+  const run=async()=>{const plan=await localVoicePlan();await engineCall(`OGBLocalVoice.loadTTS(${JSON.stringify(plan.tts)})`);if(listening)await engineCall(`OGBLocalVoice.loadSTT(${JSON.stringify(plan.stt)})`);return {...await engineCall('OGBLocalVoice.benchmark()'),device:plan.tts.device};};
+  const choose=async device=>{const saved=await loadJSON('voice-settings.json',{});const plan=await localVoicePlan();saved.localModels={tts:{...plan.tts,device},stt:{...plan.stt,device}};await atomicJSON('voice-settings.json',saved);};
+  if(!compare)return run();
+  await choose('wasm');const processor=await run();
+  if(!(await localVoicePlan()).webgpu)return processor;
+  await choose('webgpu');let graphics=null;try{graphics=await run();}catch{}
+  if(graphics?.tts&&processor.tts&&graphics.tts.realTimeFactor<processor.tts.realTimeFactor*0.8)return graphics;
+  await choose('wasm');return processor;
+ });
  handle('localvoice:remove',async()=>{voiceEngine?.destroy();voiceEngine=null;voiceStore||=localVoice.createStore({root:voiceModelsRoot()});await voiceStore.remove();return true;});
  handle('setup:server',async(provider,address)=>{await ensureState();if(!cli.isLocal(provider))throw new Error();const base=require('./local-llm.cjs').serverURL(address);if(!base)throw new PublicError('Use an address on this computer or your local network, like http://127.0.0.1:11434.');settings.overrides[provider]=base;await saveSettings();installed=await cli.discover(settings.overrides);notify();return setupStatus();});
  handle('approval:answer',async(id,approved)=>settleApproval(String(id),approved===true));
@@ -766,7 +777,10 @@ app.whenReady().then(() => {
   protocol.handle('ogb-models',async request=>{
    let url;try{url=new URL(request.url);}catch{return new Response(null,{status:400});}
    if(url.host!=='local')return new Response(null,{status:404});
-   try{const found=await voiceStore.file(url.pathname);if(found.status!==200)return new Response(null,{status:found.status,headers:{'Access-Control-Allow-Origin':'*'}});return new Response(found.body,{headers:{'Content-Type':found.type,'Access-Control-Allow-Origin':'*','Cache-Control':'no-store'}});}
+   // COOP/COEP make the engine page cross-origin isolated, so the WebAssembly runtime can use several cores.
+   const isolation={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cross-Origin-Resource-Policy':'cross-origin'};
+   if(url.pathname==='/engine.html'||url.pathname==='/local-voice-engine.js'){try{const body=await require('node:fs/promises').readFile(path.join(__dirname,'..','renderer',url.pathname==='/engine.html'?'voice-engine.html':'local-voice-engine.js'));return new Response(body,{headers:{'Content-Type':url.pathname.endsWith('.html')?'text/html':'text/javascript',...isolation}});}catch{return new Response(null,{status:404});}}
+   try{const found=await voiceStore.file(url.pathname);if(found.status!==200)return new Response(null,{status:found.status,headers:{'Access-Control-Allow-Origin':'*'}});return new Response(found.body,{headers:{'Content-Type':found.type,'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Length':String(found.body.length),...isolation}});}
    catch(error){return new Response(String(error?.message||'Download failed'),{status:502,headers:{'Access-Control-Allow-Origin':'*'}});}
   });
   ipcMain.on('localvoice:progress',(event,value)=>{if(voiceEngine&&event.sender===voiceEngine.webContents&&window&&!window.isDestroyed())window.webContents.send('localvoice:progress',{kind:value?.kind==='stt'?'stt':'tts',loaded:Number(value?.loaded)||0,total:Number(value?.total)||0});});

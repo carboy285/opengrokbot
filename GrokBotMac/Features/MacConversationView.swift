@@ -46,7 +46,7 @@ struct MacConversationView: View {
                         if messages.isEmpty { emptyConversation.padding(.top, 120) }
                         Color.clear.frame(height: 1).id("bottom")
                     }
-                    .padding(.horizontal, 24).padding(.top, 80).padding(.bottom, 20)
+                    .padding(.horizontal, 24).padding(.top, 88).padding(.bottom, 20)
                     .frame(maxWidth: 780).frame(maxWidth: .infinity)
                     .background(ChatScrollMonitor(onUserScroll: { nearBottom in followLatest = nearBottom },
                         onLayout: { if followLatest { scrollToLatest(proxy) } }))
@@ -59,6 +59,12 @@ struct MacConversationView: View {
 
             }
             composer
+        }
+        // 0.9.4: messages fade out under the header so the Bot's name and model never sit on top of text.
+        .overlay(alignment: .top) {
+            LinearGradient(stops: [.init(color: MacTheme.canvas, location: 0), .init(color: MacTheme.canvas, location: 0.55), .init(color: MacTheme.canvas.opacity(0), location: 1)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 84).allowsHitTesting(false).accessibilityHidden(true)
         }
         .overlay(alignment: .top) {
             Button {
@@ -187,29 +193,34 @@ struct MacConversationView: View {
                     }
                     .onExitCommand { if desktop.panel != nil { desktop.panel = nil } else { desktop.showBotInspector = false } }
                     .accessibilityIdentifier("chat-input").accessibilityLabel("Message for \(bot.name)")
-                Button { dictation.toggle(current: draft.wrappedValue) { draft.wrappedValue = $0 } } label: {
-                    Image(systemName: dictation.listening ? "mic.fill" : "mic").font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(dictation.listening ? Color.red : MacTheme.secondary)
-                        .frame(width: 30, height: 36).contentShape(Rectangle())
+                // 0.9.4: dictation and send / voice read as one control.
+                HStack(spacing: 2) {
+                    Button { dictation.toggle(current: draft.wrappedValue) { draft.wrappedValue = $0 } } label: {
+                        Image(systemName: dictation.listening ? "mic.fill" : "mic").font(.system(size: 17, weight: .regular))
+                            .foregroundStyle(dictation.listening ? Color.red : MacTheme.secondary)
+                            .frame(width: 30, height: 36).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).help(dictation.listening ? "Stop dictation" : "Dictate a message").accessibilityLabel(dictation.listening ? "Stop dictation" : "Dictate a message")
+                    .popover(isPresented: Binding(get: { dictation.note != nil }, set: { if !$0 { dictation.note = nil } })) {
+                        Text(dictation.note ?? "").font(.callout).padding(14).frame(width: 280)
+                    }
+                    if desktop.runningBots.contains(bot.id) {
+                        Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").foregroundStyle(ink).frame(width: 36, height: 36).background(tint, in: Circle()) }.buttonStyle(.plain).help("Stop response")
+                    } else if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(desktop.attachments[bot.id] ?? []).isEmpty {
+                        Button { sendMessage() } label: {
+                            Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).foregroundStyle(ink)
+                                .frame(width: 36, height: 36).background(tint, in: Circle())
+                        }.buttonStyle(.plain).disabled(desktop.needsProvider(bot))
+                            .help("Send message").accessibilityLabel("Send message")
+                    } else {
+                        Button { startVoice() } label: {
+                            Image(systemName: "waveform").font(.system(size: 17, weight: .semibold)).foregroundStyle(ink)
+                                .frame(width: 36, height: 36).background(tint, in: Circle())
+                        }.buttonStyle(.plain).help("Start voice mode").accessibilityLabel("Start voice mode")
+                    }
                 }
-                .buttonStyle(.plain).help(dictation.listening ? "Stop dictation" : "Dictate a message").accessibilityLabel(dictation.listening ? "Stop dictation" : "Dictate a message")
-                .popover(isPresented: Binding(get: { dictation.note != nil }, set: { if !$0 { dictation.note = nil } })) {
-                    Text(dictation.note ?? "").font(.callout).padding(14).frame(width: 280)
-                }
-                if desktop.runningBots.contains(bot.id) {
-                    Button { desktop.stop(botID: bot.id) } label: { Image(systemName: "stop.fill").foregroundStyle(ink).frame(width: 36, height: 36).background(tint, in: Circle()) }.buttonStyle(.plain).help("Stop response")
-                } else if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(desktop.attachments[bot.id] ?? []).isEmpty {
-                    Button { sendMessage() } label: {
-                        Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).foregroundStyle(ink)
-                            .frame(width: 36, height: 36).background(tint, in: Circle())
-                    }.buttonStyle(.plain).disabled(desktop.needsProvider(bot))
-                        .help("Send message").accessibilityLabel("Send message")
-                } else {
-                    Button { startVoice() } label: {
-                        Image(systemName: "waveform").font(.system(size: 17, weight: .semibold)).foregroundStyle(ink)
-                            .frame(width: 36, height: 36).background(tint, in: Circle())
-                    }.buttonStyle(.plain).help("Start voice mode").accessibilityLabel("Start voice mode")
-                }
+                .padding(.leading, 4).padding(.trailing, 2).padding(.vertical, 2)
+                .background(Color.primary.opacity(0.06), in: Capsule())
             }
             .padding(.leading, 10).padding(.trailing, 8).padding(.vertical, 6).frame(minHeight: 52)
             .background { RoundedRectangle(cornerRadius: 26, style: .continuous).fill(MacTheme.panel.opacity(0.55)).glassChrome(in: RoundedRectangle(cornerRadius: 26, style: .continuous), interactive: false).allowsHitTesting(false) }

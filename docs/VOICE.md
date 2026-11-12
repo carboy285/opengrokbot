@@ -1,5 +1,11 @@
 # Voice mode and image attachments
 
+## 0.9.4
+- The open-source voice now loads in the Mac app (WebKit could not iterate a stream the pronunciation data uses).
+- Defaults: Kokoro q8 (92 MB) and Whisper base on the processor, using several cores. Mac keeps Apple's recognizer as the recommended listener.
+- Settings → Voice → Test speed shows real-time factors on this computer; “Use the graphics chip if it's faster” compares and keeps the faster device. A failing graphics-chip load falls back to the processor by itself.
+- Diagnose on a real machine: `node scripts/diagnose-local-voice.mjs --download` (add `--headed` to time the real graphics chip).
+
 ## 0.9.3: a voice that sounds and behaves like a person
 - **Open-source voice on your computer (Mac and Windows):** Whisper listens and Kokoro-82M speaks, with no key and nothing sent anywhere. Settings → Voice recommends models for your machine (memory, cores, Apple silicon or a graphics chip) and downloads them once (about 160–600 MB). You can choose smaller or larger Whisper models, three Kokoro sizes and ten Kokoro voices, preview a voice, or remove the models. The iPhone keeps Apple's on-device voice.
 - **Turn-taking:** voice mode waits longer when you trail off (“and…”, “um”, a comma) and less after a question. Choose Quick, Normal or Relaxed. Press and hold the orb (or Space on a computer) to keep talking as long as you like; it sends when you let go.
