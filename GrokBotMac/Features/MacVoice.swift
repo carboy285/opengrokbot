@@ -155,7 +155,7 @@ final class MacLocalVoiceStore: @unchecked Sendable {
 
 /// Serves the engine script from the app bundle and model files from the store to the hidden web view.
 @MainActor
-final class MacModelSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler {
+final class MacModelSchemeHandler: NSObject, WKURLSchemeHandler {
     let store: MacLocalVoiceStore
     private var live: Set<ObjectIdentifier> = []
     init(store: MacLocalVoiceStore) { self.store = store }
@@ -200,7 +200,7 @@ final class MacModelSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler 
 
 /// Receives download progress from the engine without the web view keeping the engine alive.
 @MainActor
-private final class ProgressProxy: NSObject, @preconcurrency WKScriptMessageHandler {
+private final class ProgressProxy: NSObject, WKScriptMessageHandler {
     var onMessage: ((Int, Int, String) -> Void)?
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }

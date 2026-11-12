@@ -303,7 +303,7 @@ final class MacRemoteHost: ObservableObject {
             case "voice_mode":
                 // A phone opened or closed voice mode for this Bot: its replies are spoken, so they get the voice style and quick model.
                 guard let bot else { return .error(404, "Bot not found") }
-                desktop?.setVoiceMode(bot.id, on: command.text == "on")
+                desktop.setVoiceMode(bot.id, on: command.text == "on")
             case "open_vm":
                 guard let bot, MacBotVMs.shared.assigned(bot.id) != nil else { return .error(409, "Set up this Bot’s Linux VM on the host desktop first.") }
                 await MacBotVMs.shared.open(bot)

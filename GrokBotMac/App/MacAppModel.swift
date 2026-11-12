@@ -665,12 +665,12 @@ extension MacAppModel {
 
     // MARK: Voice mode (0.9.3)
     /// Bots whose voice mode is open, on this Mac or an approved phone, with when that was last confirmed.
-    private var voiceBots: [UUID: Date] = [:]
-    func setVoiceMode(_ botID: UUID, on: Bool) { if on { voiceBots[botID] = Date() } else { voiceBots[botID] = nil } }
+    private static var voiceBots: [UUID: Date] = [:]
+    func setVoiceMode(_ botID: UUID, on: Bool) { if on { Self.voiceBots[botID] = Date() } else { Self.voiceBots[botID] = nil } }
     func voiceActive(_ botID: UUID) -> Bool {
-        guard let since = voiceBots[botID] else { return false }
+        guard let since = Self.voiceBots[botID] else { return false }
         if Date().timeIntervalSince(since) < 30 * 60 { return true }
-        voiceBots[botID] = nil; return false
+        Self.voiceBots[botID] = nil; return false
     }
     /// The model a voice turn uses: a quicker one for the CLIs that have it, unless the human turned that off.
     static func voiceModels() -> [String: String] { UserDefaults.standard.dictionary(forKey: "voiceModels") as? [String: String] ?? [:] }
