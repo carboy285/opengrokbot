@@ -117,4 +117,16 @@ final class CLIProtocolTests: XCTestCase {
         XCTAssertEqual(BotTeamwork.voiceModel(provider: .codex, chatModel: "gpt-x", custom: nil), "gpt-x")
         XCTAssertEqual(BotTeamwork.voiceModel(provider: .ollama, chatModel: "llama3.2", custom: "qwen3:4b"), "qwen3:4b")
     }
+
+    func testCodexAnswerPiecesStreamAndFinalTextWins() {
+        var parser = CLIEventParser()
+        var texts: [String] = []
+        for line in [#"{"type":"item.agent_message.delta","item_id":"m1","delta":"Hello"}"#,
+                     #"{"type":"item.agent_message.delta","item_id":"m1","delta":" there."}"#,
+                     #"{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"Hello there!"}}"#] {
+            for case .text(let value) in parser.parse(Data(line.utf8)) { texts.append(value) }
+        }
+        XCTAssertEqual(texts, ["Hello", "Hello there.", "Hello there!"])
+        XCTAssertNil(CLIEventParser.agentDelta(type: "item.reasoning.delta", value: ["delta": "thinking"]))
+    }
 }

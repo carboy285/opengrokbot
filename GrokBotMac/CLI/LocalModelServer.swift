@@ -99,3 +99,65 @@ enum LocalModelServer {
         return text
     }
 }
+
+// MARK: - Ollama model manager (0.9.5)
+
+struct OllamaModel: Identifiable, Equatable, Sendable { let name: String; let bytes: Int64; let parameters: String; var id: String { name } }
+struct OllamaSuggestion: Identifiable, Sendable { let name: String; let sizeGB: Double; let minMemoryGB: Double; let voice: Bool; let about: String; var id: String { name } }
+
+extension LocalModelServer {
+    /// Models worth downloading, smallest first. `voice` marks the quick ones that suit voice mode. Mirrors local-llm.cjs.
+    static let ollamaRecommended: [OllamaSuggestion] = [
+        OllamaSuggestion(name: "llama3.2:3b", sizeGB: 2.0, minMemoryGB: 8, voice: true, about: "Meta Llama 3.2 · quick, good for voice"),
+        OllamaSuggestion(name: "qwen3:4b", sizeGB: 2.6, minMemoryGB: 8, voice: true, about: "Qwen 3 · quick and capable"),
+        OllamaSuggestion(name: "gemma3:4b", sizeGB: 3.3, minMemoryGB: 8, voice: true, about: "Google Gemma 3 · quick, understands images"),
+        OllamaSuggestion(name: "llama3.1:8b", sizeGB: 4.9, minMemoryGB: 16, voice: false, about: "Meta Llama 3.1 · stronger answers"),
+        OllamaSuggestion(name: "qwen3:8b", sizeGB: 5.2, minMemoryGB: 16, voice: false, about: "Qwen 3 · stronger answers and tools"),
+        OllamaSuggestion(name: "gemma3:12b", sizeGB: 8.1, minMemoryGB: 24, voice: false, about: "Google Gemma 3 · best quality here")
+    ]
+    static func validModelName(_ name: String) -> Bool { name.range(of: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$", options: .regularExpression) != nil }
+    static var ollamaBase: String { origin(UserDefaults.standard.dictionary(forKey: "localCLIPaths")?["ollama"] as? String ?? "") ?? CLIProvider.ollama.defaultServer }
+
+    /// Installed models, or nil when Ollama is not running.
+    static func ollamaModels() async -> [OllamaModel]? {
+        guard let url = URL(string: ollamaBase + "/api/tags") else { return nil }
+        var request = URLRequest(url: url); request.timeoutInterval = 3
+        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return ((object["models"] as? [[String: Any]]) ?? []).compactMap { item in
+            guard let name = item["name"] as? String, validModelName(name) else { return nil }
+            return OllamaModel(name: name, bytes: (item["size"] as? NSNumber)?.int64Value ?? 0, parameters: (item["details"] as? [String: Any])?["parameter_size"] as? String ?? "")
+        }
+    }
+
+    /// Downloads a model; `progress(status, completed, total)` is called as it goes.
+    static func ollamaPull(_ name: String, progress: @escaping @Sendable (String, Int64, Int64) -> Void) async throws {
+        guard validModelName(name), let url = URL(string: ollamaBase + "/api/pull") else { throw Failure("Choose a valid model name, like llama3.2:3b.") }
+        var request = URLRequest(url: url); request.httpMethod = "POST"; request.timeoutInterval = 3600
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": name, "stream": true])
+        let connection: (URLSession.AsyncBytes, URLResponse)
+        do { connection = try await URLSession.shared.bytes(for: request) } catch { throw Failure("Ollama isn’t running. Open Ollama, then try again.") }
+        guard (connection.1 as? HTTPURLResponse)?.statusCode == 200 else { throw Failure("Ollama could not download \(name). Check the name on ollama.com/library.") }
+        for try await line in connection.0.lines {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+            if let error = object["error"] as? String { throw Failure("Ollama: " + String(error.prefix(200))) }
+            progress(object["status"] as? String ?? "", (object["completed"] as? NSNumber)?.int64Value ?? 0, (object["total"] as? NSNumber)?.int64Value ?? 0)
+        }
+    }
+
+    static func ollamaDelete(_ name: String) async throws {
+        guard validModelName(name), let url = URL(string: ollamaBase + "/api/delete") else { throw Failure("Invalid model name.") }
+        var request = URLRequest(url: url); request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": name])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure("Ollama could not remove \(name).") }
+    }
+
+    /// The quickest installed model for voice: a recommended voice model if present, else the smallest.
+    static func voicePick(_ models: [OllamaModel]) -> String {
+        let quick = ollamaRecommended.filter(\.voice).map(\.name)
+        return models.first { quick.contains($0.name) }?.name ?? models.min { $0.bytes < $1.bytes }?.name ?? ""
+    }
+}

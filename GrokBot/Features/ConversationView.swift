@@ -392,7 +392,9 @@ private struct MessageRow: View, Equatable {
     }
 
     private var bubbleRow: some View {
-        let split: (text: String, prompt: ChoicePrompt?) = entry.kind == .bot ? ChoicePrompt.split(entry.text) : (entry.text, nil)
+        let choice: (text: String, prompt: ChoicePrompt?) = entry.kind == .bot ? ChoicePrompt.split(entry.text) : (entry.text, nil)
+        let follow: (text: String, suggestions: [String]) = entry.kind == .bot ? FollowUps.split(choice.text) : (choice.text, [])
+        let split: (text: String, prompt: ChoicePrompt?) = (follow.text, choice.prompt)
         let fromOtherBot = entry.kind == .bot && entry.senderBotID != nil
         let isUser = entry.kind == .user
         return HStack(alignment: .top, spacing: 8) {
@@ -414,6 +416,18 @@ private struct MessageRow: View, Equatable {
                 }
                 if let prompt = split.prompt {
                     QuestionCard(prompt: prompt, canAnswer: canAnswer, answer: { actions.answer($0) }, other: { actions.other() })
+                } else if canAnswer, !follow.suggestions.isEmpty {
+                    // Tap-to-send follow-ups under the latest reply (0.9.5).
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(follow.suggestions, id: \.self) { suggestion in
+                                Button { actions.answer(suggestion) } label: {
+                                    Label(suggestion, systemImage: "arrow.up.right").labelStyle(.titleAndIcon).font(.subheadline)
+                                        .padding(.horizontal, 12).padding(.vertical, 8).background(Palette.card, in: Capsule())
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
                 }
                 if entry.state == .failed {
                     Label(entry.provider.map { "Couldn’t finish · \($0)" } ?? "Couldn’t finish", systemImage: "exclamationmark.circle")

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import CryptoKit
 import SwiftUI
 import WebKit
@@ -473,7 +474,7 @@ struct MacLocalVoiceSection: View {
     private func test() {
         working = true; speed = "Testing…"
         Task {
-            do { speed = describe(try await engine.measure(listening: VoiceSettings.transcriber == .local)) } catch { speed = error.localizedDescription }
+            do { speed = describe(try await engine.measure(listening: VoiceSettings.transcriber == .local)); UserDefaults.standard.set(speed, forKey: "lastVoiceSpeed") } catch { speed = error.localizedDescription }
             working = false
         }
     }
@@ -509,15 +510,186 @@ private enum PreviewSound {
 
 /// Settings → Voice: the same options as the gear in voice mode, in a sheet so its form scrolls on its own.
 struct MacVoiceSettingsPage: View {
+    @EnvironmentObject private var desktop: MacAppModel
+    @EnvironmentObject private var app: AppModel
     @State private var open = false
+    @State private var copied = false
+    @AppStorage(MacGlobalHotKey.enabledKey) private var hotKey = true
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Voice mode listens and talks back hands-free. It keeps going when you open another Bot, and shows as a small card, full screen, or a small pill.")
                 .foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Run it free and private with open-source models on this Mac (Whisper listens, Kokoro speaks), or use Apple’s voices or a cloud provider. Hold Space or the orb to keep talking as long as you like.")
                 .foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
-            MacPillButton(title: "Open voice settings", prominent: true) { open = true }
+            HStack(spacing: 10) {
+                MacPillButton(title: "Open voice settings", prominent: true) { open = true }
+                MacPillButton(title: copied ? "Copied" : "Copy diagnostics") {
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(desktop.diagnostics(app: app), forType: .string); copied = true
+                }
+            }
+            Toggle("Option-Space starts voice from anywhere", isOn: $hotKey)
+                .onChange(of: hotKey) { _, on in if on { MacGlobalHotKey.shared.register() } else { MacGlobalHotKey.shared.unregister() } }
+            Text("Press Option-Space in any app to talk to the Bot you have open (or Grok Bot). Press it again to stop.")
+                .font(.caption).foregroundStyle(MacTheme.secondary)
         }
         .sheet(isPresented: $open) { VoiceSettingsView() }
+    }
+}
+
+// MARK: - Settings → Local Models (Ollama manager, 0.9.5)
+
+struct MacLocalModelsView: View {
+    @EnvironmentObject private var desktop: MacAppModel
+    @State private var models: [OllamaModel]?
+    @State private var checked = false
+    @StateObject private var pulls = PullProgress()
+    @State private var custom = ""
+    @State private var voiceModel = MacAppModel.voiceModels()["ollama"] ?? ""
+    private let memoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Ollama runs AI models on this Mac: private, free and quick. Pick it for any Bot in its side panel. LM Studio works too; manage its models in LM Studio itself.")
+                .foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            if !checked {
+                ProgressView().controlSize(.small)
+            } else if let models {
+                card("On this Mac") {
+                    if models.isEmpty { Text("No models yet. Download one below.").foregroundStyle(MacTheme.secondary) }
+                    ForEach(models) { model in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(model.name).font(.system(size: 14, weight: .medium))
+                                Text([ByteCountFormatter.string(fromByteCount: model.bytes, countStyle: .file), model.parameters].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(MacTheme.secondary)
+                            }
+                            Spacer()
+                            Button(voiceModel == model.name ? "★ Voice model" : "Use for voice") { setVoice(model.name) }
+                            Button("Remove", role: .destructive) { remove(model.name) }
+                        }
+                        Divider()
+                    }
+                }
+                card("Recommended") {
+                    Text("This Mac has \(Int(memoryGB.rounded())) GB of memory. Models marked ⚡ are quick enough for voice mode.").font(.caption).foregroundStyle(MacTheme.secondary)
+                    ForEach(LocalModelServer.ollamaRecommended) { suggestion in
+                        let have = models.contains { $0.name == suggestion.name }
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text((suggestion.voice ? "⚡ " : "") + suggestion.name).font(.system(size: 14, weight: .medium))
+                                Text(pulls.text[suggestion.name] ?? "\(suggestion.about) · \(String(format: "%.1f", suggestion.sizeGB)) GB" + (memoryGB < suggestion.minMemoryGB ? " · may be slow here" : ""))
+                                    .font(.caption).foregroundStyle(MacTheme.secondary)
+                                if let value = pulls.fraction[suggestion.name] { ProgressView(value: value).frame(maxWidth: 260) }
+                            }
+                            Spacer()
+                            Button(have ? "Installed" : "Download") { pull(suggestion.name) }.disabled(have || pulls.text[suggestion.name] != nil)
+                        }
+                        Divider()
+                    }
+                }
+                card("Other models") {
+                    HStack {
+                        TextField("Any model from ollama.com/library, e.g. mistral:7b", text: $custom).textFieldStyle(.roundedBorder)
+                        Button("Download") { pull(custom.trimmingCharacters(in: .whitespaces)) }.disabled(custom.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    if let note = pulls.text[custom.trimmingCharacters(in: .whitespaces)] { Text(note).font(.caption).foregroundStyle(MacTheme.secondary) }
+                }
+            } else {
+                card("Ollama isn’t running") {
+                    Text("Install Ollama, open it, then check again. The app looks at \(LocalModelServer.ollamaBase).").foregroundStyle(MacTheme.secondary)
+                    HStack {
+                        Link("Get Ollama ↗", destination: CLIProvider.ollama.guideURL)
+                        Button("Check again") { refresh() }
+                    }
+                }
+            }
+        }
+        .task { refresh() }
+    }
+
+    private func card<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.system(size: 15, weight: .semibold))
+            content()
+        }
+        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func refresh() { Task { models = await LocalModelServer.ollamaModels(); checked = true } }
+
+    private func setVoice(_ name: String) {
+        var values = MacAppModel.voiceModels(); values["ollama"] = name
+        UserDefaults.standard.set(values, forKey: "voiceModels"); voiceModel = name
+    }
+
+    private func remove(_ name: String) {
+        Task {
+            do { try await LocalModelServer.ollamaDelete(name); refresh(); desktop.refreshCLIs() } catch { pulls.text[name] = error.localizedDescription }
+        }
+    }
+
+    private func pull(_ name: String) {
+        guard !name.isEmpty else { return }
+        pulls.text[name] = "Starting…"
+        let sink = pulls
+        Task {
+            do {
+                try await LocalModelServer.ollamaPull(name) { status, completed, total in
+                    Task { @MainActor in sink.update(name, status: status, completed: completed, total: total) }
+                }
+                pulls.text[name] = nil; pulls.fraction[name] = nil
+                let installed = await LocalModelServer.ollamaModels() ?? []
+                models = installed
+                // The first quick model you download becomes Ollama's voice-mode model.
+                if voiceModel.isEmpty { setVoice(LocalModelServer.voicePick(installed)) }
+                desktop.refreshCLIs()
+            } catch { pulls.text[name] = error.localizedDescription; pulls.fraction[name] = nil }
+        }
+    }
+}
+
+/// Download progress for the Local Models page, updated from the download's own thread.
+@MainActor
+final class PullProgress: ObservableObject {
+    @Published var text: [String: String] = [:]
+    @Published var fraction: [String: Double] = [:]
+    func update(_ name: String, status: String, completed: Int64, total: Int64) {
+        if total > 0 {
+            fraction[name] = Double(completed) / Double(total)
+            text[name] = "\(status) · \(ByteCountFormatter.string(fromByteCount: completed, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))"
+        } else { text[name] = status }
+    }
+}
+
+// MARK: - Voice from anywhere (0.9.5)
+
+
+/// Option-Space anywhere on the Mac starts (or stops) voice mode. Uses the system hot-key service, which needs no
+/// Accessibility permission and only ever sees this one key combination.
+@MainActor
+final class MacGlobalHotKey {
+    static let shared = MacGlobalHotKey()
+    static let enabledKey = "globalVoiceHotKey"
+    var action: (() -> Void)?
+    private var hotKey: EventHotKeyRef?
+    private var handler: EventHandlerRef?
+
+    func register() {
+        guard hotKey == nil, UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true else { return }
+        if handler == nil {
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { MacGlobalHotKey.shared.action?() } }
+                return noErr
+            }, 1, &spec, nil, &handler)
+        }
+        let id = EventHotKeyID(signature: OSType(0x4F47_424B), id: 1) // "OGBK"
+        RegisterEventHotKey(UInt32(kVK_Space), UInt32(optionKey), id, GetApplicationEventTarget(), 0, &hotKey)
+    }
+
+    func unregister() {
+        if let hotKey { UnregisterEventHotKey(hotKey) }
+        hotKey = nil
     }
 }

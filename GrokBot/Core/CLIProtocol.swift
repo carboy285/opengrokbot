@@ -173,6 +173,15 @@ struct CLIEventParser {
                 text = codexOrder.compactMap { codexMessages[$0] }.joined(separator: "\n\n")
                 events.append(.text(text))
             } else if type == "item.updated" { events.append(.activity("Working…")) }
+        } else if let fragment = Self.agentDelta(type: type, value: value) {
+            // 0.9.5: Codex (and other CLIs) can send an answer in pieces; show and speak each piece as it arrives
+            // instead of waiting for the whole message. A later item.completed replaces it with the final text.
+            let msg = value["msg"] as? [String:Any]
+            let id = (value["item_id"] as? String) ?? (value["itemId"] as? String) ?? (msg?["item_id"] as? String) ?? "answer"
+            if codexMessages[id] == nil { codexOrder.append(id) }
+            codexMessages[id, default: ""] += fragment
+            text = codexOrder.compactMap { codexMessages[$0] }.joined(separator: "\n\n")
+            events.append(.text(text))
         } else if type == "stream_event", let event = value["event"] as? [String:Any], let delta = event["delta"] as? [String:Any], delta["type"] as? String == "text_delta", let fragment = delta["text"] as? String {
             text += fragment; events.append(.text(text))
         } else if type == "assistant", let message = value["message"] as? [String:Any], let content = message["content"] as? [[String:Any]], text.isEmpty {
@@ -182,5 +191,19 @@ struct CLIEventParser {
             text = result; events.append(.text(text))
         }
         return events
+    }
+
+    /// Text from an agent-message delta event, in the shapes Codex has used: {"type":"…agent_message…delta","delta":"…"},
+    /// {"type":"item.delta","delta":{"text":"…"}} and the older {"msg":{"type":"agent_message_delta","delta":"…"}}.
+    static func agentDelta(type: String, value: [String:Any]) -> String? {
+        let msg = value["msg"] as? [String:Any]
+        let kind = type.isEmpty ? (msg?["type"] as? String ?? "") : type
+        let lower = kind.lowercased()
+        guard lower.contains("delta"), lower.contains("agent") || lower.contains("message") || lower == "item.delta" else { return nil }
+        if lower.contains("reasoning") { return nil }
+        let source = type.isEmpty ? (msg ?? [:]) : value
+        if let fragment = source["delta"] as? String { return fragment }
+        if let delta = source["delta"] as? [String:Any], let fragment = delta["text"] as? String { return fragment }
+        return nil
     }
 }

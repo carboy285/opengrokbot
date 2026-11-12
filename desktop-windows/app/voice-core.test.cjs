@@ -131,3 +131,20 @@ test('speech is made one sentence at a time and starts quickly', async () => {
   assert.equal(quick[0], 'The cheapest cruise leaves Galveston on Friday,');
   assert.equal(quick.length, 2);
 });
+
+test('follow-up suggestions are taken out of the reply and starters follow the Bot’s job', async () => {
+  const core = await load();
+  const split = core.splitSuggestions('Here is your plan.\n```suggestions\n- Make it cheaper\n2. Add a museum\nMake it cheaper\n```');
+  assert.equal(split.text, 'Here is your plan.');
+  assert.deepEqual(split.suggestions, ['Make it cheaper', 'Add a museum']);
+  assert.deepEqual(core.splitSuggestions('Streaming…\n```suggestions\nOne').suggestions, []);
+  assert.equal(core.splitSuggestions('Streaming…\n```suggestions\nOne').text, 'Streaming…');
+  assert.equal(core.starters('Calendar Agent', 'x')[0], 'What’s on my calendar this week?');
+  assert.equal(core.starters('Helper', 'anything').length, 4);
+});
+
+test('voice skips follow-up chips and reads choices as options', async () => {
+  const core = await load();
+  assert.equal(core.speakable('Done.\n```suggestions\nMore\n```'), 'Done.');
+  assert.equal(core.speakable('Which port?\n```choices\nGalveston\nMiami\nTampa\n```'), 'Which port? Options: Galveston, Miami, or Tampa.');
+});

@@ -21,6 +21,17 @@ struct GrokBotMacApp: App {
                     if !app.previewEnabled { app.enterPreview() }
                     // Open-source voice (Kokoro + Whisper) runs in the Mac app; voice mode finds it here.
                     LocalVoice.backend = MacLocalVoiceEngine.shared
+                    // Option-Space anywhere starts voice with the open Bot (or the main one), and stops it again.
+                    let model = desktop, workspace = app
+                    MacGlobalHotKey.shared.action = {
+                        let hub = MacVoiceHub.shared
+                        if hub.isOn { hub.stop(); return }
+                        NSApp.activate(ignoringOtherApps: true)
+                        guard model.gateway == nil, let bot = model.selected(in: workspace) ?? workspace.workspace.bots.first(where: { $0.isMain == true }) ?? workspace.workspace.bots.first else { return }
+                        model.selectedID = bot.id
+                        hub.start(bot: bot, desktop: model, app: workspace)
+                    }
+                    MacGlobalHotKey.shared.register()
                     desktop.remote.attach(app: app, desktop: desktop)
                     MacIntentHub.shared.attach(app: app, desktop: desktop)
                     desktop.localApp = app

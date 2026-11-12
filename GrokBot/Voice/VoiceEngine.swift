@@ -385,7 +385,13 @@ enum VoiceText {
 
     /// Makes a Bot reply pleasant to hear: no code blocks, links or markdown symbols.
     static func speakable(_ raw: String) -> String {
-        var text = raw
+        // Follow-up chips are for the screen; a question's choices are read as options.
+        var text = FollowUps.split(raw).text
+        let question = ChoicePrompt.split(text)
+        if let prompt = question.prompt {
+            let options = prompt.options.count > 1 ? prompt.options.dropLast().joined(separator: ", ") + ", or " + (prompt.options.last ?? "") : prompt.options.joined()
+            text = question.text + " Options: " + options + "."
+        }
         if let fence = try? NSRegularExpression(pattern: "```[\\s\\S]*?(```|$)") {
             text = fence.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " (code omitted) ")
         }

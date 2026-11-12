@@ -17,7 +17,7 @@ function validateWorkspace(value) {
     if(bot.isPinned!=null&&typeof bot.isPinned!=='boolean'||bot.folder!=null&&(typeof bot.folder!=='string'||bot.folder.length>80)||bot.sortOrder!=null&&(!Number.isInteger(bot.sortOrder)||bot.sortOrder<0||bot.sortOrder>10000))throw new Error('Invalid Bot organization');
     if(bot.appearance!=null){const a=bot.appearance;if(!COLORS.has(a.color)||!['circle','cloud','square','sparkle','flower','heart','clover','droplet','capsule','triangle','pebble','star','hexagon','fruit'].includes(a.shape)||a.imageData!=null&&(typeof a.imageData!=='string'||!/^[A-Za-z0-9+/]*={0,2}$/.test(a.imageData)||a.imageData.length>32768||Buffer.from(a.imageData,'base64').length>24576))throw new Error('Invalid Bot avatar');}
     if(bot.aiConfiguration!==undefined&&bot.aiConfiguration!==null){const config=bot.aiConfiguration;
-      if(!Array.isArray(config.providers)||config.providers.length>5||!['one','all'].includes(config.replyMode)||new Set(config.providers.map(x=>x.provider)).size!==config.providers.length||config.providers.some(x=>!['codex','claude','grok','opencode','gemini'].includes(x.provider)||typeof x.model!=='string'||x.model.length>200||/[\r\n]/.test(x.model))||(config.activeProvider!=null&&!config.providers.some(x=>x.provider===config.activeProvider)))throw new Error('Invalid provider settings');
+      if(!Array.isArray(config.providers)||config.providers.length>7||!['one','all'].includes(config.replyMode)||new Set(config.providers.map(x=>x.provider)).size!==config.providers.length||config.providers.some(x=>!['codex','claude','grok','opencode','gemini','ollama','lmstudio'].includes(x.provider)||typeof x.model!=='string'||x.model.length>200||/[\r\n]/.test(x.model))||(config.activeProvider!=null&&!config.providers.some(x=>x.provider===config.activeProvider)))throw new Error('Invalid provider settings');
     }
     if(!memory(bot.memory)||bot.memberIDs!==undefined&&(!Array.isArray(bot.memberIDs)||bot.memberIDs.length>8||bot.memberIDs.some(x=>typeof x!=='string')))throw new Error('Invalid Bot memory or group');
     ids.add(bot.id.toLowerCase());
@@ -26,6 +26,7 @@ function validateWorkspace(value) {
   for (const entry of value.entries) {
     if (typeof entry.id !== 'string' || entries.has(entry.id.toLowerCase()) || typeof entry.botID!=='string' || !ids.has(entry.botID.toLowerCase()) || !KINDS.has(entry.kind) || typeof entry.text !== 'string' || entry.text.length > (entry.kind === 'bot' ? 32 * 1024 * 1024 : 100000)) throw new Error('Invalid entry');
     if(entry.reaction!=null&&(typeof entry.reaction!=='string'||[...entry.reaction].length>8))throw new Error('Invalid reaction');
+    if(entry.pinned!=null&&typeof entry.pinned!=='boolean')throw new Error('Invalid pin');
     if(entry.state!==undefined&&!['streaming','complete','stopped','failed'].includes(entry.state))throw new Error('Invalid message state');
     entries.add(entry.id.toLowerCase());
   }

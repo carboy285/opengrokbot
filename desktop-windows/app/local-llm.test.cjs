@@ -37,3 +37,17 @@ test('explains a stopped server and an empty model list', async () => {
   await assert.rejects(llm.run({ provider: 'lmstudio', prompt: 'x', fetchImpl: async () => { throw new Error('ECONNREFUSED'); } }).done, /LM Studio isn’t running/);
   await assert.rejects(llm.run({ provider: 'ollama', prompt: 'x', fetchImpl: async () => ({ ok: true, json: async () => ({ data: [] }) }) }).done, /no models yet/);
 });
+
+test('Ollama manager lists, downloads with progress and picks a quick voice model', async () => {
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'llama3.1:8b', size: 5e9 }, { name: 'qwen3:4b', size: 2.6e9 }, { name: 'bad name!', size: 1 }] }) };
+    if (url.endsWith('/api/pull')) return { ok: true, body: (async function* () { yield new TextEncoder().encode('{"status":"pulling","completed":5,"total":10}\n{"status":"success"}\n'); })() };
+    return { ok: true };
+  };
+  const models = await llm.ollamaModels(undefined, { fetchImpl });
+  assert.deepEqual(models.map(m => m.name), ['llama3.1:8b', 'qwen3:4b']);
+  assert.equal(llm.voicePick(models), 'qwen3:4b');
+  const seen = []; await llm.ollamaPull(undefined, 'llama3.2:3b', { fetchImpl, onProgress: p => seen.push(p.status) });
+  assert.deepEqual(seen, ['pulling', 'success']);
+  await assert.rejects(llm.ollamaPull(undefined, 'rm -rf /', { fetchImpl }), /valid model name/);
+});

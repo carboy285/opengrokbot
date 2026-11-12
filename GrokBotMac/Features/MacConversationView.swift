@@ -11,6 +11,8 @@ struct MacConversationView: View {
     @State private var followLatest = true
     @State private var showActions = false
     @ObservedObject private var voiceHub = MacVoiceHub.shared
+    /// The message a search or pin jumped to, highlighted for a moment.
+    @State private var highlighted: UUID?
     @StateObject private var dictation = MacDictation()
     @ObservedObject private var approval = MacApproval.shared
     @State private var pasteMonitor: Any?
@@ -41,7 +43,9 @@ struct MacConversationView: View {
                         let bots = app.workspace.bots
                         ForEach(messages) { entry in
                             // Equatable rows: a streaming reply redraws only the message that changed, not every message in the chat.
-                            row(entry, lastBotID: lastBotID, lastUserID: lastUserID, lastTalkID: lastTalkID, bots: bots).equatable().id(entry.id)
+                            row(entry, lastBotID: lastBotID, lastUserID: lastUserID, lastTalkID: lastTalkID, bots: bots).equatable()
+                                .background(highlighted == entry.id ? MacTheme.working.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .id(entry.id)
                         }
                         if messages.isEmpty { emptyConversation.padding(.top, 120) }
                         Color.clear.frame(height: 1).id("bottom")
@@ -51,7 +55,8 @@ struct MacConversationView: View {
                     .background(ChatScrollMonitor(onUserScroll: { nearBottom in followLatest = nearBottom },
                         onLayout: { if followLatest { scrollToLatest(proxy) } }))
                 }
-                .task(id: bot.id) { followLatest = true; scrollToLatest(proxy) }
+                .task(id: bot.id) { followLatest = true; scrollToLatest(proxy); jump(proxy) }
+                .onChange(of: desktop.jumpTo) { _, _ in jump(proxy) }
                 .onChange(of: app.entries(for: bot).last) { _, _ in
                     if followLatest { scrollToLatest(proxy) }
                 }
@@ -95,6 +100,22 @@ struct MacConversationView: View {
             .padding(.top, 12)
         }
         .overlay(alignment: .topTrailing) { MacModelMenu(bot: bot).padding(.top, 14).padding(.trailing, 18) }
+        .overlay(alignment: .topLeading) {
+            // Pinned messages in this chat (0.9.5): pick one to jump to it.
+            let pins = app.entries(for: bot).filter { $0.pinned == true }
+            if !pins.isEmpty {
+                Menu {
+                    ForEach(pins) { pin in
+                        Button(String(FollowUps.split(ChoicePrompt.split(pin.text).text).text.prefix(60))) { desktop.jumpTo = pin.id }
+                    }
+                } label: {
+                    Label("\(pins.count)", systemImage: "pin.fill").font(.system(size: 11.5, weight: .medium)).foregroundStyle(MacTheme.secondary)
+                        .padding(.horizontal, 10).padding(.vertical, 6).background(MacTheme.panel.opacity(0.7), in: Capsule())
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Pinned messages")
+                .padding(.top, 14).padding(.leading, 18)
+            }
+        }
         .background(MacTheme.canvas)
         .dropDestination(for: URL.self) { urls, _ in
             guard urls.allSatisfy(\.isFileURL), bot.memberIDs == nil else { return false }
@@ -272,9 +293,26 @@ struct MacConversationView: View {
             Text(bot.name).font(.system(size: 26, weight: .semibold))
             Text(bot.purpose).font(.system(size: 14)).foregroundStyle(MacTheme.secondary)
                 .multilineTextAlignment(.center).frame(maxWidth: 420)
-            Text("Say hi to get started.")
-                .font(.system(size: 13)).foregroundStyle(MacTheme.tertiary)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(FollowUps.starters(name: bot.name, purpose: bot.purpose), id: \.self) { idea in
+                    MacStarterCard(text: idea) { draft.wrappedValue = idea; sendMessage() }
+                }
+            }
+            .frame(maxWidth: 560).padding(.top, 14)
         }.frame(maxWidth: .infinity)
+    }
+
+    /// Scrolls to a message found by search or a pin, and highlights it briefly.
+    private func jump(_ proxy: ScrollViewProxy) {
+        guard let target = desktop.jumpTo, app.entries(for: bot).contains(where: { $0.id == target }) else { return }
+        desktop.jumpTo = nil; followLatest = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(target, anchor: .center) }
+            highlighted = target
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            withAnimation(.easeOut(duration: 0.4)) { if highlighted == target { highlighted = nil } }
+        }
     }
 
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
@@ -309,9 +347,13 @@ struct MacConversationView: View {
                 }
             }
             Divider().padding(.vertical, 4)
-            ComposerActionRow(title: "Export conversation…", icon: "square.and.arrow.up", disabled: false, tint: tint) {
+            ComposerActionRow(title: "Export as Markdown…", icon: "square.and.arrow.up", disabled: false, tint: tint) {
                 showActions = false
                 DispatchQueue.main.async { desktop.exportConversation(bot, app: app) }
+            }
+            ComposerActionRow(title: "Export as PDF…", icon: "doc.richtext", disabled: false, tint: tint) {
+                showActions = false
+                DispatchQueue.main.async { desktop.exportConversation(bot, app: app, pdf: true) }
             }
         }
         .padding(8).frame(width: 220)
@@ -354,7 +396,15 @@ struct MacConversationView: View {
             delete: { entry in _ = model.deleteEntry(entry.id) },
             retry: { _ in desktopModel.retry(bot: current, app: model) },
             answer: { text in _ = desktopModel.send(text, to: current, app: model) },
-            other: { composing = true })
+            other: { composing = true },
+            edit: { entry in
+                guard !desktopModel.runningBots.contains(current.id) else { return }
+                let list = model.entries(for: current)
+                guard let start = list.firstIndex(where: { $0.id == entry.id }) else { return }
+                for later in list[start...].reversed() { _ = model.deleteEntry(later.id) }
+                draft.wrappedValue = entry.text; composing = true
+            },
+            pin: { entry in _ = model.setPinned(entry.pinned != true, for: entry.id) })
     }
 
     private func sendMessage() {
@@ -382,6 +432,10 @@ struct MacMessageActions: @unchecked Sendable {
     var answer: (String) -> Void = { _ in }
     /// "Something else…" on a question card: puts the cursor in the message box.
     var other: () -> Void = {}
+    /// Puts your latest message back in the box and removes it and what came after (0.9.5).
+    var edit: (Entry) -> Void = { _ in }
+    /// Pins or unpins a message (0.9.5).
+    var pin: (Entry) -> Void = { _ in }
 }
 
 struct MacMessageRow: View, Equatable {
@@ -401,7 +455,7 @@ struct MacMessageRow: View, Equatable {
     var body: some View {
         MacMessageView(entry: entry, onReply: actions.reply, onReact: canReact ? actions.react : nil, onDelete: canReact ? actions.delete : nil, onRetry: isLastBot ? actions.retry : nil,
                        isLastUser: isLastUser, canAnswer: canAnswer, sender: sender, botName: botName, isGroup: isGroup,
-                       onAnswer: actions.answer, onOther: actions.other)
+                       onAnswer: actions.answer, onOther: actions.other, onEdit: canReact && isLastUser ? actions.edit : nil, onPin: canReact ? actions.pin : nil)
     }
 }
 
@@ -419,6 +473,8 @@ struct MacMessageView: View {
     var isGroup = false
     var onAnswer: ((String) -> Void)? = nil
     var onOther: (() -> Void)? = nil
+    var onEdit: ((Entry) -> Void)? = nil
+    var onPin: ((Entry) -> Void)? = nil
     @State private var copied = false
     @State private var hovering = false
     @State private var reacting = false
@@ -444,10 +500,13 @@ struct MacMessageView: View {
                     }
             }
             if onReply != nil { Button { onReply?(entry) } label: { Image(systemName: "arrowshape.turn.up.left") }.help("Reply") }
+            if entry.kind == .user, let onEdit { Button { onEdit(entry) } label: { Image(systemName: "pencil") }.help("Edit and resend") }
             if entry.kind == .bot, let onRetry { Button { onRetry(entry) } label: { Image(systemName: "arrow.clockwise") }.help("Retry") }
             Menu {
                 Button("Copy text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.text, forType: .string) }
                 Button("Copy as Markdown") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString((entry.kind == .user ? "**You:** " : "") + entry.text, forType: .string) }
+                ShareLink("Share…", item: FollowUps.split(ChoicePrompt.split(entry.text).text).text)
+                if let onPin { Button(entry.pinned == true ? "Unpin" : "Pin message") { onPin(entry) } }
                 if let onDelete { Divider(); Button("Delete message", role: .destructive) { onDelete(entry) } }
             } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More")
             if entry.kind == .bot, let provider = entry.provider {
@@ -518,7 +577,10 @@ struct MacMessageView: View {
     }
 
     private var bubbleRow: some View {
-        let split: (text: String, prompt: ChoicePrompt?) = entry.kind == .bot ? ChoicePrompt.split(entry.text) : (entry.text, nil)
+        let choice: (text: String, prompt: ChoicePrompt?) = entry.kind == .bot ? ChoicePrompt.split(entry.text) : (entry.text, nil)
+        // Follow-up chips (0.9.5): the Bot's suggested next requests, under the latest reply only.
+        let follow: (text: String, suggestions: [String]) = entry.kind == .bot ? FollowUps.split(choice.text) : (choice.text, [])
+        let split: (text: String, prompt: ChoicePrompt?) = (follow.text, choice.prompt)
         let fromOtherBot = entry.kind == .bot && entry.senderBotID != nil
         let thinking = entry.text.isEmpty && entry.state == .streaming
         let isUser = entry.kind == .user
@@ -550,6 +612,8 @@ struct MacMessageView: View {
                 }
                 if let prompt = split.prompt {
                     MacQuestionCard(prompt: prompt, canAnswer: canAnswer, answer: { onAnswer?($0) }, other: { onOther?() })
+                } else if canAnswer, !follow.suggestions.isEmpty {
+                    MacFollowUps(suggestions: follow.suggestions) { onAnswer?($0) }
                 }
                 if entry.state == .failed {
                     Label("Couldn’t finish", systemImage: "exclamationmark.circle").font(.system(size: 11.5)).foregroundStyle(MacTheme.danger.opacity(0.9)).padding(.horizontal, 6)
@@ -561,6 +625,7 @@ struct MacMessageView: View {
                         .background(MacTheme.raised, in: Capsule()).accessibilityLabel("Reaction \(reaction)")
                 }
                 HStack(spacing: 8) {
+                    if entry.pinned == true { Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(MacTheme.attention).help("Pinned").accessibilityLabel("Pinned") }
                     actionRow
                     if isUser, isLastUser { Text("Delivered").font(.system(size: 11)).foregroundStyle(MacTheme.tertiary) }
                 }
@@ -572,67 +637,134 @@ struct MacMessageView: View {
     }
 }
 
-/// Split fenced blocks before rendering inline Markdown. An unfinished fence remains
-/// visible as code while a response is streaming.
+/// Split fenced blocks before rendering Markdown. An unfinished fence remains visible as code while a response is streaming.
+/// 0.9.5: numbered and nested lists, real tables, syntax-highlighted code and inline images.
 private struct MacMessageContent: View {
     let text: String
     let markdown: Bool
     private struct Segment: Identifiable {
         let id: Int
         let code: Bool
+        let language: String
         let text: String
     }
     private var segments: [Segment] {
-        guard markdown else { return [Segment(id: 0, code: false, text: text)] }
-        var result: [Segment] = [], buffer: [String] = [], code = false
+        guard markdown else { return [Segment(id: 0, code: false, language: "", text: text)] }
+        var result: [Segment] = [], buffer: [String] = [], code = false, language = ""
         for line in text.components(separatedBy: "\n") {
-            if line.hasPrefix("```") {
-                if !buffer.isEmpty { result.append(Segment(id: result.count, code: code, text: buffer.joined(separator: "\n"))); buffer = [] }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                if !buffer.isEmpty { result.append(Segment(id: result.count, code: code, language: language, text: buffer.joined(separator: "\n"))); buffer = [] }
+                if !code { language = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces).lowercased() }
                 code.toggle()
             } else { buffer.append(line) }
         }
-        if !buffer.isEmpty { result.append(Segment(id: result.count, code: code, text: buffer.joined(separator: "\n"))) }
+        if !buffer.isEmpty { result.append(Segment(id: result.count, code: code, language: language, text: buffer.joined(separator: "\n"))) }
         return result
     }
     private func inline(_ value: String) -> AttributedString {
         (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)
     }
-    @ViewBuilder private func markdownLines(_ value: String) -> some View {
+
+    /// Lines grouped into blocks so a table is drawn as one grid.
+    private enum Block: Identifiable {
+        case line(Int, String)
+        case table(Int, header: [String], rows: [[String]])
+        var id: Int { switch self { case .line(let id, _), .table(let id, _, _): id } }
+    }
+    private static func cells(_ line: String) -> [String] {
+        var value = line.trimmingCharacters(in: .whitespaces)
+        if value.hasPrefix("|") { value.removeFirst() }
+        if value.hasSuffix("|") { value.removeLast() }
+        return value.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+    private static func isSeparator(_ line: String) -> Bool {
+        let value = line.trimmingCharacters(in: .whitespaces)
+        return value.contains("-") && value.allSatisfy { "|:- ".contains($0) }
+    }
+    private func blocks(_ value: String) -> [Block] {
         let lines = value.components(separatedBy: "\n")
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                let stripped = line.trimmingCharacters(in: .whitespaces)
-                let hashes = stripped.prefix(while: { $0 == "#" }).count
-                if stripped.isEmpty {
-                    Color.clear.frame(height: 8)
-                } else if (1...6).contains(hashes), stripped.dropFirst(hashes).first == " " {
-                    Text(inline(String(stripped.dropFirst(hashes + 1))))
-                        .font(.system(size: max(17, 27 - CGFloat(hashes) * 2), weight: .semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if stripped.hasPrefix("> ") {
-                    HStack(alignment: .top, spacing: 10) {
-                        Rectangle().fill(Color.secondary.opacity(0.5)).frame(width: 3)
-                        Text(inline(String(stripped.dropFirst(2)))).fixedSize(horizontal: false, vertical: true)
-                    }.fixedSize(horizontal: false, vertical: true)
-                } else if stripped.hasPrefix("|"), stripped.contains("|") {
-                    ScrollView(.horizontal) {
-                        Text(stripped).font(.system(.body, design: .monospaced)).fixedSize(horizontal: true, vertical: false)
-                    }
-                } else if stripped.hasPrefix("- ") || stripped.hasPrefix("* ") {
-                    HStack(alignment: .top, spacing: 8) { Text("•"); Text(inline(String(stripped.dropFirst(2)))).fixedSize(horizontal: false, vertical: true) }
-                } else {
-                    Text(inline(line)).fixedSize(horizontal: false, vertical: true)
-                }
+        var result: [Block] = [], index = 0
+        while index < lines.count {
+            let line = lines[index], trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("|"), index + 1 < lines.count, Self.isSeparator(lines[index + 1]) {
+                let header = Self.cells(line)
+                var rows: [[String]] = []
+                index += 2
+                while index < lines.count, lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("|") { rows.append(Self.cells(lines[index])); index += 1 }
+                result.append(.table(result.count, header: header, rows: rows))
+                continue
             }
+            result.append(.line(result.count, line)); index += 1
+        }
+        return result
+    }
+
+    @ViewBuilder private func lineView(_ line: String) -> some View {
+        let stripped = line.trimmingCharacters(in: .whitespaces)
+        let indent = CGFloat(line.prefix(while: { $0 == " " }).count / 2) * 16
+        let hashes = stripped.prefix(while: { $0 == "#" }).count
+        let numbered = stripped.range(of: "^\\d{1,3}[.)] ", options: .regularExpression)
+        if stripped.isEmpty {
+            Color.clear.frame(height: 6)
+        } else if (1...6).contains(hashes), stripped.dropFirst(hashes).first == " " {
+            Text(inline(String(stripped.dropFirst(hashes + 1))))
+                .font(.system(size: max(16, 22 - CGFloat(hashes) * 1.5), weight: .semibold))
+                .padding(.top, 4).fixedSize(horizontal: false, vertical: true)
+        } else if stripped.hasPrefix("> ") {
+            HStack(alignment: .top, spacing: 10) {
+                Rectangle().fill(Color.secondary.opacity(0.5)).frame(width: 3)
+                Text(inline(String(stripped.dropFirst(2)))).foregroundStyle(Color.primary.opacity(0.82)).fixedSize(horizontal: false, vertical: true)
+            }.fixedSize(horizontal: false, vertical: true)
+        } else if stripped.hasPrefix("!["), let image = MacInlineImage.parse(stripped) {
+            image
+        } else if let numbered {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(String(stripped[numbered]).trimmingCharacters(in: .whitespaces)).foregroundStyle(MacTheme.secondary).monospacedDigit()
+                Text(inline(String(stripped[numbered.upperBound...]))).fixedSize(horizontal: false, vertical: true)
+            }.padding(.leading, indent)
+        } else if stripped.hasPrefix("- ") || stripped.hasPrefix("* ") || stripped.hasPrefix("+ ") {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(indent > 0 ? "◦" : "•").foregroundStyle(MacTheme.secondary)
+                Text(inline(String(stripped.dropFirst(2)))).fixedSize(horizontal: false, vertical: true)
+            }.padding(.leading, indent)
+        } else if stripped.count >= 3, stripped.allSatisfy({ "-*_".contains($0) }) {
+            Divider().padding(.vertical, 4)
+        } else {
+            Text(inline(line)).fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    private func table(header: [String], rows: [[String]]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
+                        Text(inline(cell)).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 11).padding(.vertical, 7)
+                    }
+                }
+                .background(Color.primary.opacity(0.05))
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                            Text(inline(cell)).font(.system(size: 13)).padding(.horizontal, 11).padding(.vertical, 7)
+                        }
+                    }
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(MacTheme.line, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(segments) { segment in
                 if segment.code {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack {
-                            Text("Code").font(.system(size: 11, weight: .medium)).foregroundStyle(MacTheme.secondary)
+                            Text(segment.language.isEmpty ? "Code" : segment.language).font(.system(size: 11, weight: .medium)).foregroundStyle(MacTheme.secondary)
                             Spacer()
                             Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(segment.text, forType: .string) } label: {
                                 Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11))
@@ -641,7 +773,7 @@ private struct MacMessageContent: View {
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(Color.primary.opacity(0.04))
                         ScrollView(.horizontal) {
-                            Text(segment.text).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+                            Text(CodeHighlight.attributed(segment.text)).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
                                 .padding(12)
                         }
                     }
@@ -649,9 +781,79 @@ private struct MacMessageContent: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(MacTheme.line, lineWidth: 1))
                 } else if markdown {
-                    markdownLines(segment.text)
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(blocks(segment.text)) { block in
+                            switch block {
+                            case .line(_, let line): lineView(line)
+                            case .table(_, let header, let rows): table(header: header, rows: rows)
+                            }
+                        }
+                    }
                 } else { Text(segment.text).fixedSize(horizontal: false, vertical: true) }
             }
+        }
+    }
+}
+
+/// Keyword, string, comment and number colours for code in replies. Language-agnostic; mirrors markdown-core.mjs.
+enum CodeHighlight {
+    private static let keywords: Set<String> = Set("abstract and as async await break case catch class const continue def default defer del do elif else enum export extends false final finally fn for from func function go guard if impl import in interface is lambda let match mut new nil none not null or package pass private protected pub public raise return self static struct super switch this throw true try type typeof undefined use var void where while with yield".split(separator: " ").map(String.init))
+    private static let pattern = try? NSRegularExpression(pattern: #"(//[^\n]*|#[^\n]*|/\*[\s\S]*?\*/|--[^\n]*)|("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\b(\d+(?:\.\d+)?)\b|\b([A-Za-z_][A-Za-z0-9_]*)\b"#)
+
+    static func attributed(_ code: String) -> AttributedString {
+        guard let pattern else { return AttributedString(code) }
+        var result = AttributedString()
+        var last = code.startIndex
+        let whole = NSRange(code.startIndex..., in: code)
+        for match in pattern.matches(in: code, range: whole) {
+            guard let range = Range(match.range, in: code) else { continue }
+            if range.lowerBound > last { result += AttributedString(String(code[last..<range.lowerBound])) }
+            var piece = AttributedString(String(code[range]))
+            if match.range(at: 1).location != NSNotFound { piece.foregroundColor = Color(hex: 0x7F8590) }
+            else if match.range(at: 2).location != NSNotFound { piece.foregroundColor = Color(hex: 0x9FD27C) }
+            else if match.range(at: 3).location != NSNotFound { piece.foregroundColor = Color(hex: 0xF78C6C) }
+            else if keywords.contains(String(code[range])) { piece.foregroundColor = Color(hex: 0xC792EA) }
+            result += piece
+            last = range.upperBound
+        }
+        if last < code.endIndex { result += AttributedString(String(code[last...])) }
+        return result
+    }
+}
+
+/// An image line in a reply: a web image, or a picture the Bot saved in OpenGrokBot's own folders.
+struct MacInlineImage: View {
+    let alt: String
+    let source: String
+
+    static func parse(_ line: String) -> MacInlineImage? {
+        guard let altEnd = line.range(of: "]("), line.hasSuffix(")") else { return nil }
+        let alt = String(line[line.index(line.startIndex, offsetBy: 2)..<altEnd.lowerBound])
+        let source = String(line[altEnd.upperBound..<line.index(before: line.endIndex)]).trimmingCharacters(in: .whitespaces)
+        return source.isEmpty ? nil : MacInlineImage(alt: alt, source: source)
+    }
+
+    /// Only files inside ~/Library/Application Support/OpenGrokBot are shown; nothing else on the Mac is read.
+    private var localImage: NSImage? {
+        let path = source.hasPrefix("file://") ? (URL(string: source)?.path ?? "") : source
+        let allowed = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/OpenGrokBot").standardizedFileURL.path
+        let resolved = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard resolved.hasPrefix(allowed + "/"), ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(URL(fileURLWithPath: resolved).pathExtension.lowercased()) else { return nil }
+        return NSImage(contentsOfFile: resolved)
+    }
+
+    var body: some View {
+        if source.hasPrefix("https://"), let url = URL(string: source) {
+            AsyncImage(url: url) { image in image.resizable().scaledToFit() } placeholder: { Text(alt.isEmpty ? "Loading image…" : alt).foregroundStyle(MacTheme.secondary) }
+                .frame(maxWidth: 420, maxHeight: 320, alignment: .leading)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else if let image = localImage {
+            Image(nsImage: image).resizable().scaledToFit()
+                .frame(maxWidth: 420, maxHeight: 320, alignment: .leading)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityLabel(alt.isEmpty ? "Image" : alt)
+        } else {
+            Text(alt.isEmpty ? "Image" : alt).italic().foregroundStyle(MacTheme.secondary)
         }
     }
 }
@@ -758,5 +960,48 @@ private struct ComposerActionRow: View {
         }
         .buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.4 : 1)
         .onHover { hovering = $0 }
+    }
+}
+
+/// Tap-to-send follow-ups under the latest reply, like ChatGPT's suggestions.
+struct MacFollowUps: View {
+    let suggestions: [String]
+    let send: (String) -> Void
+    @State private var hovered: String?
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(suggestions, id: \.self) { suggestion in
+                Button { send(suggestion) } label: {
+                    HStack(spacing: 6) {
+                        Text(suggestion).font(.system(size: 13)).lineLimit(1)
+                        Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .bold)).foregroundStyle(MacTheme.tertiary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(hovered == suggestion ? MacTheme.raised : MacTheme.panel.opacity(0.55), in: Capsule())
+                    .overlay(Capsule().stroke(MacTheme.line, lineWidth: 1))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .onHover { inside in hovered = inside ? suggestion : (hovered == suggestion ? nil : hovered) }
+            }
+        }
+        .accessibilityElement(children: .contain).accessibilityLabel("Suggested follow-ups")
+    }
+}
+
+/// An idea to start an empty chat with.
+struct MacStarterCard: View {
+    let text: String
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Text(text).font(.system(size: 13.5)).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14).padding(.vertical, 13)
+                .background(hovering ? MacTheme.panel : MacTheme.panel.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(MacTheme.line, lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain).onHover { hovering = $0 }
     }
 }

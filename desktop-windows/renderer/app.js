@@ -2,7 +2,8 @@ import { preview } from './seed.js';
 import { createVoice } from './voice.js';
 import { renderApiKeys } from './api-keys.js';
 import { renderSecureLogins } from './secure-logins.js';
-import { encodeWav } from './voice-core.mjs';
+import { encodeWav, splitSuggestions, starters } from './voice-core.mjs';
+import { renderMarkdown } from './markdown.js';
 import * as catalog from './catalog.js';
 
 const $ = selector => document.querySelector(selector);
@@ -65,6 +66,7 @@ function currentBot() { return workspace.bots.find(bot => bot.id === selected); 
 function entries(bot) { return workspace.entries.filter(entry => entry.botID === bot.id); }
 function applyTheme(value) {
   document.documentElement.dataset.theme = value === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : value;
+  window.desktop?.setTitleBarTheme?.(document.documentElement.dataset.theme !== 'light').catch?.(() => {});
   localStorage.setItem('appearance', value);
 }
 applyTheme(localStorage.getItem('appearance') || 'dark');
@@ -85,7 +87,7 @@ function render() {
   const visible=recentBots(matching.filter(bot=>!isPinned(bot)));
   for(const bot of visible){
     const row=button('',()=>selectBot(bot.id),`bot-row ${bot.id===selected?'selected':''}`);row.draggable=true;
-    const preview=(splitChoices(lastText.get(bot.id)||bot.purpose||'').text.split('\n').find(x=>x.trim())||'').slice(0,90);
+    const preview=(splitSuggestions(splitChoices(lastText.get(bot.id)||bot.purpose||'').text).text.split('\n').find(x=>x.trim())||'').slice(0,90);
     const state=waitingOn(bot)?'attention':running.has(bot.id)?'working':'';const face=avatar(bot);if(state)face.classList.add(state);
     append(row,face,append(node('span','details'),append(node('strong','',bot.name),...(isPinned(bot)?[node('i','pin','⚲')]:[])),node('small',state,state==='attention'?'Needs your OK':state==='working'?'Thinking it through…':preview)),...(bot.unread&&bot.id!==selected?[Object.assign(node('i','unread-dot'),{title:'Unread'})]:[]));
     row.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});
@@ -146,15 +148,15 @@ function renderMessages(bot){
   live.add(entry.id);let row=rows.get(entry.id);const kind=entryKind(entry);
   if(!row||row.kind!==kind){row?.remove();row=node('div',kind==='activity'?'activity':`message-row ${kind==='botnote'?'bot botnote':entry.kind}${entry.senderBotID&&entry.kind==='bot'?' from-bot':''}`);row.kind=kind;row.dataset.entry=entry.id;row.append(node('div','message-body'));rows.set(entry.id,row);}
   const canAnswer=entry.id===lastTalkID&&entry.kind==='bot'&&entry.state!=='streaming'&&!running.has(bot.id);
-  const key=[entry.text,entry.state||'',entry.id===lastUserID,canAnswer,entry.senderName||'',entry.provider||''].join('\u0001');
-  const body=row.firstElementChild;if(row.renderKey!==key){row.renderKey=key;row.toolsKey='';body.replaceChildren();renderEntryBody(bot,entry,body,{isLastUser:entry.id===lastUserID,canAnswer});row.dataset.state=entry.state||'';}
-  if(kind==='message'&&!(entry.state==='streaming'&&!entry.text)){const key=`${entry.reaction||''}|${entry.state||''}|${running.has(bot.id)}|${entry.id===lastEntryID}`;const stack=body.querySelector(':scope>.stack')||body;if(row.toolsKey!==key||!stack.querySelector(':scope>.message-tools')){stack.querySelector(':scope>.message-tools')?.remove();row.toolsKey=key;const tools=messageTools(bot,entry,entry.id===lastEntryID);const delivered=stack.querySelector(':scope>.delivery-state');if(delivered)tools.append(delivered);stack.append(tools);}}
+  const key=[entry.text,entry.state||'',entry.id===lastUserID,canAnswer,entry.id===lastEntryID,entry.senderName||'',entry.provider||''].join('\u0001');
+  const body=row.firstElementChild;if(row.renderKey!==key){row.renderKey=key;row.toolsKey='';body.replaceChildren();renderEntryBody(bot,entry,body,{isLastUser:entry.id===lastUserID,canAnswer,canSuggest:canAnswer&&entry.id===lastEntryID});row.dataset.state=entry.state||'';}
+  if(kind==='message'&&!(entry.state==='streaming'&&!entry.text)){const key=`${entry.reaction||''}|${entry.pinned?1:0}|${entry.state||''}|${running.has(bot.id)}|${entry.id===lastEntryID}`;const stack=body.querySelector(':scope>.stack')||body;if(row.toolsKey!==key||!stack.querySelector(':scope>.message-tools')){stack.querySelector(':scope>.message-tools')?.remove();row.toolsKey=key;const tools=messageTools(bot,entry,entry.id===lastEntryID);const delivered=stack.querySelector(':scope>.delivery-state');if(delivered)tools.append(delivered);stack.append(tools);}}
   if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
  }
  for(const [id,row] of rows)if(!live.has(id)){row.remove();rows.delete(id);}
  const pending=pendingSends.get(bot.id);
  if(pending&&!live.has(pending.id)){const row=append(node('div','message-row user pending'),append(node('div','message-body'),node('div','bubble',pending.text),node('small','delivery-state',pending.failed?'Failed to send':'Sending…')));row.dataset.extra='true';if(pending.failed)row.firstChild.append(button('Retry sending',()=>submitMessage(bot,pending.text,pending.id)));messages.append(row);}
- if(!entries(bot).length&&!pending){const empty=append(node('div','empty empty-chat'),avatar(bot),node('h2','',bot.name),node('p','',bot.purpose||'What’s on your mind?'),node('small','','Say hi to get started.'));empty.dataset.extra='true';messages.append(empty);}
+ if(!entries(bot).length&&!pending){const cards=node('div','starters');for(const idea of starters(bot.name,bot.purpose))cards.append(append(button('',()=>submitMessage(bot,idea,undefined,[]),'starter'),node('span','',idea)));const empty=append(node('div','empty empty-chat'),avatar(bot),node('h2','',bot.name),node('p','',bot.purpose||'What’s on your mind?'),cards);empty.dataset.extra='true';messages.append(empty);}
  const busy=running.has(bot.id),send=$('#save-note');send.classList.toggle('stop',busy);send.textContent=busy?'■':'↑';send.title=busy?'Stop response':'Send';
  send.disabled=!busy&&!!pending&&!pending.failed;send.setAttribute('aria-label',busy?'Stop response':pending&&!pending.failed?'Sending message':'Send message');
  renderApprovalCard();
@@ -193,20 +195,29 @@ function questionCard(bot,prompt,canAnswer){
  if(canAnswer)card.append(append(node('div','question-actions'),button('Something else…',()=>$('#draft').focus(),'link'),submit));
  return card;
 }
-function renderEntryBody(bot,entry,body,{isLastUser,canAnswer}){
+const markdownContext=bot=>({openLink:url=>bridge.openLink?bridge.openLink(url).then(r=>{if(r&&!r.ok)toast(r.error);}).catch(()=>{}):window.open(url,'_blank','noopener'),loadImage:path=>bridge.botImage?result(bridge.botImage(bot.id,path)).catch(()=>null):Promise.resolve(null)});
+function renderEntryBody(bot,entry,body,{isLastUser,canAnswer,canSuggest}){
  const kind=entryKind(entry);
  if(kind==='activity'){body.append(activityPill(entry.text,entry.delivery==='scheduled'));return;}
  if(kind==='botnote'){
   const [,...rest]=String(entry.text).split('\n'),message=rest.join('\n')||entry.text,from=entry.senderName||'Another Bot';
   const label=append(node('small','sender-line'),node('strong','',from),node('span','arrow','→'),node('span','',bot.name));
-  append(body,senderFace(entry),append(node('div','stack'),label,node('div','bubble dashed',message)));body.setAttribute('aria-label',`Message from ${from} to ${bot.name}`);return;
+  const note=node('div','bubble dashed md-bubble');note.append(renderMarkdown(message,markdownContext(bot)));
+  append(body,senderFace(entry),append(node('div','stack'),label,note));body.setAttribute('aria-label',`Message from ${from} to ${bot.name}`);return;
  }
- const fromBot=entry.kind==='bot'&&entry.senderBotID,{text,prompt}=entry.kind==='bot'?splitChoices(entry.text):{text:entry.text,prompt:null};
+ const fromBot=entry.kind==='bot'&&entry.senderBotID,choice=entry.kind==='bot'?splitChoices(entry.text):{text:entry.text,prompt:null},prompt=choice.prompt;
+ // Follow-up chips (0.9.5): the Bot's suggested next requests, shown under the latest reply only.
+ const follow=entry.kind==='bot'?splitSuggestions(choice.text):{text:choice.text,suggestions:[]},text=follow.text;
  const stack=node('div','stack');
  if(fromBot){body.append(senderFace(entry));stack.append(node('small','sender-line',bot.memberIDs?(entry.senderName||'Bot'):`${entry.senderName||'Another Bot'} replied`));}
  if(!entry.text&&entry.state==='streaming')stack.append(typingBubble());
- else if(text)stack.append(node('div',`bubble${entry.state==='failed'?' failed':''}`,text));
+ else if(text){
+  // Bot replies are Markdown (0.9.5): lists, tables, highlighted code, links and the Bot's own images. Your messages stay plain text.
+  if(entry.kind==='bot'){const bubble=node('div',`bubble md-bubble${entry.state==='failed'?' failed':''}`);bubble.append(renderMarkdown(text,markdownContext(bot)));stack.append(bubble);}
+  else stack.append(node('div',`bubble${entry.state==='failed'?' failed':''}`,text));
+ }
  if(prompt)stack.append(questionCard(bot,prompt,canAnswer));
+ if(canSuggest&&!prompt&&follow.suggestions.length){const chips=node('div','followups');chips.setAttribute('aria-label','Suggested follow-ups');for(const suggestion of follow.suggestions){const chip=button('',()=>submitMessage(bot,suggestion,undefined,[]),'followup');append(chip,node('span','followup-text',suggestion),node('span','followup-arrow','↗'));chips.append(chip);}stack.append(chips);}
  if(entry.state==='failed')stack.append(node('small','state-note failed',entry.provider?`Couldn’t finish · ${entry.provider}`:'Couldn’t finish'));
  if(entry.state==='stopped')stack.append(node('small','state-note','Stopped'));
  if(entry.kind==='user'&&isLastUser)stack.append(node('small','delivery-state','Delivered'));
@@ -381,7 +392,7 @@ function unavailable(title, detail) { return append(node('div', 'unavailable'), 
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
   const layout = node('div', 'settings-layout'); const nav = node('nav', 'settings-nav'); const page = node('section', 'settings-page');
-  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Secure Logins','⚿'],['Vault','⚿'],['Voice','♫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
+  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Secure Logins','⚿'],['Vault','⚿'],['Voice','♫'],['Local models','◫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
   append(page, append(node('header','panel-head'), node('h1','',tab), button('×', () => dialog.close(), 'close-panel')));
   append(layout, nav, page); dialog.append(layout); if (!dialog.open) dialog.showModal();
   if (tab === 'General') {
@@ -395,6 +406,7 @@ function showSettings(tab = 'General') {
     append(page,promo,node('p','settings-label','Account'),account,node('p','settings-label','Appearance'),appearance,button('Reset conversations…',()=>confirmReset()));
   } else if (tab === 'Computer') { page.append(button('Shared VM for all Bots…',()=>showBotVM(workspace.bots.find(x=>x.isMain)||currentBot()))); page.append(button('View another computer on this account',async()=>{try{await result(bridge.openMirror());}catch(error){toast(error.message);}})); page.append(unavailable('This computer', 'AI CLIs run on this computer in a private folder for each Bot.')); renderRemoteAccess(page); renderSharing(page); page.append(node('p','muted','Each Bot has its own visible local browser with separate cookies and login storage. Open it from Bot details. No cloud browser account is required.')); }
   else if (tab === 'Permissions') renderPermissions(page);
+  else if (tab === 'Local models') renderLocalModels(page);
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
@@ -466,7 +478,22 @@ function showAvatarPicker(bot){
  const upload=node('input','field');upload.type='file';upload.accept='image/png,image/jpeg,image/webp,image/heic';upload.setAttribute('aria-label','Upload avatar image');upload.addEventListener('change',async()=>{try{const file=upload.files[0];if(!file)return;if(file.size>12000000)throw new Error('Choose an image under 12 MB.');const image=await createImageBitmap(file);const canvas=document.createElement('canvas'),scale=Math.min(1,192/Math.max(image.width,image.height));canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);image.close();let data;for(const q of [.8,.6,.4,.2]){data=canvas.toDataURL('image/jpeg',q).split(',')[1];if(data.length<=32768)break;}if(data.length>32768)throw new Error('Choose a smaller image.');draft.imageData=data;refresh();}catch(error){toast(error.message);}});
  append(content,upload,button('Generate a look',()=>{draft={shape:avatarShapes[Math.floor(Math.random()*avatarShapes.length)],color:Object.keys(avatarColors)[Math.floor(Math.random()*Object.keys(avatarColors).length)]};refresh();}),button('Reset',async()=>{await organize(bot,{appearance:null,color:bot.isMain?'white':'purple'});dialog.close();}),button('Save avatar',async()=>{await organize(bot,{appearance:draft,color:draft.color});dialog.close();},'pill primary'));
 }
-async function exportConversation(bot=currentBot()) { if(!bot)return; const text='OpenGrokBot — Local AI conversation\n\n'+entries(bot).map(x=>`${x.kind==='user'?'You':x.senderName||bot.name}: ${x.text}`).join('\n\n'); try { if(await result(bridge.export(text)))toast('Conversation exported.'); }catch(error){toast(error.message);} }
+// 0.9.5: export as Markdown, or as a PDF of the rendered chat (lists, tables and code keep their shape).
+async function exportConversation(bot=currentBot(),format='md') {
+ if(!bot)return;
+ const list=entries(bot).filter(x=>x.kind!=='activity'),clean=x=>splitSuggestions(splitChoices(x.text).text).text,when=x=>x.date?new Date(x.date).toLocaleString():'';
+ let text;
+ if(format==='pdf'){const page=node('div');page.append(node('h1','',bot.name));for(const x of list){page.append(node('div','who',`${x.kind==='user'?'You':x.senderName||bot.name} · ${when(x)}`));const body=x.kind==='user'?node('p','msg',clean(x)):renderMarkdown(clean(x),{});body.classList.add('msg');page.append(body);}text=page.innerHTML;}
+ else text=`# ${bot.name}\n\n`+list.map(x=>`**${x.kind==='user'?'You':x.senderName||bot.name}** · ${when(x)}\n\n${clean(x)}`).join('\n\n---\n\n');
+ try { if(await result(bridge.export(text,format,`${bot.name} conversation`)))toast(format==='pdf'?'PDF saved.':'Conversation exported.'); }catch(error){toast(error.message);}
+}
+// Jumps to a message from search or a pin and highlights it for a moment.
+function jumpTo(botID,entryID){
+ if(selected!==botID)selectBot(botID);
+ requestAnimationFrame(()=>requestAnimationFrame(()=>{const row=document.querySelector(`[data-entry="${CSS.escape(entryID)}"]`);if(!row)return;chatScroll.follow=false;row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('jump-flash');setTimeout(()=>row.classList.remove('jump-flash'),1800);}));
+}
+async function pinEntry(entry,on){try{if(bridge.pinEntry)workspace=await result(bridge.pinEntry(entry.id,on));else{const next=structuredClone(workspace);const item=next.entries.find(x=>x.id===entry.id);if(!item)return;if(on)item.pinned=true;else delete item.pinned;if(!await persist(next))return;}render();}catch(error){toast(error.message);}}
+async function copyDiagnostics(){try{const text=bridge.diagnostics?await result(bridge.diagnostics()):`OpenGrokBot web preview · ${navigator.userAgent}`;await navigator.clipboard.writeText(text);toast('Diagnostics copied. Paste them into your bug report.');}catch(error){toast(error.message||'Diagnostics could not be copied.');}}
 function renderChips(){
  const box=$('#attachment-chips'),bot=currentBot(),files=bot?pendingFiles.get(bot.id)||[]:[];box.replaceChildren();box.hidden=!files.length;
  for(const name of files){const chip=node('span','attachment-chip');chip.append(node('span','',/\.(png|jpe?g|gif|webp)$/i.test(name)?'🖼':'📄'),node('span','chip-name',name.replace(/^[0-9a-f-]{37}/i,'')));const remove=button('×',()=>{pendingFiles.set(bot.id,(pendingFiles.get(bot.id)||[]).filter(x=>x!==name));renderChips();},'chip-remove');remove.setAttribute('aria-label','Remove attachment '+name.replace(/^[0-9a-f-]{37}/i,''));chip.append(remove);box.append(chip);}
@@ -582,9 +609,9 @@ function openPalette() {
   if ($('#palette')) { $('#palette input')?.focus(); return; }
   const back = node('div', 'palette-backdrop'); back.id = 'palette';
   const box = node('div', 'palette-box'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Search Bots and actions');
-  const field = node('input', 'palette-field'); field.placeholder = 'Search Bots and actions'; field.setAttribute('aria-label', 'Search Bots and actions'); field.autocomplete = 'off';
+  const field = node('input', 'palette-field'); field.placeholder = 'Search Bots, messages and actions'; field.setAttribute('aria-label', 'Search Bots and actions'); field.autocomplete = 'off';
   const list = node('div', 'palette-list'); list.setAttribute('role', 'listbox');
-  const actions = [['New Bot', 'Create a Bot', '＋', () => showNewBot()], ['Settings…', 'Preferences', '⚙', () => showSettings()], ['Permissions…', 'What Bots may do without asking', '♧', () => showSettings('Permissions')], ['Connect apps', 'Add your tools', '⬡', () => showApps()], ['Keyboard shortcuts', 'See every shortcut', '⌨', () => showShortcuts()]];
+  const actions = [['Copy diagnostics', 'Versions, providers, voice settings and recent errors, for a bug report', '⚕', () => copyDiagnostics()], ['Export as PDF…', 'Save this chat as a PDF', '⇩', () => exportConversation(currentBot(), 'pdf')], ['New Bot', 'Create a Bot', '＋', () => showNewBot()], ['Settings…', 'Preferences', '⚙', () => showSettings()], ['Permissions…', 'What Bots may do without asking', '♧', () => showSettings('Permissions')], ['Connect apps', 'Add your tools', '⬡', () => showApps()], ['Keyboard shortcuts', 'See every shortcut', '⌨', () => showShortcuts()]];
   let items = [], index = 0;
   const close = () => { back.remove(); $('#draft')?.focus(); };
   const choose = position => { const item = items[position]; if (!item) return; close(); item.run(); };
@@ -605,6 +632,14 @@ function openPalette() {
       if (query && !`${bot.name} ${bot.purpose} ${last}`.toLowerCase().includes(query)) continue;
       items.push({ title: bot.name, sub: (bot.hidden ? 'Hidden · ' : '') + (last || bot.purpose).replace(/\s+/g, ' ').slice(0, 90), bot, run: () => { if (bot.hidden) organize(bot, { hidden: null }); selectBot(bot.id); } });
       if (items.length >= 8) break;
+    }
+    // 0.9.5: messages that match (newest first), or your pinned messages when nothing is typed. Choosing one jumps to it.
+    const found = query.length >= 2 ? workspace.entries.filter(x => x.kind !== 'activity' && x.text.toLowerCase().includes(query)).slice(-12).reverse() : workspace.entries.filter(x => x.pinned).slice(-6).reverse();
+    for (const entry of found) {
+      const bot = workspace.bots.find(x => x.id === entry.botID); if (!bot) continue;
+      const clean = splitSuggestions(splitChoices(entry.text).text).text.replace(/\s+/g, ' '), at = query ? clean.toLowerCase().indexOf(query) : 0;
+      const snippet = (at > 30 ? '…' : '') + clean.slice(Math.max(0, at - 30), Math.max(0, at - 30) + 90);
+      items.push({ title: snippet, sub: `${entry.kind === 'user' ? 'You' : entry.senderName || bot.name} in ${bot.name}${entry.date ? ' · ' + new Date(entry.date).toLocaleDateString() : ''}${entry.pinned ? ' · pinned' : ''}`, icon: entry.pinned ? '📌' : '⌕', run: () => { if (bot.hidden) organize(bot, { hidden: null }); jumpTo(bot.id, entry.id); } });
     }
     for (const [title, sub, icon, run] of actions) if (!query || `${title} ${sub}`.toLowerCase().includes(query)) items.push({ title, sub, icon, run });
     index = Math.min(index, Math.max(items.length - 1, 0)); draw();
@@ -636,6 +671,14 @@ async function deleteMessage(entry) {
     render();
   } catch (error) { toast(error.message); }
 }
+/** Puts your latest message back in the box and removes it and everything after it, like editing in ChatGPT. */
+async function editAndResend(bot, entry) {
+  const list = entries(bot), from = list.findIndex(x => x.id === entry.id);
+  if (from < 0) return;
+  for (const later of list.slice(from).reverse()) await deleteMessage(later);
+  const draft = $('#draft'); draft.value = entry.text; drafts.set(bot.id, entry.text); persistDrafts();
+  draft.focus(); draft.setSelectionRange(draft.value.length, draft.value.length);
+}
 function replyTo(bot, entry) {
   const quoted = entry.text.split('\n').filter(Boolean).slice(0, 3).map(line => '> ' + line.slice(0, 240)).join('\n');
   const draft = $('#draft'); draft.value = quoted + '\n\n' + draft.value; drafts.set(bot.id, draft.value); persistDrafts();
@@ -643,6 +686,7 @@ function replyTo(bot, entry) {
 }
 function messageTools(bot, entry, isLast) {
   const tools = node('div', 'message-tools');
+  if (entry.pinned) tools.append(Object.assign(node('span', 'pin-mark', '📌'), { title: 'Pinned' }));
   if (entry.reaction) tools.append(Object.assign(node('span', 'reaction-pill', entry.reaction), { title: 'Reaction' }));
   const bar = node('span', 'tool-bar');
   const react = button('☺', () => {
@@ -654,14 +698,23 @@ function messageTools(bot, entry, isLast) {
   const reply = button('↩', () => replyTo(bot, entry), 'tool'); reply.setAttribute('aria-label', 'Reply to message'); reply.title = 'Reply';
   const more = button('…', () => showMessageMenu(bot, entry, isLast), 'tool'); more.setAttribute('aria-label', 'More message actions'); more.title = 'More';
   const copy = button('⧉', async () => { try { await navigator.clipboard.writeText(entry.text); copy.textContent = '✓'; setTimeout(() => { copy.textContent = '⧉'; }, 1200); } catch { toast('It could not be copied.'); } }, 'tool'); copy.setAttribute('aria-label', 'Copy message'); copy.title = 'Copy';
-  bar.append(copy, react, reply, more);
+  const tools2 = [];
+  // Edit and resend your latest message, or regenerate the latest reply (0.9.5).
+  if (entry.kind === 'user' && !running.has(bot.id) && entries(bot).findLast(x => x.kind === 'user')?.id === entry.id) {
+    const edit = button('✎', () => editAndResend(bot, entry), 'tool'); edit.setAttribute('aria-label', 'Edit message'); edit.title = 'Edit and resend'; tools2.push(edit);
+  }
+  if (entry.kind === 'bot' && isLast && !running.has(bot.id)) {
+    const again = button('↻', async () => { try { await result(bridge.retry(bot.id)); } catch (error) { toast(error.message); } }, 'tool'); again.setAttribute('aria-label', 'Regenerate reply'); again.title = 'Regenerate'; tools2.push(again);
+  }
+  bar.append(copy, ...tools2, react, reply, more);
   if (entry.kind === 'bot' && entry.provider) bar.append(Object.assign(node('span', 'provider-tag', entry.provider), { title: `Answered by ${entry.provider}` }));
   tools.append(bar); return tools;
 }
 function showMessageMenu(bot, entry, isLast) {
   const content = panel('Message');
   const copy = async text => { try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch { toast('It could not be copied.'); } dialog.close(); };
-  append(content, button('Copy text', () => copy(entry.text)), button('Copy as Markdown', () => copy((entry.kind === 'user' ? '**You:** ' : '') + entry.text)));
+  append(content, button('Copy text', () => copy(entry.text)), button('Copy as Markdown', () => copy((entry.kind === 'user' ? '**You:** ' : '') + entry.text)),
+    button(entry.pinned ? 'Unpin' : 'Pin message', () => { dialog.close(); pinEntry(entry, !entry.pinned); }));
   if (entry.kind === 'bot' && isLast && !running.has(bot.id)) content.append(button('Retry', async () => { dialog.close(); try { await result(bridge.retry(bot.id)); } catch (error) { toast(error.message); } }));
   if (entry.state !== 'streaming') content.append(button('Delete message', () => {
     const confirm = panel('Delete this message?');
@@ -688,7 +741,7 @@ function showBotActions(bot) {
     button('Copy conversation ID', async () => { try { await navigator.clipboard.writeText(bot.id); toast('Conversation ID copied.'); } catch { toast('The ID could not be copied.'); } done(); }),
     ...(bot.isMain ? [] : [button('Hide from sidebar', async () => { await organize(bot, { hidden: true }); done(); })]),
     button('Change avatar', () => showAvatarPicker(bot)),
-    button('Export conversation…', () => exportConversation(bot)));
+    button('Export as Markdown…', () => exportConversation(bot, 'md')), button('Export as PDF…', () => exportConversation(bot, 'pdf')));
   if (!bot.isMain) content.append(button('Delete Bot…', () => {
     const confirm = panel(`Delete ${bot.name}?`);
     append(confirm, node('p', '', 'This removes this Bot and its local conversations.'), button('Delete Bot', async () => { const next = structuredClone(workspace); next.bots = next.bots.filter(x => x.id !== bot.id); next.entries = next.entries.filter(x => x.botID !== bot.id); if (await persist(next)) { if (selected === bot.id) selected = workspace.bots[0]?.id; render(); dialog.close(); } }, 'pill danger'), button('Cancel', () => dialog.close()));
@@ -886,3 +939,50 @@ function renderVMHandoff(request) {
   refresh(); handoffTimer = setInterval(refresh, 2000);
 }
 bridge.onVMHandoff?.(renderVMHandoff);
+
+// ---- 0.9.5: Settings → Local models (Ollama manager) ----
+async function renderLocalModels(page) {
+  const body = node('div', 'local-models'); page.append(body);
+  if (!bridge.ollamaModels) { body.append(node('p', 'muted', 'Local models are managed in the installed Windows app.')); return; }
+  const draw = async () => {
+    let info;
+    try { info = await result(bridge.ollamaModels()); } catch (error) { body.replaceChildren(node('p', 'muted', error.message)); return; }
+    body.replaceChildren(node('p', 'muted', 'Ollama runs AI models on this PC: private, free and quick. Pick it for any Bot in its side panel. LM Studio works too; manage its models in LM Studio itself.'));
+    if (!info.running) {
+      append(body, append(node('div', 'settings-card'), node('strong', '', 'Ollama isn’t running'), node('p', 'muted', `Install Ollama, open it, then check again. The app looks at ${info.base}.`),
+        append(node('div', 'row-actions'), button('Get Ollama ↗', () => bridge.openDocs('https://ollama.com/download'), 'pill primary small'), button('Check again', draw, 'pill small'))));
+      return;
+    }
+    const sizeOf = bytes => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+    const installedCard = append(node('div', 'settings-card'), node('h3', '', 'On this PC'));
+    if (!info.models.length) installedCard.append(node('p', 'muted', 'No models yet. Download one below.'));
+    for (const model of info.models) {
+      const voice = button(info.voiceModel === model.name ? '★ Voice model' : 'Use for voice', async () => { try { await result(bridge.ollamaVoice(model.name)); draw(); } catch (error) { toast(error.message); } }, 'pill small');
+      const remove = button('Remove', async () => { if (!confirm(`Remove ${model.name} from this PC?`)) return; try { await result(bridge.ollamaDelete(model.name)); draw(); } catch (error) { toast(error.message); } }, 'pill small');
+      installedCard.append(append(node('div', 'model-row'), append(node('div', 'details'), node('strong', '', model.name), node('small', 'muted', [sizeOf(model.bytes), model.parameters].filter(Boolean).join(' · '))), voice, remove));
+    }
+    const recommended = append(node('div', 'settings-card'), node('h3', '', 'Recommended'), node('p', 'muted', `This PC has ${info.memoryGB} GB of memory. Models marked ⚡ are quick enough for voice mode.`));
+    const have = new Set(info.models.map(m => m.name));
+    for (const model of info.recommended) {
+      const bar = node('div', 'pull-progress'); bar.hidden = true; const fill = node('i'); bar.append(fill);
+      const status = node('small', 'muted', `${model.about} · ${model.sizeGB} GB${model.fits ? '' : ' · may be slow on this PC'}`);
+      const action = button(have.has(model.name) ? 'Installed' : 'Download', async () => {
+        action.disabled = true; bar.hidden = false;
+        const stop = bridge.onOllamaProgress?.(p => { if (p.name !== model.name) return; if (p.total) { fill.style.width = `${Math.round(100 * p.completed / p.total)}%`; status.textContent = `${p.status} · ${sizeOf(p.completed)} of ${sizeOf(p.total)}`; } else status.textContent = p.status; });
+        try { await result(bridge.ollamaPull(model.name)); toast(`${model.name} is ready.`); draw(); }
+        catch (error) { status.textContent = error.message; action.disabled = false; }
+        finally { stop?.(); }
+      }, 'pill small');
+      if (have.has(model.name)) action.disabled = true;
+      recommended.append(append(node('div', 'model-row'), append(node('div', 'details'), node('strong', '', (model.voice ? '⚡ ' : '') + model.name), status, bar), action));
+    }
+    const custom = node('input', 'field'); custom.placeholder = 'Any model from ollama.com/library, e.g. mistral:7b'; custom.setAttribute('aria-label', 'Model to download');
+    const pullCustom = button('Download', async () => { const name = custom.value.trim(); if (!name) return; pullCustom.disabled = true; try { await result(bridge.ollamaPull(name)); toast(`${name} is ready.`); draw(); } catch (error) { toast(error.message); pullCustom.disabled = false; } }, 'pill small');
+    append(body, installedCard, recommended, append(node('div', 'settings-card'), node('h3', '', 'Other models'), append(node('div', 'model-entry'), custom, pullCustom)));
+  };
+  draw();
+}
+
+// 0.9.5: native Windows caption buttons replace the drawn ones; Ctrl+Shift+Space anywhere starts or stops voice.
+if (window.desktop?.platform === 'win32') document.body.classList.add('native-titlebar');
+bridge.onVoiceHotkey?.(() => { if (voice.active) voice.stop(); else if (setup.installed.length) voice.start(); else showConnection(); });

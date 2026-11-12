@@ -216,7 +216,8 @@ struct MacWorkspaceView: View {
             Button("Copy to another computer…") { desktop.copyingBot = bot.id; desktop.copyNotice = nil; desktop.panel = .computers }
         }
         Divider()
-        Button("Export Conversation…") { desktop.exportConversation(bot, app: app) }
+        Button("Export as Markdown…") { desktop.exportConversation(bot, app: app) }
+        Button("Export as PDF…") { desktop.exportConversation(bot, app: app, pdf: true) }
         if bot.isMain != true { Button("Delete Bot…", role: .destructive) { deleting = bot } }
     }
 
@@ -283,7 +284,7 @@ struct MacRosterRow: View {
         case .working: return "Thinking it through…"
         case .idle:
             // One clean line: no question-card block, no blank lines.
-            let clean = ChoicePrompt.split(latest).text
+            let clean = FollowUps.split(ChoicePrompt.split(latest).text).text
             return clean.split(separator: "\n").first.map { String($0) } ?? clean
         }
     }

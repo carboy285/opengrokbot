@@ -15,7 +15,7 @@ enum MacPanel: String, Identifiable {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "General", computer = "Computer", permissions = "Permissions", apiKeys = "API Keys", secureLogins = "Secure Logins", vault = "Vault", voice = "Voice", usage = "Usage & Billing", updates = "Updates"
+    case general = "General", computer = "Computer", permissions = "Permissions", apiKeys = "API Keys", secureLogins = "Secure Logins", vault = "Vault", voice = "Voice", localModels = "Local Models", usage = "Usage & Billing", updates = "Updates"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -26,6 +26,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .secureLogins: "person.badge.key"
         case .vault: "lock.square"
         case .voice: "waveform"
+        case .localModels: "cpu"
         case .usage: "chart.bar"
         case .updates: "arrow.down.circle"
         }
@@ -40,6 +41,8 @@ final class MacAppModel: ObservableObject {
     @Published var providerHealth: [CLIProvider:String] = [:]
     @Published var sendFeedback: [UUID:String] = [:]
     @Published var selectedID: UUID?
+    /// A message to scroll to and highlight (search results and pinned messages, 0.9.5).
+    @Published var jumpTo: UUID?
     @Published var panel: MacPanel?
     @Published var settingsTab = SettingsTab.general
     @Published var showSearch = false
@@ -391,13 +394,55 @@ final class MacAppModel: ObservableObject {
         if gateway != nil { panel = .remoteSettings } else { settingsTab = tab; panel = .settings }
     }
 
-    func exportConversation(_ bot: Bot, app: AppModel) {
+    /// 0.9.5: Markdown (readable anywhere) or PDF (paginated, for printing or sending).
+    func exportConversation(_ bot: Bot, app: AppModel, pdf: Bool = false) {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = "\(bot.name)-conversation.txt"
+        panel.allowedContentTypes = [pdf ? .pdf : (UTType(filenameExtension: "md") ?? .plainText)]
+        panel.nameFieldStringValue = "\(bot.name) conversation.\(pdf ? "pdf" : "md")"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try conversationText(for: bot, app: app).write(to: url, atomically: true, encoding: .utf8) }
-        catch { app.errorMessage = "The conversation could not be exported. Choose a writable folder and try again." }
+        let markdown = conversationMarkdown(for: bot, app: app)
+        if !pdf {
+            do { try markdown.write(to: url, atomically: true, encoding: .utf8) }
+            catch { app.errorMessage = "The conversation could not be exported. Choose a writable folder and try again." }
+            return
+        }
+        let text = (try? NSAttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? NSAttributedString(string: markdown)
+        let styled = NSMutableAttributedString(attributedString: text)
+        styled.addAttributes([.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.black], range: NSRange(location: 0, length: styled.length))
+        let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 10))
+        view.textStorage?.setAttributedString(styled); view.sizeToFit()
+        let info = NSPrintInfo.shared.copy() as? NSPrintInfo ?? NSPrintInfo()
+        info.jobDisposition = .save
+        info.dictionary().setObject(url, forKey: NSPrintInfo.AttributeKey.jobSavingURL as NSCopying)
+        info.horizontalPagination = .fit; info.verticalPagination = .automatic
+        let operation = NSPrintOperation(view: view, printInfo: info)
+        operation.showsPrintPanel = false; operation.showsProgressPanel = false
+        if !operation.run() { app.errorMessage = "The PDF could not be saved. Choose a writable folder and try again." }
+    }
+    func conversationMarkdown(for bot: Bot, app: AppModel) -> String {
+        "# \(bot.name)\n\n" + app.entries(for: bot).filter { $0.kind != .activity }.map { entry in
+            let label = entry.kind == .user ? "You" : (entry.senderName ?? bot.name)
+            let body = FollowUps.split(ChoicePrompt.split(entry.text).text).text
+            return "**\(label)** · \(entry.date.formatted(date: .abbreviated, time: .shortened))\n\n\(body)"
+        }.joined(separator: "\n\n---\n\n")
+    }
+
+    /// Settings → Copy diagnostics (0.9.5): versions, providers, voice settings and recent errors. No chats, keys or names of people.
+    func diagnostics(app: AppModel) -> String {
+        let info = Bundle.main.infoDictionary
+        let defaults = UserDefaults.standard
+        var lines = [
+            "OpenGrokBot \(info?["CFBundleShortVersionString"] as? String ?? "?") (build \(info?["CFBundleVersion"] as? String ?? "?"))",
+            "macOS \(ProcessInfo.processInfo.operatingSystemVersionString) · \(ProcessInfo.processInfo.activeProcessorCount) cores · \(Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())) GB",
+            "Providers: " + (installedCLIs.isEmpty ? "none found" : installedCLIs.map { "\($0.provider.name) \($0.version)" }.joined(separator: "; ")),
+            "Bots: \(app.workspace.bots.count) · messages: \(app.workspace.entries.count)",
+            "Voice: listening \(VoiceSettings.transcriber.rawValue), speaking \(VoiceSettings.speaker.rawValue), patience \(VoiceSettings.patience), quick model \(VoiceSettings.fastModel), layout \(VoiceSettings.layout.rawValue), Kokoro \(VoiceSettings.kokoroVoice)",
+            "Local voice: tts \(defaults.string(forKey: "localVoiceTTSDtype") ?? "default"), stt \(defaults.string(forKey: "localVoiceSTTModel") ?? "default"), device \(defaults.string(forKey: "localVoiceDevice") ?? "default"); last speed test: \(defaults.string(forKey: "lastVoiceSpeed") ?? "none")",
+            "Voice models: \(Self.voiceModels().map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", "))"
+        ]
+        let errors = runErrors.values.map { String($0.prefix(200)) }
+        lines.append("Recent errors: " + (errors.isEmpty ? "none" : errors.joined(separator: " | ")))
+        return lines.joined(separator: "\n")
     }
     func conversationText(for bot: Bot, app: AppModel) -> String {
         "OpenGrokBot — \(bot.name)\n\n" + app.entries(for: bot).map { entry in

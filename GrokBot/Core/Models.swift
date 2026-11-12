@@ -60,6 +60,8 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var detail: String? = nil
     /// A single emoji reaction the human added to this message.
     var reaction: String? = nil
+    /// Pinned by the human so it is easy to find again (0.9.5).
+    var pinned: Bool? = nil
     let date: Date
 
     init(botID: UUID, kind: Kind, text: String, id: UUID = UUID(), date: Date = Date()) {

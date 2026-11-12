@@ -283,7 +283,7 @@ struct RootView: View {
                         if latest?.senderBotID != nil {
                             Image(systemName: "arrow.left.arrow.right").font(.caption).foregroundStyle(.secondary)
                         }
-                        Text(ChoicePrompt.split(model.latest(for: bot)).text.split(separator: "\n").first.map { String($0) } ?? "")
+                        Text(FollowUps.split(ChoicePrompt.split(model.latest(for: bot)).text).text.split(separator: "\n").first.map { String($0) } ?? "")
                             .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }

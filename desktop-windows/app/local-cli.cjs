@@ -104,6 +104,12 @@ class EventParser {
     if(value.type==='turn.failed'||(value.type==='result'&&(value.is_error===true||value.status==='error')))return [...events,{type:'failed'}];
     if(typeof value.parent_tool_use_id==='string')return events;
     const item=value.item;
+    // 0.9.5: an answer sent in pieces (Codex agent-message deltas) is shown and spoken as it arrives.
+    const deltaType=String(value.type||value.msg?.type||'').toLowerCase(),deltaSource=value.type?value:(value.msg||{});
+    if(deltaType.includes('delta')&&!deltaType.includes('reasoning')&&(deltaType.includes('agent')||deltaType.includes('message')||deltaType==='item.delta')&&value.type!=='stream_event'){
+      const fragment=typeof deltaSource.delta==='string'?deltaSource.delta:typeof deltaSource.delta?.text==='string'?deltaSource.delta.text:null;
+      if(fragment!==null){const id=value.item_id||value.itemId||value.msg?.item_id||'answer';if(!this.parts.has(id))this.order.push(id);this.parts.set(id,(this.parts.get(id)||'')+fragment);this.text=this.order.map(x=>this.parts.get(x)).filter(Boolean).join('\n\n');return [...events,{type:'text',text:this.text}];}
+    }
     if((value.type==='item.completed'||value.type==='item.updated')&&item?.type==='agent_message'&&typeof item.text==='string')this.part(item.id||'answer',item.text);
     else if(value.type==='text'&&typeof value.part?.text==='string')this.part(value.part.id||'answer',value.part.text);
     else if(value.type==='stream_event'&&value.event?.delta?.type==='text_delta'&&typeof value.event.delta.text==='string')this.text+=value.event.delta.text;

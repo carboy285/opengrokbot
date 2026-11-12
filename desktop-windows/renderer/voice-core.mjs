@@ -1,7 +1,13 @@
 // Pure helpers for voice mode (no DOM), so they can be unit-tested in Node.
 
 export function speakable(raw) {
-  return String(raw ?? '')
+  // Follow-up chips are for the screen; a question's choices are read as options.
+  let value = String(raw ?? '').replace(/```suggestions[\s\S]*?(```|$)/g, ' ');
+  value = value.replace(/```choices[ \t]*\n([\s\S]*?)(```|$)/g, (_, body) => {
+    const options = body.split('\n').map(x => x.trim().replace(/^[-*•]+/, '').trim()).filter(x => x && x.toLowerCase() !== 'multiple');
+    return options.length ? ` Options: ${options.length > 1 ? options.slice(0, -1).join(', ') + ', or ' + options.at(-1) : options[0]}. ` : ' ';
+  });
+  return value
     .replace(/```[\s\S]*?(```|$)/g, ' (code omitted) ')
     .replace(/https?:\/\/\S+/g, ' link ')
     .replace(/[`*_#>|~]/g, '')
@@ -218,4 +224,35 @@ export function sentences(text, quickStart = false) {
     }
   }
   return pieces;
+}
+
+// ---- 0.9.5: follow-up suggestions and starters. Mirrors FollowUps in Swift. ----
+/** The message without its ```suggestions block, and up to three follow-ups (none while the block is unfinished). */
+export function splitSuggestions(text) {
+  const value = String(text ?? ''), start = value.indexOf('```suggestions');
+  if (start < 0) return { text: value, suggestions: [] };
+  const lineEnd = value.indexOf('\n', start);
+  if (lineEnd < 0) return { text: value.slice(0, start).trim(), suggestions: [] };
+  const end = value.indexOf('```', lineEnd + 1), body = value.slice(lineEnd + 1, end < 0 ? value.length : end);
+  const seen = new Set(), items = [];
+  for (const raw of body.split('\n')) {
+    const line = raw.trim().replace(/^[-*•\d.)\s]+/, '').trim();
+    if (!line || line.length > 90 || seen.has(line.toLowerCase())) continue;
+    seen.add(line.toLowerCase()); items.push(line); if (items.length === 3) break;
+  }
+  return { text: (value.slice(0, start) + (end < 0 ? '' : value.slice(end + 3))).trim(), suggestions: end < 0 ? [] : items };
+}
+const STARTERS = [
+  [['calendar', 'schedule', 'meeting'], ['What’s on my calendar this week?', 'Find a free hour tomorrow', 'Move my next meeting to Friday', 'Summarize today’s plans']],
+  [['mail', 'inbox', 'email'], ['What needs a reply today?', 'Summarize my unread email', 'Draft a polite follow-up', 'Find the last receipt I got']],
+  [['travel', 'trip', 'cruise', 'flight', 'vacation'], ['Plan a 3-day weekend trip', 'Find cheap flights next month', 'Compare two cruise options', 'Make a packing list']],
+  [['school', 'homework', 'study', 'class'], ['Help me study for a test', 'Explain this topic simply', 'Make a homework plan for tonight', 'Quiz me on my notes']],
+  [['news', 'brief', 'research'], ['Give me today’s brief', 'What changed in AI this week?', 'Research a topic for me', 'Summarize a long article']],
+  [['soccer', 'sport', 'practice', 'fitness', 'workout'], ['Plan this week’s practice', 'Make a warm-up routine', 'Track my progress', 'Ideas for a rest day']],
+  [['code', 'dev', 'programming', 'bug'], ['Explain this error', 'Review a function for bugs', 'Write a quick script', 'Plan a small feature']]
+];
+/** Ideas for an empty chat, from the Bot's name and job. */
+export function starters(name, purpose) {
+  const topic = `${name || ''} ${purpose || ''}`.toLowerCase();
+  return (STARTERS.find(([keys]) => keys.some(key => topic.includes(key))) || [null, ['What can you do for me?', 'Plan my week', 'Summarize a web page', 'Draft a message for me']])[1];
 }

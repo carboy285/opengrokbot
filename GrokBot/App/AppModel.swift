@@ -205,6 +205,12 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
+    func setPinned(_ pinned: Bool, for entryID: UUID) -> Bool {
+        guard let index = workspace.entries.firstIndex(where: { $0.id == entryID }) else { return false }
+        return commit { $0.entries[index].pinned = pinned ? true : nil }
+    }
+
+    @discardableResult
     func deleteEntry(_ id: UUID) -> Bool {
         guard workspace.entries.contains(where: { $0.id == id && $0.state != .streaming }) else { return false }
         return commit { $0.entries.removeAll { $0.id == id } }

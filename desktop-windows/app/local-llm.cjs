@@ -99,4 +99,56 @@ function run({ provider, base, prompt, model = '', onEvent = () => {}, timeout =
   return { done, cancel };
 }
 
-module.exports = { SERVERS, serverURL, visibleText, listModels, run };
+// ---- 0.9.5: Ollama model manager ----
+/** Models worth downloading, smallest first. `voice` marks the quick ones that suit voice mode. */
+const OLLAMA_RECOMMENDED = [
+  { name: 'llama3.2:3b', sizeGB: 2.0, minMemoryGB: 8, voice: true, about: 'Meta Llama 3.2 · quick, good for voice' },
+  { name: 'qwen3:4b', sizeGB: 2.6, minMemoryGB: 8, voice: true, about: 'Qwen 3 · quick and capable' },
+  { name: 'gemma3:4b', sizeGB: 3.3, minMemoryGB: 8, voice: true, about: 'Google Gemma 3 · quick, understands images' },
+  { name: 'llama3.1:8b', sizeGB: 4.9, minMemoryGB: 16, voice: false, about: 'Meta Llama 3.1 · stronger answers' },
+  { name: 'qwen3:8b', sizeGB: 5.2, minMemoryGB: 16, voice: false, about: 'Qwen 3 · stronger answers and tools' },
+  { name: 'gemma3:12b', sizeGB: 8.1, minMemoryGB: 24, voice: false, about: 'Google Gemma 3 · best quality here' }
+];
+const MODEL_NAME = /^[a-z0-9][a-z0-9._:\/-]{0,100}$/i;
+/** Installed Ollama models with sizes, or null when Ollama is not running. */
+async function ollamaModels(base, { fetchImpl = fetch } = {}) {
+  const origin = serverURL(base || SERVERS.ollama.url); if (!origin) return null;
+  try {
+    const value = await getJSON(origin + '/api/tags', fetchImpl, 3000);
+    return (value?.models || []).filter(m => typeof m?.name === 'string' && MODEL_NAME.test(m.name)).map(m => ({ name: m.name, bytes: Number(m.size) || 0, parameters: m.details?.parameter_size || '' }));
+  } catch { return null; }
+}
+/** Downloads a model, calling onProgress({status, completed, total}). Resolves when done. */
+async function ollamaPull(base, name, { fetchImpl = fetch, onProgress = () => {}, signal } = {}) {
+  const origin = serverURL(base || SERVERS.ollama.url);
+  if (!origin || !MODEL_NAME.test(String(name))) throw new Error('Choose a valid model name, like llama3.2:3b.');
+  let response;
+  try { response = await fetchImpl(origin + '/api/pull', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: name, stream: true }), signal }); }
+  catch { throw new Error(`Ollama isn’t running at ${origin}. Open Ollama, then try again.`); }
+  if (!response.ok) throw new Error(`Ollama could not download ${name} (HTTP ${response.status}). Check the name on ollama.com/library.`);
+  const decoder = new TextDecoder(); let pending = '';
+  for await (const chunk of response.body) {
+    pending += decoder.decode(chunk, { stream: true });
+    let index; while ((index = pending.indexOf('\n')) >= 0) {
+      const line = pending.slice(0, index); pending = pending.slice(index + 1);
+      let value; try { value = JSON.parse(line); } catch { continue; }
+      if (value.error) throw new Error(`Ollama: ${String(value.error).slice(0, 200)}`);
+      onProgress({ status: String(value.status || ''), completed: Number(value.completed) || 0, total: Number(value.total) || 0 });
+    }
+  }
+  return true;
+}
+async function ollamaDelete(base, name, { fetchImpl = fetch } = {}) {
+  const origin = serverURL(base || SERVERS.ollama.url);
+  if (!origin || !MODEL_NAME.test(String(name))) throw new Error('Invalid model name.');
+  const response = await fetchImpl(origin + '/api/delete', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: name }) });
+  if (!response.ok) throw new Error(`Ollama could not remove ${name} (HTTP ${response.status}).`);
+  return true;
+}
+/** The quickest installed model for voice: a recommended voice model if present, else the smallest. */
+function voicePick(models) {
+  const quick = OLLAMA_RECOMMENDED.filter(x => x.voice).map(x => x.name);
+  return models.find(m => quick.includes(m.name))?.name || [...models].sort((a, b) => a.bytes - b.bytes)[0]?.name || '';
+}
+
+module.exports = { SERVERS, serverURL, visibleText, listModels, run, OLLAMA_RECOMMENDED, ollamaModels, ollamaPull, ollamaDelete, voicePick };

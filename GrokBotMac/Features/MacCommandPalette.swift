@@ -34,11 +34,34 @@ struct MacCommandPalette: View {
                 close()
             })
         }
+        // 0.9.5: messages that match (newest first), or your pinned messages when nothing is typed. Choosing one jumps to it.
+        let open: (Entry) -> Void = { entry in
+            if let bot = app.workspace.bots.first(where: { $0.id == entry.botID }), bot.hidden == true, desktop.gateway == nil { _ = app.setHidden(false, for: bot) }
+            desktop.selectedID = entry.botID; desktop.jumpTo = entry.id; close()
+        }
+        let messages: [Entry] = needle.count >= 2
+            ? Array(app.workspace.entries.reversed().filter { $0.kind != .activity && $0.text.localizedCaseInsensitiveContains(needle) }.prefix(12))
+            : Array(app.workspace.entries.reversed().filter { $0.pinned == true }.prefix(6))
+        for entry in messages {
+            guard let bot = app.workspace.bots.first(where: { $0.id == entry.botID }) else { continue }
+            let clean = FollowUps.split(ChoicePrompt.split(entry.text).text).text.replacingOccurrences(of: "\n", with: " ")
+            var snippet = clean
+            if needle.count >= 2, let found = clean.range(of: needle, options: .caseInsensitive) {
+                let start = clean.index(found.lowerBound, offsetBy: -30, limitedBy: clean.startIndex) ?? clean.startIndex
+                snippet = (start > clean.startIndex ? "…" : "") + String(clean[start...])
+            }
+            result.append(Item(id: "message-" + entry.id.uuidString, title: String(snippet.prefix(90)),
+                               subtitle: "\(entry.kind == .user ? "You" : (entry.senderName ?? bot.name)) in \(bot.name) · \(entry.date.formatted(date: .abbreviated, time: .shortened))\(entry.pinned == true ? " · pinned" : "")",
+                               symbol: entry.pinned == true ? "pin.fill" : "text.magnifyingglass", bot: nil) { open(entry) })
+        }
         var actions: [(String, String, String, () -> Void)] = [
             ("New Bot", "Create a Bot", "plus", { desktop.panel = .newBot }),
             ("Computers…", "Look at another computer, or copy Bots between them", "desktopcomputer", { desktop.copyingBot = nil; desktop.copyNotice = nil; desktop.panel = .computers }),
             ("Settings…", "Preferences", "gearshape", { desktop.openSettings() }),
-            ("Keyboard shortcuts", "See every shortcut", "keyboard", { desktop.panel = .shortcuts })
+            ("Keyboard shortcuts", "See every shortcut", "keyboard", { desktop.panel = .shortcuts }),
+            ("Copy diagnostics", "Versions, providers, voice settings and recent errors, for a bug report", "stethoscope", {
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(desktop.diagnostics(app: app), forType: .string)
+            })
         ]
         if desktop.gateway == nil { actions.insert(("New group chat", "Chat with several Bots at once", "person.3", { desktop.panel = .newGroup }), at: 1) }
         for action in actions where needle.isEmpty || action.0.localizedCaseInsensitiveContains(needle) || action.1.localizedCaseInsensitiveContains(needle) {
@@ -53,7 +76,7 @@ struct MacCommandPalette: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(MacTheme.secondary)
-                    TextField("Search Bots and actions", text: $query).textFieldStyle(.plain).font(.system(size: 17)).focused($focused)
+                    TextField("Search Bots, messages and actions", text: $query).textFieldStyle(.plain).font(.system(size: 17)).focused($focused)
                         .onSubmit { run(index) }
                         .onKeyPress(.downArrow) { index = min(index + 1, max(items.count - 1, 0)); return .handled }
                         .onKeyPress(.upArrow) { index = max(index - 1, 0); return .handled }

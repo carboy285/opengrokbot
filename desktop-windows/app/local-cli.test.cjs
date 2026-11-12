@@ -23,3 +23,16 @@ test('Claude Code reports connected-apps problems and only pre-approves the conn
   assert.equal(on[on.indexOf('--allowedTools') + 1], 'mcp__opengrokbot-composio');
   assert.ok(!command('codex', null, 'p.txt', '', { allowConnectedApps: true }).includes('--allowedTools'));
 });
+
+test('Codex answers sent in pieces stream into the chat, then the final text wins', () => {
+  const { EventParser } = require('./local-cli.cjs');
+  const parser = new EventParser();
+  const texts = [];
+  for (const line of [
+    '{"type":"item.agent_message.delta","item_id":"m1","delta":"Hello"}',
+    '{"type":"item.agent_message.delta","item_id":"m1","delta":" there."}',
+    '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"Hello there!"}}'
+  ]) for (const event of parser.parse(line)) if (event.type === 'text') texts.push(event.text);
+  assert.deepEqual(texts, ['Hello', 'Hello there.', 'Hello there!']);
+  assert.equal(parser.text, 'Hello there!');
+});

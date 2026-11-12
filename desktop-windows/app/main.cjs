@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Tray, Menu, Notification, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Tray, Menu, Notification, protocol, globalShortcut } = require('electron');
 // 0.9.3: the local voice engine loads models and its runtime through this scheme (see local-voice.cjs).
 protocol.registerSchemesAsPrivileged([{ scheme: 'ogb-models', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 const { readFile, writeFile, mkdir, rename, readdir, lstat, stat, copyFile } = require('node:fs/promises');
@@ -438,6 +438,35 @@ async function startVMJob(requestID,bot,argv){
 function configureIPC() {
  const uuidLike=value=>typeof value==='string'&&/^[a-f0-9-]{36}$/i.test(value);
  handle('voice:mode',async(botID,on)=>setVoiceMode(botID,on===true));
+ handle('window:titlebar',async dark=>{if(process.platform==='win32'&&window&&!window.isDestroyed()){try{window.setTitleBarOverlay(dark?{color:'#0a0a0b',symbolColor:'#ececee'}:{color:'#f5f5f6',symbolColor:'#111111'});}catch{}}return true;});
+ handle('chat:pin',async(entryID,on)=>{await ensureState();const entry=state.entries.find(x=>x.id===entryID);if(!entry)throw new PublicError('That message is gone.');if(on===true)entry.pinned=true;else delete entry.pinned;await atomicJSON('preview-workspace.json',state);notify();return state;});
+ // Settings → Copy diagnostics (0.9.5): versions, providers, voice settings and recent errors. No chats, keys or names of people.
+ handle('diagnostics:get',async()=>{await ensureState();const os=require('node:os'),voiceSettings=await loadJSON('voice-settings.json',{});
+  const errors=Object.entries(settings.providerHealth||{}).filter(([,v])=>v?.state&&v.state!=='ready'&&v.state!=='configured').map(([k,v])=>`${k}: ${String(v.detail||'').slice(0,160)}`);
+  return [`OpenGrokBot ${app.getVersion()} (Windows ${os.release()}, Electron ${process.versions.electron})`,`${os.cpus()[0]?.model||'CPU'} · ${os.cpus().length} cores · ${Math.round(os.totalmem()/2**30)} GB`,
+   `Providers: ${installed.map(x=>`${x.name} ${x.version||''}`.trim()).join('; ')||'none found'}`,`Bots: ${state.bots.length} · messages: ${state.entries.length}`,
+   `Voice: listening ${voiceSettings.transcriber||'default'}, speaking ${voiceSettings.speaker||'default'}, patience ${voiceSettings.patience||'normal'}, quick model ${voiceSettings.fastModel!==false}, layout ${voiceSettings.layout||'card'}, Kokoro ${voiceSettings.kokoroVoice||'af_heart'}`,
+   `Local voice models: ${JSON.stringify(voiceSettings.localModels||'recommended')}; voice models: ${JSON.stringify(voiceSettings.voiceModels||{})}; last speed test: ${voiceSettings.lastSpeed||'none'}`,
+   `Provider problems: ${errors.join(' | ')||'none'}`].join('\n');});
+ // ---- 0.9.5: Ollama model manager ----
+ const llm=require('./local-llm.cjs'),ollamaBase=()=>llm.serverURL(settings.overrides?.ollama||llm.SERVERS.ollama.url);
+ handle('ollama:models',async()=>{await ensureState();const models=await llm.ollamaModels(ollamaBase());const memoryGB=Math.round(require('node:os').totalmem()/2**30);const voiceSettings=await loadJSON('voice-settings.json',{});
+  return {running:models!==null,base:ollamaBase(),models:models||[],memoryGB,voiceModel:voiceSettings.voiceModels?.ollama||'',recommended:llm.OLLAMA_RECOMMENDED.map(x=>({...x,fits:memoryGB>=x.minMemoryGB}))};});
+ handle('ollama:pull',async name=>{await ensureState();const send=value=>{if(window&&!window.isDestroyed())window.webContents.send('ollama:progress',{name:String(name),...value});};
+  try{await llm.ollamaPull(ollamaBase(),name,{onProgress:send});}catch(error){throw new PublicError(error.message);}
+  installed=await cli.discover(settings.overrides);notify();
+  // The first quick model you download becomes Ollama's voice-mode model.
+  const voiceSettings=await loadJSON('voice-settings.json',{});if(!voiceSettings.voiceModels?.ollama){const models=await llm.ollamaModels(ollamaBase())||[];voiceSettings.voiceModels={...(voiceSettings.voiceModels||{}),ollama:llm.voicePick(models)};await atomicJSON('voice-settings.json',voiceSettings);}
+  return true;});
+ handle('ollama:delete',async name=>{await ensureState();try{await llm.ollamaDelete(ollamaBase(),name);}catch(error){throw new PublicError(error.message);}installed=await cli.discover(settings.overrides);notify();return true;});
+ handle('ollama:voice',async name=>{if(typeof name!=='string'||name.length>120)throw new Error('Invalid model');const voiceSettings=await loadJSON('voice-settings.json',{});voiceSettings.voiceModels={...(voiceSettings.voiceModels||{}),ollama:name};await atomicJSON('voice-settings.json',voiceSettings);return true;});
+ // Links in Bot replies open in the default browser: http(s) only, no credentials, bounded length.
+ handle('link:open',async address=>{let url;try{url=new URL(String(address));}catch{throw new PublicError('That link is not valid.');}if(!['http:','https:'].includes(url.protocol)||url.username||url.password||String(address).length>2000)throw new PublicError('Only web links can be opened.');await shell.openExternal(url.href);return true;});
+ // Images a Bot shows from its own folder (screenshots, charts). Nothing outside that folder is read.
+ handle('bot:image',async(botID,file)=>{await ensureState();const bot=state.bots.find(x=>x.id===botID);if(!bot||typeof file!=='string'||file.length>500)return null;
+  const root=path.resolve(botDirectory(bot.id)),target=path.resolve(root,file.replace(/^file:\/\//,''));
+  if(target!==root&&!target.startsWith(root+path.sep))return null;const type={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp'}[path.extname(target).toLowerCase()];if(!type)return null;
+  try{const info=await stat(target);if(!info.isFile()||info.size>8_000_000)return null;return `data:${type};base64,${(await readFile(target)).toString('base64')}`;}catch{return null;}});
  handle('localvoice:status',async()=>{const plan=await localVoicePlan();voiceStore||=localVoice.createStore({root:voiceModelsRoot()});return {...plan,installed:await voiceStore.installed(),voices:localVoice.KOKORO_VOICES,memoryGB:Math.round(require('node:os').totalmem()/2**30),cores:require('node:os').cpus().length};});
  handle('localvoice:choose',async choice=>{const plan=await localVoicePlan();const next={tts:{...plan.tts},stt:{...plan.stt}};
   if(choice?.tts?.dtype&&['q8','fp16','fp32','q4'].includes(choice.tts.dtype))next.tts.dtype=choice.tts.dtype;
@@ -459,7 +488,8 @@ function configureIPC() {
   return engineCall(`OGBLocalVoice.transcribe(${JSON.stringify(samples)},${JSON.stringify({language:String(language||'en').slice(0,2)})})`);});
  // Times the loaded models here; with compare=true, also tries the graphics chip and keeps the faster one.
  handle('localvoice:benchmark',async(listening,compare)=>{
-  const run=async()=>{const plan=await localVoicePlan();await engineCall(`OGBLocalVoice.loadTTS(${JSON.stringify(plan.tts)})`);if(listening)await engineCall(`OGBLocalVoice.loadSTT(${JSON.stringify(plan.stt)})`);return {...await engineCall('OGBLocalVoice.benchmark()'),device:plan.tts.device};};
+  const run=async()=>{const plan=await localVoicePlan();await engineCall(`OGBLocalVoice.loadTTS(${JSON.stringify(plan.tts)})`);if(listening)await engineCall(`OGBLocalVoice.loadSTT(${JSON.stringify(plan.stt)})`);const measured={...await engineCall('OGBLocalVoice.benchmark()'),device:plan.tts.device};
+   const saved=await loadJSON('voice-settings.json',{});saved.lastSpeed=`speaking ${measured.tts?.realTimeFactor}x on ${measured.device}, ${measured.threads} threads${measured.stt?`, listening ${measured.stt.realTimeFactor}x`:''}`;await atomicJSON('voice-settings.json',saved);return measured;};
   const choose=async device=>{const saved=await loadJSON('voice-settings.json',{});const plan=await localVoicePlan();saved.localModels={tts:{...plan.tts,device},stt:{...plan.stt,device}};await atomicJSON('voice-settings.json',saved);};
   if(!compare)return run();
   await choose('wasm');const processor=await run();
@@ -645,11 +675,19 @@ function configureIPC() {
   handle('composio:refresh',async()=>{await ensureState();if(composioConfiguration){try{connectedTools=await composio.toolkits(composioConfiguration.key,composioConfiguration.session.session_id);}catch(error){throw new PublicError(error.message);}}return composioStatus();});
   handle('composio:link',async slug=>{if(!composioConfiguration||!connectedTools.some(x=>x.slug===slug&&x.enabled))throw new PublicError('Choose a tool in your configured project.');try{await shell.openExternal(await composio.link(composioConfiguration.key,composioConfiguration.session.session_id,slug));}catch(error){throw new PublicError(error.message.startsWith('Composio')?error.message:'The authorization page could not be opened.');}});
   handle('composio:remove',async()=>{if(composioBusy)throw new PublicError('Wait for Composio setup to finish.');if(active.size||pendingBots.size)throw new PublicError('Stop responses before changing tool access.');requireVault();await atomicJSON('composio.encrypted.json',null);composioConfiguration=null;connectedTools=[];return composioStatus();});
-  handle('workspace:export', async text => {
+  // 0.9.5: Markdown, or PDF made from the rendered chat (scripts off, no network) in a hidden window.
+  handle('workspace:export', async (text, format = 'md', name = 'OpenGrokBot conversation') => {
     if (typeof text !== 'string' || text.length > 32 * 1024 * 1024) throw new Error('Invalid export');
-    const result = await dialog.showSaveDialog(window, { defaultPath: 'OpenGrokBot-conversation.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
+    const safeName = String(name).replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80) || 'OpenGrokBot conversation';
+    const pdf = format === 'pdf';
+    const result = await dialog.showSaveDialog(window, { defaultPath: `${safeName}.${pdf ? 'pdf' : format === 'txt' ? 'txt' : 'md'}`, filters: [pdf ? { name: 'PDF', extensions: ['pdf'] } : format === 'txt' ? { name: 'Text file', extensions: ['txt'] } : { name: 'Markdown', extensions: ['md'] }] });
     if (result.canceled) return false;
-    await writeFile(result.filePath, text, { encoding: 'utf8', mode: 0o600 });
+    if (!pdf) { await writeFile(result.filePath, text, { encoding: 'utf8', mode: 0o600 }); return true; }
+    const page = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>body{font:12px/1.55 'Segoe UI',sans-serif;color:#111;margin:28px}h1{font-size:20px}.who{font-weight:600;margin-top:18px;color:#555;font-size:11px}.msg{margin:4px 0 0}pre{background:#f4f4f6;padding:10px;border-radius:8px;white-space:pre-wrap}code{font-family:Consolas,monospace}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:4px 8px}img{max-width:100%}</style></head><body>${text}</body></html>`;
+    const printer = new BrowserWindow({ show: false, webPreferences: { partition: 'opengrokbot-pdf-export', javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    printer.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
+    try { await printer.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(page)); await writeFile(result.filePath, await printer.webContents.printToPDF({ printBackground: true, pageSize: 'Letter' })); }
+    finally { printer.destroy(); }
     return true;
   });
   handle('docs:open', async url => { if (!documentation.has(url)) throw new Error('Unapproved URL'); await shell.openExternal(url); });
@@ -784,7 +822,9 @@ app.whenReady().then(() => {
    catch(error){return new Response(String(error?.message||'Download failed'),{status:502,headers:{'Access-Control-Allow-Origin':'*'}});}
   });
   ipcMain.on('localvoice:progress',(event,value)=>{if(voiceEngine&&event.sender===voiceEngine.webContents&&window&&!window.isDestroyed())window.webContents.send('localvoice:progress',{kind:value?.kind==='stt'?'stt':'tts',loaded:Number(value?.loaded)||0,total:Number(value?.total)||0});});
-  window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, frame: false, backgroundColor: '#111111', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  // 0.9.5: the native Windows caption buttons (minimize, maximize, close) over our own dark title area.
+  const nativeTitleBar = process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0a0a0b', symbolColor: '#ececee', height: 40 } } : { frame: false };
+  window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, ...nativeTitleBar, backgroundColor: '#0f0f10', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   window.on('close',event=>{if(cloud.active&&!quitting){event.preventDefault();window.hide();}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('render-process-gone',()=>denyAllApprovals());window.on('closed',()=>{denyAllApprovals();voiceEngine?.destroy();voiceEngine=null;});
@@ -793,7 +833,10 @@ app.whenReady().then(() => {
   window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(contents === window?.webContents && (permission === 'clipboard-sanitized-write' || (permission === 'media' && Array.isArray(details?.mediaTypes) && details.mediaTypes.length > 0 && details.mediaTypes.every(type => type === 'audio')))));
   window.webContents.session.setPermissionCheckHandler((contents, permission) => contents === window?.webContents && (permission === 'media' || permission === 'clipboard-sanitized-write'));
   window.loadFile(rendererFile);
+  // Ctrl+Shift+Space anywhere starts (or stops) voice with the open Bot.
+  try { globalShortcut.register('Control+Shift+Space', () => { if (!window || window.isDestroyed()) return; if (!window.isVisible()) window.show(); if (window.isMinimized()) window.restore(); window.focus(); window.webContents.send('voice:hotkey'); }); } catch {}
   (async()=>{try{await ensureState();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
 });
+app.on('will-quit',()=>{try{globalShortcut.unregisterAll();}catch{}});
 app.on('before-quit',()=>{quitting=true;localBrowsers.closeAll();mirror.stop();cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
 app.on('window-all-closed', () => {if(!cloud.active)app.quit();});
