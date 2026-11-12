@@ -2,6 +2,7 @@ const {spawn}=require('node:child_process');const {StringDecoder}=require('node:
 const cli=require('./local-cli.cjs');
 const valid=value=>typeof value==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9_.\/:@+-]{0,199}$/.test(value);
 async function listModels(installation){
+ if(cli.isLocal(installation.provider)){const models=await require('./local-llm.cjs').listModels(installation.path,{timeout:4000});return (models||[]).filter(valid).map(id=>({id,name:id}));}
  if(installation.provider==='opencode'){
   const response=await cli.capture(installation,['models'],12000,262144);
   return response.exit===0?[...new Set(response.text.split(/\r?\n/).filter(x=>x.includes('/')&&valid(x)))].sort().slice(0,1000).map(id=>({id,name:id})):[];

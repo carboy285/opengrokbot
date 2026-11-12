@@ -270,7 +270,13 @@ function renderInspector(){
     const check=node('input');check.type='checkbox';check.checked=!!choice;check.disabled=busy||(!installed&&!choice);check.setAttribute('aria-label',`Enable ${provider.name}`);
     check.addEventListener('change',()=>{const value=structuredClone(config);if(check.checked){value.providers.push({provider:provider.id,model:''});value.activeProvider||=provider.id;}else{value.providers=value.providers.filter(x=>x.provider!==provider.id);if(value.activeProvider===provider.id)value.activeProvider=value.providers[0]?.provider;}configureBot(bot,value);});
     const label=append(node('label','provider-label'),check,node('strong','',provider.name));card.append(label);
-    if(!installed)append(card,node('small','muted','Not installed on this device'),button('Set up',()=>showConnection()));
+    if(!installed&&provider.local){
+     // Ollama and LM Studio: a local server, not a CLI. Show where the app looks and let people change it.
+     const address=node('input','field');address.value=provider.id==='ollama'?'http://127.0.0.1:11434':'http://127.0.0.1:1234';address.setAttribute('aria-label',`${provider.name} address`);
+     append(card,node('small','muted',`Not running. Open ${provider.name} and start its server${provider.id==='ollama'?'':' (Developer tab)'}, then check again.`),address,
+      append(node('div','row-actions'),button('Check again',async()=>{try{setup=await result(bridge.setupServer(provider.id,address.value));inspectorSignature='';renderInspector();toast(setup.installed.some(x=>x.provider===provider.id)?`${provider.name} found.`:`${provider.name} isn’t answering at that address yet.`);}catch(error){toast(error.message);}},'pill small'),button(`Get ${provider.name} ↗`,()=>bridge.openDocs(provider.guide),'pill small')));
+    }
+    else if(!installed)append(card,node('small','muted','Not installed on this device'),button('Set up',()=>showConnection()));
     if(choice){
      const models=modelCatalogs.get(provider.id)||[];
      if(models.length){const picker=node('select','field');picker.setAttribute('aria-label',`${provider.name} model`);const options=[{id:'',name:'CLI default'},...models];if(choice.model&&!models.some(x=>x.id===choice.model))options.push({id:choice.model,name:choice.model});for(const model of options){const option=node('option','',model.name);option.value=model.id;picker.append(option);}picker.value=choice.model;picker.disabled=busy;picker.addEventListener('change',()=>saveModel(picker.value));card.append(picker);}
@@ -477,8 +483,11 @@ $('#draft').addEventListener('paste',async event=>{
 const voice = createVoice({
   get bridge() { return window.desktop || {}; }, result, toast, currentBot,
   latestReply: bot => { const entry = entries(bot).findLast(x => x.kind === 'bot'); return entry ? { id: entry.id, text: entry.text, finished: entry.state !== 'streaming' && !running.has(bot.id) } : null; },
+  activitySince: (bot, since) => entries(bot).filter(x => x.kind === 'activity' && Date.parse(x.date || 0) >= since - 500).map(x => ({ id: x.id, text: x.text })),
   sendText: (bot, text) => submitMessage(bot, text, undefined, []),
-  openSettings: () => showSettings('Voice')
+  openSettings: () => showSettings('Voice'),
+  avatar: bot => avatar(bot),
+  openBot: id => { if (workspace.bots.some(x => x.id === id)) selectBot(id); }
 });
 $('#voice-button').addEventListener('click', () => { if (!window.desktop) { toast('Voice mode is available in the installed app.'); return; } if (!setup.installed.length) { showConnection(); return; } voice.start(); });
 $('#composer').addEventListener('submit',event=>{event.preventDefault();const bot=currentBot(),text=$('#draft').value.trim();if(!bot||(!text&&!(pendingFiles.get(bot.id)||[]).length)||running.has(bot.id))return;if(!window.desktop||!setup.installed.length){showConnection();return;}submitMessage(bot,text,pendingSends.get(bot.id)?.text===text?pendingSends.get(bot.id).id:undefined);});

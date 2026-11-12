@@ -101,4 +101,13 @@ function pageSummary(json){
  if(page.loadNote)line+=' (partly loaded)';
  return line;
 }
-module.exports={parse,instructions,connectedAppsNote,apply,begin,finish,group,MAX_STEPS,STEP_LIMIT_MESSAGE,RETRY_HINT,pageSummary};
+/** Added to a Bot's instructions while its voice mode is open: replies are heard, not read. Mirrors BotTeamwork.voiceStyle in Swift. */
+const VOICE_STYLE='\nVOICE MODE: The human is talking to you out loud and hears your reply spoken by a voice. Talk like a person on a call: usually one to three short sentences, warm and natural, with contractions. Lead with the answer. No lists, headings, tables, code, emoji, links or markdown, and say numbers, dates and symbols the way you would say them aloud. If more detail would help, give the gist and offer to go deeper. Ask at most one short question at a time. App operations (opengrokbot-action blocks) still work as usual.';
+/** The quicker model a provider uses in voice mode. `custom` is the human's own choice for that provider; '' keeps the chat model. */
+function voiceModel(provider,chatModel,custom){
+ if(typeof custom==='string'&&custom.trim())return custom.trim();
+ if(provider==='claude')return 'haiku';
+ if(provider==='gemini')return 'gemini-2.5-flash';
+ return chatModel||'';
+}
+module.exports={VOICE_STYLE,voiceModel,parse,instructions,connectedAppsNote,apply,begin,finish,group,MAX_STEPS,STEP_LIMIT_MESSAGE,RETRY_HINT,pageSummary};

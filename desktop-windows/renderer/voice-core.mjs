@@ -142,3 +142,50 @@ export class Vad {
     return null;
   }
 }
+
+// ---- 0.9.3: turn-taking that waits for you, and something to hear while a Bot works. Mirrors VoiceTurns in Swift. ----
+
+/** Milliseconds of quiet before what you said is sent, by the patience setting. */
+export function silenceFor(patience) { return patience === 'quick' ? 550 : patience === 'relaxed' ? 1300 : 800; }
+
+const TRAILING = new Set(['and', 'or', 'but', 'so', 'because', 'cause', 'um', 'uh', 'er', 'like', 'the', 'a', 'an', 'to', 'of', 'for', 'with', 'my', 'your', 'if', 'then', 'that', 'which', 'when', 'about', 'also', 'actually', 'is', 'are', 'was', 'i', "i'm", 'we', 'and,', 'in', 'on', 'at', 'just', 'maybe', 'could', 'can', 'should', 'would', 'what', 'how', 'where']);
+
+/** True when what you said so far sounds unfinished (a trailing "and", "um", a comma), so the app keeps listening a little longer. */
+export function continuesThought(text) {
+  const clean = String(text ?? '').trim().toLowerCase();
+  if (!clean) return false;
+  if (/[,;:\-–—]$/.test(clean) || clean.endsWith('...') || clean.endsWith('…')) return true;
+  if (/[.?!]$/.test(clean)) return false;
+  const last = clean.split(/\s+/).pop().replace(/[^a-z']/g, '');
+  return TRAILING.has(last);
+}
+
+/** Resamples microphone audio to 16 kHz mono for Whisper. */
+export function resample16k(samples, sampleRate) {
+  const ratio = Math.max(1, sampleRate / 16000), count = Math.floor(samples.length / ratio), out = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const start = Math.floor(i * ratio), end = Math.min(samples.length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0; for (let j = start; j < end; j++) sum += samples[j];
+    out[i] = sum / (end - start);
+  }
+  return out;
+}
+
+const ACKS = ['Mm-hm, one sec.', 'Okay, give me a moment.', 'Sure, let me check.', 'Got it. One moment.', 'Okay, thinking.'];
+/** A short spoken acknowledgement while the Bot is still starting its answer. */
+export function acknowledgement(seed = Math.random()) { return ACKS[Math.floor(Math.abs(seed) * ACKS.length) % ACKS.length]; }
+
+/** What to say out loud for a tool step, or '' to stay quiet. Takes the step's chat text. */
+export function stepPhrase(text) {
+  const first = String(text ?? '').split('\n').find(line => line.trim()) || '';
+  const lower = first.toLowerCase();
+  if (!first || /couldn|could not|failed|declined|not sent|stopped/.test(lower)) return '';
+  if (lower.startsWith('linux vm result')) return 'Running that on the computer.';
+  const asked = /^queued message · (.+)$/i.exec(first.trim());
+  if (asked) return `Asking ${asked[1]}.`;
+  if (lower.startsWith('read ')) return 'Reading a page.';
+  if (lower.includes('search')) return 'Searching the web.';
+  if (lower.includes('calendar') || lower.includes('event')) return 'Checking your calendar.';
+  if (lower.includes('mail') || lower.includes('email')) return 'Looking at your email.';
+  return '';
+}

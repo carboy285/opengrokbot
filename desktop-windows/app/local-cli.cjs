@@ -11,8 +11,13 @@ const providers = [
   { id:'claude',name:'Claude Code',install:'npm install -g @anthropic-ai/claude-code',login:'claude',guide:'https://code.claude.com/docs/en/setup',package:'@anthropic-ai/claude-code' },
   { id:'grok',name:'Grok Build',install:null,login:'grok',guide:'https://github.com/xai-org/grok-build#installing-the-released-binary' },
   { id:'opencode',name:'OpenCode',install:'npm install -g opencode-ai',login:'opencode auth login',guide:'https://opencode.ai/docs/',package:'opencode-ai' },
-  { id:'gemini',name:'Gemini CLI',install:'npm install -g @google/gemini-cli',login:'gemini',guide:'https://geminicli.com/docs/get-started/installation/',package:'@google/gemini-cli' }
+  { id:'gemini',name:'Gemini CLI',install:'npm install -g @google/gemini-cli',login:'gemini',guide:'https://geminicli.com/docs/get-started/installation/',package:'@google/gemini-cli' },
+  // 0.9.3: self-hosted models. No CLI: the app talks to their local server (see local-llm.cjs).
+  { id:'ollama',name:'Ollama',install:null,login:'ollama pull llama3.2',guide:'https://ollama.com/download',local:true },
+  { id:'lmstudio',name:'LM Studio',install:null,login:'Load a model and start the server in LM Studio',guide:'https://lmstudio.ai/',local:true }
 ];
+const localLLM=require('./local-llm.cjs');
+const isLocal=id=>providers.some(x=>x.id===id&&x.local);
 function provider(id) { const value=providers.find(x=>x.id===id);if(!value)throw new Error('Unknown CLI');return value; }
 function directories() {
   const home=os.homedir(); const values=(process.env.PATH||process.env.Path||'').split(path.delimiter).filter(Boolean);
@@ -41,6 +46,7 @@ function invocation(file, definition) {
 }
 function environment(extra={}) {return {...process.env,PATH:directories().join(path.delimiter),...extra};}
 function capture(installation,args,timeout=4000,limit=4096) {
+  if(isLocal(installation.provider))return localLLM.listModels(installation.path).then(models=>models===null?{exit:1,text:''}:{exit:0,text:models.join('\n').slice(0,limit)});
   return new Promise(resolve=>{
     let child, output='', done=false;
     const finish=(exit)=>{if(done)return;done=true;clearTimeout(timer);resolve({exit,text:output.slice(0,limit)});};
@@ -55,7 +61,12 @@ function capture(installation,args,timeout=4000,limit=4096) {
 }
 async function discover(overrides={}) {
   const result=[];
-  for(const definition of providers) {
+  for(const definition of providers.filter(x=>x.local)) {
+    const base=localLLM.serverURL(overrides[definition.id]||localLLM.SERVERS[definition.id].url);
+    const models=base?await localLLM.listModels(base,{timeout:1200}):null;
+    if(models!==null)result.push({id:definition.id+':'+base,provider:definition.id,name:definition.name,path:base,version:`${models.length} model${models.length===1?'':'s'} · ${base.replace(/^https?:\/\//,'')}`});
+  }
+  for(const definition of providers.filter(x=>!x.local)) {
     const extensions=process.platform==='win32'?['.exe','.cmd','']:[''];
     const candidates=overrides[definition.id]?[overrides[definition.id]]:directories().flatMap(dir=>extensions.map(ext=>path.join(dir,definition.id+ext)));
     for(const file of candidates) {
@@ -69,9 +80,10 @@ async function discover(overrides={}) {
 }
 /** The name connected apps (Composio) are registered under in each CLI. */
 const CONNECTED_APPS_SERVER='opengrokbot-composio';
-function command(id,session,promptFile,model='',{allowConnectedApps=false}={}) {
+function command(id,session,promptFile,model='',{allowConnectedApps=false,fast=false}={}) {
   let args=[];
-  if(id==='codex') {args=['exec','--sandbox','read-only'];if(session)args.push('resume',session);args.push('--json','--skip-git-repo-check','-');}
+  // Voice mode asks Codex to think less, which is most of its wait.
+  if(id==='codex') {args=['exec','--sandbox','read-only'];if(fast)args.push('-c','model_reasoning_effort=low');if(session)args.push('resume',session);args.push('--json','--skip-git-repo-check','-');}
   else if(id==='claude'){args=['-p','--output-format','stream-json','--verbose','--include-partial-messages'];if(allowConnectedApps)args.push('--allowedTools','mcp__'+CONNECTED_APPS_SERVER);if(session)args.push('--resume',session);}
   else if(id==='grok'){args=['--prompt-file',promptFile,'--output-format','streaming-messages-json','--include-partial-messages'];if(session)args.push('--resume',session);}
   else if(id==='opencode'){args=['run','--format','json'];if(session)args.push('--session',session);}
@@ -103,7 +115,8 @@ class EventParser {
   }
   part(id,text){if(!this.parts.has(id))this.order.push(id);this.parts.set(id,text);this.text=this.order.map(x=>this.parts.get(x)).join('\n\n');}
 }
-function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',timeout=600000,env={},allowConnectedApps=false}) {
+function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',timeout=600000,env={},allowConnectedApps=false,fast=false}) {
+  if(isLocal(installation.provider))return localLLM.run({provider:installation.provider,base:installation.path,prompt,model,onEvent,timeout});
   let child, cancelled=false, timedOut=false, cancelTimer;
   const cancel=(immediately=false)=>{cancelled=true;if(child&&child.exitCode===null){if(immediately){child.kill('SIGKILL');return;}if(!child.killed){child.kill('SIGINT');cancelTimer=setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},2000);cancelTimer.unref();}}};
   const done=(async()=>{
@@ -119,7 +132,7 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',t
       return await new Promise((resolve,reject)=>{
         const timer=setTimeout(()=>{timedOut=true;cancel();},timeout);timer.unref();
         const clean=()=>{clearTimeout(timer);clearTimeout(cancelTimer);};
-        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile,model,{allowConnectedApps:!!mcpURL&&allowConnectedApps===true}),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment,...env}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
+        child=spawn(call.executable,[...call.prefix,...command(installation.provider,session,promptFile,model,{allowConnectedApps:!!mcpURL&&allowConnectedApps===true,fast}),...mcp.arguments],{cwd:directory,env:environment({...call.extraEnv,...mcp.environment,...env}),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
         const decoder=new StringDecoder('utf8');
         const consume=line=>{for(const event of parser.parse(line)){if(event.type==='failed')protocolFailed=true;onEvent(event);}};
         child.stdout.on('data',data=>{
@@ -144,4 +157,4 @@ function runCLI({installation,prompt,session,directory,onEvent,mcpURL,model='',t
   })();
   return {done,cancel};
 }
-module.exports={environment,providers,discover,capture,command,EventParser,runCLI,invocation,CONNECTED_APPS_SERVER};
+module.exports={environment,providers,discover,capture,command,EventParser,runCLI,invocation,isLocal,CONNECTED_APPS_SERVER};

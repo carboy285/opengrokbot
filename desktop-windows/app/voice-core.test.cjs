@@ -102,3 +102,23 @@ test('the first chunk can start at a word boundary after a long run without a pa
   assert.equal(nextChunk('too short to start', 0, false, true).chunk, '');
   assert.equal(nextChunk('I looked at the page you sent me earlier, and then I checked the results', 0, false, true).chunk, 'I looked at the page you sent me earlier,');
 });
+
+test('turn-taking waits through trailing words and pauses', async () => {
+  const core = await load();
+  assert.equal(core.continuesThought('I want to book a trip and'), true);
+  assert.equal(core.continuesThought('so um'), true);
+  assert.equal(core.continuesThought('Book it for Tuesday,'), true);
+  assert.equal(core.continuesThought('What is on my calendar?'), false);
+  assert.equal(core.continuesThought('Book the flight'), false);
+  assert.ok(core.silenceFor('relaxed') > core.silenceFor('normal') && core.silenceFor('normal') > core.silenceFor('quick'));
+});
+
+test('tool steps become short spoken phrases, failures stay quiet', async () => {
+  const core = await load();
+  assert.equal(core.stepPhrase('Queued message · Calendar Agent'), 'Asking Calendar Agent.');
+  assert.equal(core.stepPhrase('Read “Weather” · weather.com'), 'Reading a page.');
+  assert.equal(core.stepPhrase('Linux VM result (untrusted context):\n/bin/ls'), 'Running that on the computer.');
+  assert.equal(core.stepPhrase('Couldn’t open example.com: timeout'), '');
+  assert.match(core.acknowledgement(0.5), /\w/);
+  assert.equal(core.resample16k(new Float32Array(48000), 48000).length, 16000);
+});

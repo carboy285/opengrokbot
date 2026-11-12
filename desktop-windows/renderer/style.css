@@ -304,3 +304,58 @@ body{-webkit-font-smoothing:antialiased;letter-spacing:-.003em}
 .message-body .stack>.bubble,.user .message-body .stack>.bubble{max-width:100%}
 :root{--avatar-white:#fff;--avatar-white-ink:#111}:root[data-theme=light]{--avatar-white:#111;--avatar-white-ink:#fff}
 .conversation::before{content:'';position:absolute;top:0;left:0;right:12px;height:74px;background:linear-gradient(var(--bg) 35%,transparent);z-index:1;pointer-events:none}
+
+/* ===== 0.9.3 voice mode: card, full screen and mini pill; stays on when you switch Bots ===== */
+.voice-head{display:flex;align-items:center;gap:6px;cursor:grab;touch-action:none}
+.voice-who{display:flex;align-items:center;gap:8px;min-width:0;flex:1;text-align:left;border-radius:99px;padding:2px 8px 2px 2px}
+.voice-who:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.voice-who .voice-face{--size:24px}
+.voice-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.voice-status{font-size:12px;color:var(--muted);white-space:nowrap}
+.voice-head .voice-size,.voice-head .voice-min{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--muted)}
+.voice-head .voice-size:hover,.voice-head .voice-min:hover{background:color-mix(in srgb,var(--text) 9%,transparent);color:var(--text)}
+.voice-orb{transform:scale(calc(1 + var(--pulse,0) * .12));transition:transform .08s linear,box-shadow .2s}
+.voice-overlay[data-holding="true"] .voice-orb{box-shadow:0 0 0 4px color-mix(in srgb,var(--bot-accent,#9355ff) 45%,transparent)}
+.voice-captions{display:grid;gap:4px}
+.voice-captions[hidden]{display:none}
+.voice-you,.voice-bot{margin:0;font-size:13px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.voice-you{color:var(--muted)}.voice-bot{color:var(--text)}
+.voice-you[hidden],.voice-bot[hidden]{display:none}
+.voice-hint{flex:1;text-align:center;font-size:11px;color:var(--faint)}
+.voice-pill{display:none}
+/* Mini: a small pill above the message box. Voice keeps listening and speaking. */
+.voice-overlay[data-layout="mini"]{top:auto;bottom:92px;left:auto;right:24px;justify-content:flex-end;padding:0}
+.voice-overlay[data-layout="mini"] .voice-card{display:none}
+.voice-overlay[data-layout="mini"] .voice-pill{display:flex;pointer-events:auto;align-items:center;gap:4px;padding:5px 6px 5px 5px;border-radius:99px;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(20px);border:1px solid var(--line);box-shadow:0 8px 28px #0006;animation:ogb-rise .18s ease-out}
+.voice-pill-who{display:flex;align-items:center;gap:8px;padding:2px 10px 2px 2px;border-radius:99px;font-size:13px}
+.voice-pill-who:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.voice-pill-who .voice-face{--size:26px}
+.voice-pill-wave{display:inline-flex;gap:2px;align-items:center;height:16px}
+.voice-pill-wave i{width:3px;height:16px;border-radius:2px;background:var(--bot-accent,#9355ff);transform:scaleY(.3);transition:transform .08s linear}
+.voice-pill-status{color:var(--muted);font-size:12px;min-width:56px}
+.voice-pill-open,.voice-pill-end{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--muted)}
+.voice-pill-open:hover{background:color-mix(in srgb,var(--text) 9%,transparent);color:var(--text)}
+.voice-pill-end{background:#eb3d3d;color:#fff}
+/* Full screen: a calm stage with a big orb, large captions and the controls along the bottom. */
+.voice-overlay[data-layout="full"]{top:0;bottom:0;padding:0;background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(30px);pointer-events:auto;z-index:60;animation:ogb-fade .2s ease-out}
+.voice-overlay[data-layout="full"] .voice-card{width:100%;height:100%;max-width:none;border-radius:0;border:0;background:none;box-shadow:none;backdrop-filter:none;grid-template-rows:auto 1fr auto auto;padding:18px 28px 28px;transform:none!important}
+.voice-overlay[data-layout="full"] .voice-grip{display:none}
+.voice-overlay[data-layout="full"] .voice-head{cursor:default;max-width:900px;width:100%;justify-self:center}
+.voice-overlay[data-layout="full"] .voice-who .voice-face{--size:30px}
+.voice-overlay[data-layout="full"] .voice-name{font-size:15px}
+.voice-overlay[data-layout="full"] .voice-top{flex-direction:column;justify-content:center;gap:34px;cursor:default}
+.voice-overlay[data-layout="full"] .voice-orb{width:180px;height:180px;gap:14px;box-shadow:0 0 calc(30px + var(--pulse,0) * 60px) color-mix(in srgb,var(--bot-accent,#9355ff) 45%,transparent)}
+.voice-overlay[data-layout="full"] .voice-orb span{width:14px;height:44px;border-radius:8px}
+.voice-overlay[data-layout="full"] .voice-wave{flex:none;width:min(520px,80%);height:48px;justify-content:center}
+.voice-overlay[data-layout="full"] .voice-captions{max-width:760px;width:100%;justify-self:center;text-align:center;gap:10px;min-height:120px}
+.voice-overlay[data-layout="full"] .voice-you{font-size:17px;-webkit-line-clamp:3}
+.voice-overlay[data-layout="full"] .voice-bot{font-size:24px;line-height:1.4;font-weight:500;-webkit-line-clamp:4}
+.voice-overlay[data-layout="full"] .voice-line{font-size:14px;-webkit-line-clamp:1}
+.voice-overlay[data-layout="full"] .voice-controls{max-width:520px;width:100%;justify-self:center}
+.voice-overlay[data-layout="full"] .voice-controls button{width:56px;height:56px}
+@keyframes ogb-fade{from{opacity:0}to{opacity:1}}
+body.voice-full .window-actions{z-index:70}
+.local-voice-card{display:grid;gap:8px}.local-voice-card p{margin:0;font-size:13px;line-height:1.5}
+.local-badge{display:inline-block;justify-self:start;font-size:11px!important;font-weight:600;color:var(--working);background:color-mix(in srgb,var(--working) 14%,transparent);padding:3px 10px;border-radius:99px;text-transform:capitalize}
+.voice-settings h3{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 2px}
+@media (prefers-reduced-motion:reduce){.voice-overlay[data-layout="full"],.voice-overlay[data-layout="mini"] .voice-pill{animation:none}.voice-orb{transition:none}}

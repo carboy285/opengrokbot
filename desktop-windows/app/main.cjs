@@ -1,4 +1,6 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Tray, Menu, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Tray, Menu, Notification, protocol } = require('electron');
+// 0.9.3: the local voice engine loads models and its runtime through this scheme (see local-voice.cjs).
+protocol.registerSchemesAsPrivileged([{ scheme: 'ogb-models', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 const { readFile, writeFile, mkdir, rename, readdir, lstat, stat, copyFile } = require('node:fs/promises');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
@@ -29,7 +31,7 @@ let initialization;
 let window,mirrorWindow;
 const rendererFile = path.resolve(__dirname, '../renderer/index.html');
 const mirrorFile = path.resolve(__dirname, '../renderer/mirror.html');
-const documentation = new Set(['https://www.virtualbox.org/wiki/Downloads','https://releases.ubuntu.com/24.04/','https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://tailscale.com/download','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
+const documentation = new Set(['https://ollama.com/download','https://lmstudio.ai/','https://huggingface.co/hexgrad/Kokoro-82M','https://www.virtualbox.org/wiki/Downloads','https://releases.ubuntu.com/24.04/','https://docs.x.ai/grok-bot/get-started', 'https://docs.x.ai/grok-bot/mobile', 'https://github.com/carboy285/opengrokbot','https://platform.composio.dev','https://tailscale.com/download','https://nodejs.org/en/download',...cli.providers.map(x=>x.guide)]);
 let writeQueue = Promise.resolve();
 function file(name) { return path.join(app.getPath('userData'), name); }
 function authorized(event) {
@@ -127,6 +129,8 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
   await atomicJSON('preview-workspace.json',state);
   const history=state.entries.filter(x=>x.botID===botID&&!['failed','stopped'].includes(x.state)&&x.text).slice(-30);
   const runs=new Set();active.set(botID,runs);
+  // Voice mode: replies are spoken, so ask for a short spoken answer from the quicker model.
+  const voiceTurn=voiceActive(botID),voicePrefs=voiceTurn?await loadJSON('voice-settings.json',{}):{};
   for(const {choice,installation} of providers){
    const key=botID+'|'+installation.id+(choice.model?'|'+choice.model:'');const session=state.sessions?.[key];
    const latest=delivery?`Bot request (not human approval): ${delivery.text}`:history.findLast(x=>x.kind==='user')?.text||'';
@@ -135,7 +139,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
    const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
-   const run=cli.runCLI({installation,prompt,session,model:choice.model,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,allowConnectedApps:settings.allowConnectedApps===true,env:await cliKeyEnv(installation.provider),onEvent:event=>{
+   const run=cli.runCLI({installation,prompt:prompt+(voiceTurn?teamwork.VOICE_STYLE:''),session,model:voiceTurn&&voicePrefs.fastModel!==false?teamwork.voiceModel(installation.provider,choice.model,voicePrefs.voiceModels?.[installation.provider]):choice.model,fast:voiceTurn&&voicePrefs.fastModel!==false,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,allowConnectedApps:settings.allowConnectedApps===true,env:await cliKeyEnv(installation.provider),onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
     if(event.type==='notice'){state.entries.push({id:randomUUID(),botID,kind:'activity',text:String(event.text).slice(0,400),date:new Date().toISOString()});notify();}
     if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notifyStreaming();}
@@ -326,6 +330,7 @@ async function remoteCommand(command){
   if(result.files.length){const folder=path.join(botDirectory(result.bot.id),'Knowledge');await mkdir(folder,{recursive:true});for(const f of result.files)await writeFile(path.join(folder,f.name),f.data);}
   await atomicJSON('preview-workspace.json',state);notify();return;
  }
+ if(command.action==='voice_mode'){if(!bot)throw new Error('Unknown Bot');setVoiceMode(bot.id,command.text==='on');return;}
  if(command.action==='touch_bot'){if(!bot)throw new Error('Unknown Bot');bot.lastUsedAt=new Date().toISOString();await atomicJSON('preview-workspace.json',state);notify();return;}
  if(command.action==='open_vm'){if(!bot)throw new Error('Unknown Bot');await localVMs.open(bot.id);return;}
  if(command.action==='vm_exec'){await startVMJob(command.requestID,bot,command.argv);return;}
@@ -383,6 +388,29 @@ function requestApproval(title,detail){
 }
 function settleApproval(id,approved){const waiter=approvalWaiters.get(id);if(!waiter)return false;approvalWaiters.delete(id);waiter.resolve(approved===true);if(!approvalWaiters.size&&window&&!window.isDestroyed()){try{window.flashFrame(false);}catch{}}return true;}
 function denyAllApprovals(){for(const id of [...approvalWaiters.keys()])settleApproval(id,false);}
+// Bots whose voice mode is open (on this PC or a phone), with when that was last confirmed.
+const voiceBots=new Map();
+const voiceActive=botID=>{const at=voiceBots.get(botID);if(at&&Date.now()-at<30*60*1000)return true;voiceBots.delete(botID);return false;};
+function setVoiceMode(botID,on){if(typeof botID!=='string'||botID.length>80)return false;if(on)voiceBots.set(botID,Date.now());else voiceBots.delete(botID);return true;}
+let voiceEngine=null;
+const localVoice=require('./local-voice.cjs');
+let voiceStore=null;
+function voiceModelsRoot(){return path.join(app.getPath('userData'),'local-voice');}
+async function engineWindow(){
+ if(voiceEngine&&!voiceEngine.isDestroyed())return voiceEngine;
+ voiceEngine=new BrowserWindow({show:false,width:320,height:240,title:'OpenGrokBot voice engine',webPreferences:{preload:path.join(__dirname,'voice-engine-preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:false}});
+ voiceEngine.webContents.setWindowOpenHandler(()=>({action:'deny'}));voiceEngine.webContents.on('will-navigate',event=>event.preventDefault());
+ voiceEngine.on('closed',()=>{voiceEngine=null;});
+ await voiceEngine.loadFile(path.join(__dirname,'..','renderer','voice-engine.html'));
+ return voiceEngine;
+}
+async function engineCall(expression){const engine=await engineWindow();try{return await engine.webContents.executeJavaScript(expression,true);}catch(error){throw new PublicError(String(error?.message||error).replace(/^Error:\s*/,'').slice(0,300)||'The local voice could not run.');}}
+async function localVoicePlan(){
+ const saved=await loadJSON('voice-settings.json',{});let caps={webgpu:false};try{caps=await engineCall('OGBLocalVoice.capabilities()');}catch{}
+ const recommended=localVoice.recommend({memoryGB:require('node:os').totalmem()/2**30,cores:require('node:os').cpus().length,webgpu:!!caps.webgpu,language:app.getLocale()});
+ const chosen=saved.localModels&&typeof saved.localModels==='object'?saved.localModels:{};
+ return {recommended,tts:{...recommended.tts,...(chosen.tts||{})},stt:{...recommended.stt,...(chosen.stt||{})},webgpu:!!caps.webgpu};
+}
 let handoffQueue=Promise.resolve(),handoffCurrent=null;
 function requestVMHandoff(botName,reason){
  const run=async()=>{
@@ -409,6 +437,28 @@ async function startVMJob(requestID,bot,argv){
 }
 function configureIPC() {
  const uuidLike=value=>typeof value==='string'&&/^[a-f0-9-]{36}$/i.test(value);
+ handle('voice:mode',async(botID,on)=>setVoiceMode(botID,on===true));
+ handle('localvoice:status',async()=>{const plan=await localVoicePlan();voiceStore||=localVoice.createStore({root:voiceModelsRoot()});return {...plan,installed:await voiceStore.installed(),voices:localVoice.KOKORO_VOICES,memoryGB:Math.round(require('node:os').totalmem()/2**30),cores:require('node:os').cpus().length};});
+ handle('localvoice:choose',async choice=>{const plan=await localVoicePlan();const next={tts:{...plan.tts},stt:{...plan.stt}};
+  if(choice?.tts?.dtype&&['q8','fp16','fp32','q4'].includes(choice.tts.dtype))next.tts.dtype=choice.tts.dtype;
+  if(choice?.tts?.device&&['wasm','webgpu'].includes(choice.tts.device))next.tts.device=choice.tts.device;
+  if(choice?.stt?.model&&localVoice.STT_REPOS.includes(choice.stt.model))next.stt.model=choice.stt.model;
+  if(choice?.stt?.device&&['wasm','webgpu'].includes(choice.stt.device))next.stt.device=choice.stt.device;
+  if(choice==='recommended'){const saved=await loadJSON('voice-settings.json',{});delete saved.localModels;await atomicJSON('voice-settings.json',saved);return true;}
+  const saved=await loadJSON('voice-settings.json',{});saved.localModels=next;await atomicJSON('voice-settings.json',saved);return true;});
+ handle('localvoice:prepare',async which=>{const plan=await localVoicePlan();
+  if(which!=='stt')await engineCall(`OGBLocalVoice.loadTTS(${JSON.stringify(plan.tts)})`);
+  if(which!=='tts')await engineCall(`OGBLocalVoice.loadSTT(${JSON.stringify(plan.stt)})`);
+  return true;});
+ handle('localvoice:speak',async(text,voiceName,speed)=>{if(typeof text!=='string'||!text.trim()||text.length>2000)throw new PublicError('Nothing to say.');const plan=await localVoicePlan();
+  const saved=await loadJSON('voice-settings.json',{});const chosenVoice=localVoice.KOKORO_VOICES.some(([id])=>id===voiceName)?voiceName:localVoice.KOKORO_VOICES.some(([id])=>id===saved.kokoroVoice)?saved.kokoroVoice:'af_heart';
+  await engineCall(`OGBLocalVoice.loadTTS(${JSON.stringify(plan.tts)})`);
+  return engineCall(`OGBLocalVoice.speak(${JSON.stringify(text)},${JSON.stringify({voice:chosenVoice,speed:Math.min(Math.max(Number(speed)||1,0.75),1.5),encoding:'base64'})})`);});
+ handle('localvoice:transcribe',async(samples,language)=>{if(typeof samples!=='string'||samples.length>16_000_000)throw new PublicError('That recording is too long.');const plan=await localVoicePlan();
+  await engineCall(`OGBLocalVoice.loadSTT(${JSON.stringify(plan.stt)})`);
+  return engineCall(`OGBLocalVoice.transcribe(${JSON.stringify(samples)},${JSON.stringify({language:String(language||'en').slice(0,2)})})`);});
+ handle('localvoice:remove',async()=>{voiceEngine?.destroy();voiceEngine=null;voiceStore||=localVoice.createStore({root:voiceModelsRoot()});await voiceStore.remove();return true;});
+ handle('setup:server',async(provider,address)=>{await ensureState();if(!cli.isLocal(provider))throw new Error();const base=require('./local-llm.cjs').serverURL(address);if(!base)throw new PublicError('Use an address on this computer or your local network, like http://127.0.0.1:11434.');settings.overrides[provider]=base;await saveSettings();installed=await cli.discover(settings.overrides);notify();return setupStatus();});
  handle('approval:answer',async(id,approved)=>settleApproval(String(id),approved===true));
  handle('approval:pending',async()=>[...approvalWaiters].map(([id,x])=>({id,title:x.title,detail:x.detail})));
  handle('vm:handoff-done',async(id,outcome)=>{if(handoffCurrent?.id===id)handoffCurrent.finish(outcome==='done'?'done':'cancelled');return true;});
@@ -546,6 +596,12 @@ function configureIPC() {
   });
   handle('setup:login',async()=>{
     const installation=selectedCLI();if(!installation)throw new PublicError('Choose an installed CLI first.');settings.providerHealth||={};
+    if(cli.isLocal(installation.provider)){
+      const models=await require('./local-llm.cjs').listModels(installation.path,{timeout:4000});const name=installation.name;
+      settings.providerHealth[installation.provider]={state:models&&models.length?'ready':'needs-login',detail:models===null?`${name} isn’t answering at ${installation.path}.`:models.length?`${models.length} model${models.length===1?'':'s'} ready.`:`${name} has no models yet.`,at:new Date().toISOString()};await saveSettings();
+      if(!models||!models.length)throw new PublicError(settings.providerHealth[installation.provider].detail+(installation.provider==='ollama'?' Run ollama pull llama3.2 in a terminal, then check again.':' Load a model in LM Studio and start its server, then check again.'));
+      return `${name} is running with ${settings.providerHealth[installation.provider].detail}`;
+    }
     if(installation.provider==='codex'){
       const signedIn=(await cli.capture(installation,['login','status'],12000)).exit===0;
       settings.providerHealth[installation.provider]={state:signedIn?'ready':'needs-login',detail:signedIn?'Signed in':'Run codex login in Terminal, then check again.',at:new Date().toISOString()};await saveSettings();
@@ -596,18 +652,29 @@ function configureIPC() {
     const values = await loadJSON('vault.json', []);
     return values.map(({ id, title }) => ({ id, title }));
   });
-  const voiceDefaults = { transcriber: 'groq', speaker: 'system', voiceID: '21m00Tcm4TlvDq8ikWAM', talkOver: true, speed: 1, groqVoice: 'autumn', nimURL: 'http://localhost:9000', nimVoice: 'Magpie-Multilingual.EN-US.Aria', geminiModel: 'gemini-2.5-flash-preview-tts', geminiVoice: 'Kore', geminiBase: 'https://generativelanguage.googleapis.com', nvcServer: 'grpc.nvcf.nvidia.com:443', nvcFunction: '877104f7-e885-42b9-8de8-f6e4c6303969', nvcVoice: 'Magpie-Multilingual.EN-US.Aria' };
+  const voiceDefaults = { transcriber: 'local', speaker: 'system', patience: 'normal', acknowledge: true, narrate: true, fastModel: true, voiceModels: {}, kokoroVoice: 'af_heart', layout: 'card', accurate: false, voiceID: '21m00Tcm4TlvDq8ikWAM', talkOver: true, speed: 1, groqVoice: 'autumn', nimURL: 'http://localhost:9000', nimVoice: 'Magpie-Multilingual.EN-US.Aria', geminiModel: 'gemini-2.5-flash-preview-tts', geminiVoice: 'Kore', geminiBase: 'https://generativelanguage.googleapis.com', nvcServer: 'grpc.nvcf.nvidia.com:443', nvcFunction: '877104f7-e885-42b9-8de8-f6e4c6303969', nvcVoice: 'Magpie-Multilingual.EN-US.Aria' };
   const voiceKey = async provider => { const keys = await loadJSON('voice-keys.encrypted.json', {}); if (!keys[provider]) return ''; requireVault(); return safeStorage.decryptString(Buffer.from(keys[provider], 'base64')); };
   const voiceSettings = async () => {
     const saved = await loadJSON('voice-settings.json', {}), keys = await loadJSON('voice-keys.encrypted.json', {});
+    // Before 0.9.3 listening always used a cloud key; people who saved one keep it until they switch to local listening.
+    if (saved.transcriber === undefined && keys.groq) saved.transcriber = 'groq';
     return { ...voiceDefaults, ...saved, keys: { groq: !!keys.groq, openAI: !!keys.openAI, elevenLabs: !!keys.elevenLabs, nvidiaNIM: !!keys.nvidiaNIM, nvidiaCloud: !!keys.nvidiaCloud, gemini: !!keys.gemini } };
   };
   handle('voice:settings', voiceSettings);
   handle('voice:save', async patch => {
     if (!patch || typeof patch !== 'object') throw new Error('Invalid settings');
     const current = await loadJSON('voice-settings.json', {}), next = { ...current };
-    if (patch.transcriber !== undefined) { if (!voice.PROVIDERS.has(patch.transcriber)) throw new Error('Invalid provider'); next.transcriber = patch.transcriber; }
-    if (patch.speaker !== undefined) { if (!['system', ...voice.SPEAKERS].includes(patch.speaker)) throw new Error('Invalid provider'); next.speaker = patch.speaker; }
+    if (patch.transcriber !== undefined) { if (patch.transcriber !== 'local' && !voice.PROVIDERS.has(patch.transcriber)) throw new Error('Invalid provider'); next.transcriber = patch.transcriber; }
+    if (patch.speaker !== undefined) { if (!['system', 'local', ...voice.SPEAKERS].includes(patch.speaker)) throw new Error('Invalid provider'); next.speaker = patch.speaker; }
+    // 0.9.3 voice mode: how long to wait for you, what to say while working, the quicker model, Kokoro voice and layout.
+    if (patch.patience !== undefined) { if (!['quick', 'normal', 'relaxed'].includes(patch.patience)) throw new Error('Invalid setting'); next.patience = patch.patience; }
+    for (const key of ['acknowledge', 'narrate', 'fastModel']) if (patch[key] !== undefined) next[key] = patch[key] === true;
+    if (patch.layout !== undefined) { if (!['card', 'full'].includes(patch.layout)) throw new Error('Invalid setting'); next.layout = patch.layout; }
+    if (patch.kokoroVoice !== undefined) { if (!localVoice.KOKORO_VOICES.some(([id]) => id === patch.kokoroVoice)) throw new Error('Invalid voice'); next.kokoroVoice = patch.kokoroVoice; }
+    if (patch.voiceModels !== undefined) {
+      if (!patch.voiceModels || typeof patch.voiceModels !== 'object') throw new Error('Invalid setting');
+      next.voiceModels = Object.fromEntries(Object.entries(patch.voiceModels).filter(([provider, model]) => cli.providers.some(x => x.id === provider) && typeof model === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.\/:@+-]{0,199}$|^$/.test(model.trim())).map(([provider, model]) => [provider, model.trim()]));
+    }
     if (patch.groqVoice !== undefined) { if (!voice.GROQ_VOICES.includes(patch.groqVoice)) throw new Error('Invalid voice'); next.groqVoice = patch.groqVoice; }
     if (patch.nimURL !== undefined) { if (!voice.nimURL(patch.nimURL)) throw new PublicError('That NVIDIA NIM address looks invalid. Use something like http://localhost:9000.'); next.nimURL = String(patch.nimURL).trim(); }
     if (patch.geminiModel !== undefined) { if (!voice.geminiURL('https://generativelanguage.googleapis.com', patch.geminiModel)) throw new PublicError('That Google AI Studio model name looks invalid.'); next.geminiModel = String(patch.geminiModel).trim(); }
@@ -695,10 +762,18 @@ function configureIPC() {
 if (process.platform === 'win32') app.setAppUserModelId('org.opengrokbot.windows');
 app.whenReady().then(() => {
   configureIPC();
+  voiceStore=localVoice.createStore({root:voiceModelsRoot()});
+  protocol.handle('ogb-models',async request=>{
+   let url;try{url=new URL(request.url);}catch{return new Response(null,{status:400});}
+   if(url.host!=='local')return new Response(null,{status:404});
+   try{const found=await voiceStore.file(url.pathname);if(found.status!==200)return new Response(null,{status:found.status,headers:{'Access-Control-Allow-Origin':'*'}});return new Response(found.body,{headers:{'Content-Type':found.type,'Access-Control-Allow-Origin':'*','Cache-Control':'no-store'}});}
+   catch(error){return new Response(String(error?.message||'Download failed'),{status:502,headers:{'Access-Control-Allow-Origin':'*'}});}
+  });
+  ipcMain.on('localvoice:progress',(event,value)=>{if(voiceEngine&&event.sender===voiceEngine.webContents&&window&&!window.isDestroyed())window.webContents.send('localvoice:progress',{kind:value?.kind==='stt'?'stt':'tts',loaded:Number(value?.loaded)||0,total:Number(value?.total)||0});});
   window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, frame: false, backgroundColor: '#111111', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   window.on('close',event=>{if(cloud.active&&!quitting){event.preventDefault();window.hide();}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('render-process-gone',()=>denyAllApprovals());window.on('closed',()=>denyAllApprovals());
+  window.webContents.on('render-process-gone',()=>denyAllApprovals());window.on('closed',()=>{denyAllApprovals();voiceEngine?.destroy();voiceEngine=null;});
   window.webContents.on('will-navigate', event => event.preventDefault());
   // The app's own window may write to the clipboard (Copy guest login, Copy diagnostics). No other page may.
   window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(contents === window?.webContents && (permission === 'clipboard-sanitized-write' || (permission === 'media' && Array.isArray(details?.mediaTypes) && details.mediaTypes.length > 0 && details.mediaTypes.every(type => type === 'audio')))));
