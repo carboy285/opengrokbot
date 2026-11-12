@@ -133,8 +133,18 @@ function base64(bytes) {
   return btoa(out);
 }
 
-/** Speaks `text` with a Kokoro voice. Returns a 24 kHz mono WAV, as bytes or base64. */
-async function speak(text, { voice = 'af_heart', speed = 1, encoding = 'bytes' } = {}) {
+/**
+ * Speaks `text` with a Kokoro voice. Returns a 24 kHz mono WAV, as bytes or base64.
+ * Requests run one after another: the apps ask for the next sentence while the current one plays, and one model
+ * session must not run two generations at once.
+ */
+let speaking = Promise.resolve();
+function speak(text, options = {}) {
+  const run = speaking.then(() => speakNow(text, options));
+  speaking = run.catch(() => {});
+  return run;
+}
+async function speakNow(text, { voice = 'af_heart', speed = 1, encoding = 'bytes' } = {}) {
   if (!state.tts) throw new Error('The local voice is not loaded yet.');
   const audio = await state.tts.generate(String(text).slice(0, 1000), { voice, speed });
   const bytes = wav(audio.audio, audio.sampling_rate);

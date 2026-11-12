@@ -1,4 +1,4 @@
-import { Vad, encodeWav, maxSpeechLength, nextChunk, rms, speakable, splitText, silenceFor, continuesThought, resample16k, acknowledgement, stepPhrase } from './voice-core.mjs';
+import { Vad, encodeWav, maxSpeechLength, nextChunk, rms, speakable, splitText, silenceFor, continuesThought, resample16k, acknowledgement, stepPhrase, sentences } from './voice-core.mjs';
 
 // Hands-free voice mode for Windows.
 // 0.9.3: listening and speaking can run on this PC with open-source models (Whisper and Kokoro), with no key.
@@ -238,10 +238,14 @@ export function createVoice({ bridge, result, toast, currentBot, latestReply, ac
 
     function resume() { if (!state.alive) return; vad.reset(); setNote(''); set('listening', 'Listening…'); }
 
-    function beginSpeaking() { vad.reset(); queue = []; streamDone = false; set('speaking', 'Speaking'); }
+    let spokeInReply = false;
+    function beginSpeaking() { vad.reset(); queue = []; streamDone = false; spokeInReply = false; set('speaking', 'Speaking'); }
+    // One sentence at a time: the first is cut short so speech starts sooner; the next is made while this one plays.
     function enqueue(text) {
       if (state.mode !== 'speaking') return;
-      for (const part of splitText(text, localSpeaking ? 400 : maxSpeechLength(settings.speaker))) queue.push(part);
+      const limit = localSpeaking ? 400 : maxSpeechLength(settings.speaker);
+      for (const sentence of sentences(text, !spokeInReply)) for (const part of splitText(sentence, limit)) queue.push(part);
+      spokeInReply = true;
       if (!draining) drain();
     }
     function endSpeaking() { streamDone = true; if (!draining && state.mode === 'speaking') resume(); }

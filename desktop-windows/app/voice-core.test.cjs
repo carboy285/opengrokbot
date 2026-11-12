@@ -122,3 +122,12 @@ test('tool steps become short spoken phrases, failures stay quiet', async () => 
   assert.match(core.acknowledgement(0.5), /\w/);
   assert.equal(core.resample16k(new Float32Array(48000), 48000).length, 16000);
 });
+
+test('speech is made one sentence at a time and starts quickly', async () => {
+  const core = await load();
+  assert.deepEqual(core.sentences('Sure. I found three cruises! Want the cheapest?'), ['Sure.', 'I found three cruises!', 'Want the cheapest?']);
+  assert.deepEqual(core.sentences('Dr. Smith said the 3.5 km walk is fine. Go.'), ['Dr. Smith said the 3.5 km walk is fine.', 'Go.']);
+  const quick = core.sentences('The cheapest cruise leaves Galveston on Friday, and it costs about twelve hundred dollars for two.', true);
+  assert.equal(quick[0], 'The cheapest cruise leaves Galveston on Friday,');
+  assert.equal(quick.length, 2);
+});

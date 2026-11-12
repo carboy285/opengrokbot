@@ -324,6 +324,43 @@ enum VoiceText {
     }
 
     /// Splits text into pieces of at most `maxLength` characters, preferring sentence ends, then commas, then spaces.
+    private static let abbreviations: Set<String> = ["mr", "mrs", "ms", "dr", "st", "vs", "etc", "e.g", "i.e", "jr", "sr", "no", "approx", "u.s"]
+
+    /// 0.9.5: one sentence per piece, so each is synthesized and played on its own and the next one is generated
+    /// while the current one plays. Long sentences are cut at a comma. With `quickStart`, a long first sentence is
+    /// cut at its first pause so the voice starts sooner. Mirrors sentences() in voice-core.mjs.
+    static func sentences(_ text: String, quickStart: Bool = false) -> [String] {
+        let chars = Array(text)
+        var result: [String] = [], current = ""
+        for (index, char) in chars.enumerated() {
+            current.append(char)
+            let next: Character = index + 1 < chars.count ? chars[index + 1] : " "
+            var ends = char == "\n" || ("!?…".contains(char) && next.isWhitespace)
+            if char == ".", next.isWhitespace {
+                // "Dr. Smith", "e.g. this" and single initials do not end a sentence.
+                let word = current.dropLast().split(whereSeparator: { $0.isWhitespace }).last.map { String($0).lowercased() } ?? ""
+                ends = !(abbreviations.contains(word) || (word.count == 1 && word.first?.isLetter == true))
+            }
+            if ends {
+                let piece = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !piece.isEmpty { result.append(piece) }
+                current = ""
+            }
+        }
+        let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { result.append(tail) }
+        var pieces = result.flatMap { split($0, maxLength: 220) }
+        if quickStart, let first = pieces.first, first.count > 70 {
+            let marks: Set<Character> = [",", ";", ":", "—"]
+            let firstChars = Array(first)
+            if let cut = (25..<min(firstChars.count - 15, 90)).first(where: { marks.contains(firstChars[$0]) && firstChars[$0 + 1] == " " }) {
+                pieces[0] = String(firstChars[...cut]).trimmingCharacters(in: .whitespaces)
+                pieces.insert(String(firstChars[(cut + 1)...]).trimmingCharacters(in: .whitespaces), at: 1)
+            }
+        }
+        return pieces
+    }
+
     static func split(_ text: String, maxLength: Int) -> [String] {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
@@ -418,6 +455,8 @@ final class VoiceSession: ObservableObject {
     private var speechDone: CheckedContinuation<Void, Never>?
     private var speechQueue: [String] = []
     private var draining = false
+    /// Whether this reply has spoken anything yet (the first sentence is cut at an early pause).
+    private var spokeInReply = false
     private var streamFinished = false
     // Cloud voice-activity detection
     private var preRoll: [Float] = []
@@ -731,7 +770,7 @@ final class VoiceSession: ObservableObject {
     /// Starts a spoken reply that arrives in pieces. Call `enqueue` for each piece and `endSpeaking` at the end.
     func beginSpeaking() {
         guard active else { return }
-        state = .speaking; partial = ""; bargeSeconds = 0; preRoll = []; speakingText = ""
+        state = .speaking; partial = ""; bargeSeconds = 0; preRoll = []; speakingText = ""; spokeInReply = false
         speechQueue = []; streamFinished = false
         if transcriber == .apple, !muted { startRecognition() }
     }
@@ -739,7 +778,10 @@ final class VoiceSession: ObservableObject {
     func enqueue(_ text: String) {
         guard active, state == .speaking, !text.isEmpty else { return }
         let limit = VoiceSettings.speaker.maxSpeechCharacters
-        speechQueue.append(contentsOf: limit.map { VoiceText.split(text, maxLength: $0) } ?? [text])
+        // One sentence at a time: the first is cut short so speech starts sooner; the next is made while this one plays.
+        let pieces = VoiceText.sentences(text, quickStart: !spokeInReply)
+        spokeInReply = true
+        speechQueue.append(contentsOf: pieces.flatMap { piece in limit.map { VoiceText.split(piece, maxLength: $0) } ?? [piece] })
         if !draining { Task { await drain() } }
     }
 

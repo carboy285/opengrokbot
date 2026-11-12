@@ -189,3 +189,33 @@ export function stepPhrase(text) {
   if (lower.includes('mail') || lower.includes('email')) return 'Looking at your email.';
   return '';
 }
+
+// ---- 0.9.5: one sentence at a time. Mirrors VoiceText.sentences in Swift. ----
+const ABBREVIATIONS = new Set(['mr', 'mrs', 'ms', 'dr', 'st', 'vs', 'etc', 'e.g', 'i.e', 'jr', 'sr', 'no', 'approx', 'u.s']);
+/**
+ * Splits text into single sentences (long ones at a comma) so each is synthesized and played on its own, and the next
+ * is generated while the current one plays. With quickStart, a long first sentence is cut at its first pause.
+ */
+export function sentences(text, quickStart = false) {
+  const chars = Array.from(String(text ?? '')), result = [];
+  let current = '';
+  chars.forEach((char, index) => {
+    current += char;
+    const next = chars[index + 1] ?? ' ';
+    let ends = char === '\n' || ('!?…'.includes(char) && /\s/.test(next));
+    if (char === '.' && /\s/.test(next)) {
+      const word = (current.slice(0, -1).split(/\s+/).pop() || '').toLowerCase();
+      ends = !(ABBREVIATIONS.has(word) || (word.length === 1 && /[a-z]/i.test(word)));
+    }
+    if (ends) { const piece = current.trim(); if (piece) result.push(piece); current = ''; }
+  });
+  if (current.trim()) result.push(current.trim());
+  const pieces = result.flatMap(piece => splitText(piece, 220));
+  if (quickStart && pieces[0] && pieces[0].length > 70) {
+    const first = Array.from(pieces[0]);
+    for (let i = 25; i < Math.min(first.length - 15, 90); i++) {
+      if (',;:—'.includes(first[i]) && first[i + 1] === ' ') { pieces.splice(0, 1, first.slice(0, i + 1).join('').trim(), first.slice(i + 1).join('').trim()); break; }
+    }
+  }
+  return pieces;
+}

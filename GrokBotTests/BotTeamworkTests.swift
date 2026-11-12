@@ -130,4 +130,12 @@ final class BotTeamworkTests: XCTestCase {
         XCTAssertEqual(VoiceTurns.stepPhrase("Couldn’t open example.com"), "")
         XCTAssertTrue(BotTeamwork.voiceStyle.contains("VOICE MODE"))
     }
+
+    func testSpeechIsMadeOneSentenceAtATimeAndStartsQuickly() {
+        XCTAssertEqual(VoiceText.sentences("Sure. I found three cruises! Want the cheapest?"), ["Sure.", "I found three cruises!", "Want the cheapest?"])
+        XCTAssertEqual(VoiceText.sentences("Dr. Smith said the 3.5 km walk is fine. Go."), ["Dr. Smith said the 3.5 km walk is fine.", "Go."])
+        let quick = VoiceText.sentences("The cheapest cruise leaves Galveston on Friday, and it costs about twelve hundred dollars for two.", quickStart: true)
+        XCTAssertEqual(quick.first, "The cheapest cruise leaves Galveston on Friday,")
+        XCTAssertEqual(quick.count, 2)
+    }
 }
