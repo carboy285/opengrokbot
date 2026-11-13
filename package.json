@@ -12,6 +12,7 @@
     "dist:windows": "electron-builder --win nsis --x64 --config scripts/desktop-build.cjs --publish never",
     "preview:desktop": "python3 -m http.server 4173 --bind 127.0.0.1 --directory desktop-windows/renderer",
     "test:ui": "node scripts/test-desktop-ui.cjs",
+    "test:voice": "node scripts/test-desktop-voice.cjs",
     "test:cloud": "node scripts/test-cloud-db.cjs"
   },
   "devDependencies": {

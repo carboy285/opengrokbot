@@ -412,6 +412,7 @@ function toggleVoice(bot){
     setTimeout(()=>{if(voiceActive)toggleVoice();},8000);
   }).catch(()=>toast('Microphone permission denied.'));
 }
+$('#voice-button').addEventListener('click',()=>toggleVoice(currentBot()));
 
 try { workspace=await result(bridge.load());selected=workspace.bots[0]?.id; setup=await result(bridge.scanCLIs()); }catch(error){toast(error.message);}
 render();
