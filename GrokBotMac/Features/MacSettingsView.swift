@@ -41,6 +41,7 @@ struct MacSettingsView: View {
                     VStack(alignment: .leading, spacing: 28) {
                         switch desktop.settingsTab {
                         case .general: general
+                        case .headsUps: MacHeadsUpsSettings()
                         case .computer: computer
                         case .permissions: unavailable(title: "Your CLI keeps its permissions", detail: "Codex runs with read-only workspace access. Other CLIs keep their own configured permissions. This app does not add approval-bypass flags or auto-approve tools.", icon: "shield")
                         case .apiKeys: MacAPIKeysView()
@@ -303,5 +304,170 @@ private struct MacUsageView: View {
                 }
             }.background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 16))
         }
+    }
+}
+
+
+/// Settings → Heads-ups (0.9.6): what Grok Bot may tell you about without being asked.
+struct MacHeadsUpsSettings: View {
+    @EnvironmentObject private var desktop: MacAppModel
+    @ObservedObject private var apple = AppleConnections.shared
+    @AppStorage(HeadsUpSettings.enabledKey) private var enabled = false
+    @AppStorage(HeadsUpSettings.emailKey) private var email = true
+    @AppStorage(HeadsUpSettings.meetingsKey) private var meetings = true
+    @AppStorage(HeadsUpSettings.leadKey) private var lead = 10
+    @AppStorage(HeadsUpSettings.conflictsKey) private var conflicts = true
+    @AppStorage(HeadsUpSettings.briefKey) private var brief = true
+    @AppStorage(HeadsUpSettings.briefMinutesKey) private var briefMinutes = 8 * 60
+    @AppStorage(HeadsUpSettings.quietKey) private var quiet = true
+    @AppStorage(HeadsUpSettings.quietStartKey) private var quietStart = 22 * 60
+    @AppStorage(HeadsUpSettings.quietEndKey) private var quietEnd = 7 * 60
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Let Grok Bot reach out first").font(.system(size: 18, weight: .medium))
+                Text("Grok Bot keeps an eye on Mail and Calendar on this Mac and messages you when something needs you, so you don’t have to keep checking.")
+                    .font(.system(size: 15)).lineSpacing(5).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            card {
+                row("Heads-ups", detail: enabled ? "On · checks about every three minutes while OpenGrokBot is open" : "Off") {
+                    Toggle("Heads-ups", isOn: $enabled).labelsHidden().toggleStyle(.switch)
+                }
+                if enabled {
+                    divider
+                    access("Mail", on: apple.canRead(.mail))
+                    access("Calendar", on: apple.canRead(.calendar))
+                    if !apple.canRead(.mail) || !apple.canRead(.calendar) {
+                        HStack {
+                            Text("Turn on Mail and Calendar under This Mac. Heads-ups use whichever ones are on.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                            Spacer()
+                            MacPillButton(title: "Open This Mac", prominent: false) { desktop.panel = .apple }
+                        }.padding(.horizontal, 20).padding(.bottom, 16)
+                    }
+                }
+            }
+            section("Tell me about") {
+                row("New email from people", detail: "Newsletters and automated senders stay quiet.") { toggle($email, "New email from people") }
+                divider
+                row("Upcoming meetings", detail: "A reminder with the join link.") {
+                    HStack(spacing: 12) {
+                        Picker("Minutes before a meeting", selection: $lead) { ForEach([5, 10, 15, 30], id: \.self) { Text("\($0) min before").tag($0) } }
+                            .labelsHidden().frame(width: 130).disabled(!enabled || !meetings)
+                        toggle($meetings, "Upcoming meetings")
+                    }
+                }
+                divider
+                row("Double-bookings", detail: "When two events overlap.") { toggle($conflicts, "Double-bookings") }
+                divider
+                row("Morning brief", detail: "Your day at a glance.") {
+                    HStack(spacing: 12) {
+                        DatePicker("Morning brief time", selection: time($briefMinutes), displayedComponents: .hourAndMinute).labelsHidden().disabled(!enabled || !brief)
+                        toggle($brief, "Morning brief")
+                    }
+                }
+            }
+            section("When") {
+                row("Quiet hours", detail: "Heads-ups still land in the chat, without a sound.") {
+                    HStack(spacing: 8) {
+                        DatePicker("Quiet hours start", selection: time($quietStart), displayedComponents: .hourAndMinute).labelsHidden()
+                        Text("to").foregroundStyle(MacTheme.secondary)
+                        DatePicker("Quiet hours end", selection: time($quietEnd), displayedComponents: .hourAndMinute).labelsHidden()
+                        toggle($quiet, "Quiet hours")
+                    }.disabled(!enabled)
+                }
+            }
+            Text("Heads-ups read Mail and Calendar on this Mac and only post messages. They never reply, send, accept or change anything. Ask Grok Bot directly when you want it to act. Phone alerts follow Settings → Computer → Phone notifications.")
+                .font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 1), value: enabled)
+    }
+
+    private var divider: some View { Rectangle().fill(MacTheme.line).frame(height: 1).padding(.leading, 20) }
+
+    private func toggle(_ value: Binding<Bool>, _ label: String) -> some View {
+        Toggle(label, isOn: value).labelsHidden().toggleStyle(.switch).disabled(!enabled)
+    }
+
+    private func time(_ minutes: Binding<Int>) -> Binding<Date> {
+        Binding(get: { Calendar.current.date(bySettingHour: minutes.wrappedValue / 60, minute: minutes.wrappedValue % 60, second: 0, of: Date()) ?? Date() },
+                set: { minutes.wrappedValue = HeadsUpRules.minuteOfDay($0) })
+    }
+
+    private func access(_ name: String, on: Bool) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(on ? Color.green : MacTheme.tertiary).frame(width: 8, height: 8)
+            Text(name).font(.system(size: 15))
+            Spacer()
+            Text(on ? "On" : "Off").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+        }.padding(.horizontal, 20).padding(.vertical, 10)
+    }
+
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }.frame(maxWidth: .infinity, alignment: .leading).background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.system(size: 14)).foregroundStyle(MacTheme.secondary).padding(.leading, 16)
+            card(content: content)
+        }
+    }
+
+    private func row<Content: View>(_ title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 16))
+                Text(detail).font(.system(size: 13)).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            content()
+        }.padding(.horizontal, 20).padding(.vertical, 14)
+    }
+}
+
+/// The small label over a heads-up in the chat: what it is about and when it came in.
+struct MacHeadsUpTag: View {
+    let tag: HeadsUpTag
+    let date: Date
+
+    private var symbol: String {
+        switch tag.kind {
+        case "email": return "envelope.fill"
+        case "meeting": return "calendar"
+        case "conflict": return "exclamationmark.triangle.fill"
+        case "brief": return "sun.max.fill"
+        default: return "sparkles"
+        }
+    }
+    private var label: String {
+        switch tag.kind {
+        case "email": return "Inbox"
+        case "meeting": return "Up next"
+        case "conflict": return "Calendar"
+        case "brief": return "Morning brief"
+        default: return "Heads-up"
+        }
+    }
+    private var tint: Color {
+        switch tag.kind {
+        case "email": return MacTheme.unread
+        case "meeting": return Color.green
+        case "conflict": return MacTheme.attention
+        case "brief": return Color.orange
+        default: return MacTheme.secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 20, height: 20).background(tint, in: Circle())
+            Text(label).font(.system(size: 12, weight: .semibold))
+            Text("· " + date.formatted(date: .omitted, time: .shortened)).font(.system(size: 12))
+        }
+        .foregroundStyle(MacTheme.secondary).padding(.leading, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Heads-up, \(label), \(date.formatted(date: .omitted, time: .shortened))")
     }
 }

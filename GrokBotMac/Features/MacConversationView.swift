@@ -37,7 +37,7 @@ struct MacConversationView: View {
                     LazyVStack(spacing: 12) {
                         let messages = app.entries(for: bot)
                         let lastBotID = messages.last(where: { $0.kind == .bot })?.id
-                        let lastUserID = messages.last(where: { $0.kind == .user && $0.delivery != "scheduled" })?.id
+                        let lastUserID = messages.last(where: { $0.kind == .user && $0.delivery != "scheduled" && $0.delivery != "proactive" })?.id
                         // A question card can be answered while nothing has been said after it.
                         let lastTalkID = messages.last(where: { $0.kind != .activity })?.id
                         let bots = app.workspace.bots
@@ -542,6 +542,9 @@ struct MacMessageView: View {
     var body: some View {
         if entry.kind == .activity, entry.senderBotID != nil, entry.text.hasPrefix("Message from ") {
             botToBotMessage
+        } else if entry.delivery == "proactive" {
+            // An automatic heads-up check (from the Windows app): show its short label, never the prompt with email text.
+            MacActivityPill(text: entry.label ?? "Automatic check").padding(.leading, 2)
         } else if entry.kind == .activity || entry.delivery == "scheduled" {
             MacActivityPill(text: entry.text, routine: entry.delivery == "scheduled").padding(.leading, 2)
         } else {
@@ -588,6 +591,7 @@ struct MacMessageView: View {
             if isUser { Spacer(minLength: 90) }
             if fromOtherBot { senderAvatar.padding(.top, 21) }
             VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
+                if let tag = entry.headsUp, entry.kind == .bot { MacHeadsUpTag(tag: tag, date: entry.date) }
                 if fromOtherBot {
                     Text(isGroup ? (entry.senderName ?? "Bot") : "\(entry.senderName ?? "Another Bot") replied")
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(MacTheme.secondary).padding(.leading, 4)

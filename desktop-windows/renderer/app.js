@@ -62,6 +62,94 @@ const orderedBots=()=>workspace.bots.map((bot,index)=>({bot,index})).sort((a,b)=
 async function organize(bot,changes){try{if(bridge.organizeBot)workspace=await result(bridge.organizeBot(bot.id,changes));else{const next=structuredClone(workspace);Object.assign(next.bots.find(x=>x.id===bot.id),changes);if(!await persist(next))return;}render();}catch(error){toast(error.message);}}
 const dialog = $('#panel');
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 5000); }
+// ---------- Heads-ups ----------
+const headsUpKinds={email:['✉','Inbox'],meeting:['◷','Up next'],conflict:['⚠','Calendar'],brief:['☀','Morning brief']};
+const headsUpWorking={email:'Reading your new email',brief:'Putting your brief together'};
+let knownHeadsUps=null,proactiveStatus=null,headsUpRefresh=null;
+const banner={element:null,botID:null,timer:null};
+const clock=iso=>{const date=new Date(iso||Date.now());return Number.isFinite(date.getTime())?date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';};
+const ago=iso=>{if(!iso)return 'not yet';const minutes=Math.round((Date.now()-Date.parse(iso))/60000);return minutes<1?'just now':minutes===1?'1 min ago':minutes<60?`${minutes} min ago`:clock(iso);};
+function headsUpTag(entry){
+ const [glyph,label]=headsUpKinds[entry.headsUp.kind]||['✦','Heads-up'];
+ const tag=node('div','heads-up-tag');tag.dataset.kind=entry.headsUp.kind;
+ append(tag,node('span','heads-up-glyph',glyph),node('span','',label),entry.date&&node('time','',clock(entry.date)));tag.firstChild.setAttribute('aria-hidden','true');
+ return tag;
+}
+// New heads-ups for a chat you're not looking at get a dot on the Bot and a banner that drops in from the top.
+function noticeHeadsUps(){
+ const arrived=workspace.entries.filter(x=>x.headsUp&&x.kind==='bot'&&x.state==='complete');
+ if(!knownHeadsUps){knownHeadsUps=new Set(arrived.map(x=>x.id));return;}
+ for(const entry of arrived){
+  if(knownHeadsUps.has(entry.id))continue;knownHeadsUps.add(entry.id);
+  if(entry.botID===selected&&document.hasFocus())continue;
+  if(entry.botID!==selected){const bot=workspace.bots.find(x=>x.id===entry.botID);if(bot&&!bot.unread){bot.unread=true;bridge.organizeBot?.(bot.id,{unread:true}).catch?.(()=>{});}}
+  showBanner(entry);
+ }
+}
+function showBanner(entry){
+ const bot=workspace.bots.find(x=>x.id===entry.botID);if(!bot)return;
+ if(!banner.element){
+  banner.element=node('div','heads-up-banner glass');banner.element.setAttribute('role','status');
+  const open=button('',()=>{const id=banner.botID;hideBanner();selectBot(id);},'heads-up-open');
+  const close=button('×',hideBanner,'heads-up-close');close.setAttribute('aria-label','Dismiss heads-up');
+  banner.element.append(open,close);
+  banner.element.addEventListener('pointerenter',()=>clearTimeout(banner.timer));
+  banner.element.addEventListener('pointerleave',()=>{banner.timer=setTimeout(hideBanner,4000);});
+  $('.conversation').append(banner.element);
+ }
+ const [glyph,label]=headsUpKinds[entry.headsUp.kind]||['✦','Heads-up'];
+ const text=entry.text.split('\n').map(x=>x.trim()).find(Boolean)||'';
+ banner.botID=bot.id;
+ banner.element.firstChild.replaceChildren(avatar(bot),append(node('span','heads-up-copy'),node('strong','',`${bot.name} · ${label}`),node('span','',text)),Object.assign(node('span','heads-up-glyph',glyph),{ariaHidden:'true'}));banner.element.firstChild.lastChild.dataset.kind=entry.headsUp.kind;
+ banner.element.firstChild.setAttribute('aria-label',`Open ${bot.name}: ${text}`);
+ banner.element.classList.add('visible');
+ clearTimeout(banner.timer);banner.timer=setTimeout(hideBanner,8000);
+}
+function hideBanner(){clearTimeout(banner.timer);banner.element?.classList.remove('visible');banner.botID=null;}
+function showHeadsUpBadge(value){
+ let badge=$('#headsup-state');
+ if(!value?.config?.enabled){badge?.remove();return;}
+ if(!badge){badge=button('',()=>showSettings('Heads-ups'),'phone-state');badge.id='headsup-state';$('#status-button').before(badge);}
+ const trouble=!value.composio||value.gmail==='error'||value.calendar==='error'||(value.gmail!=='ok'&&value.calendar!=='ok'&&value.lastCheck);
+ badge.textContent=trouble?'Heads-ups need attention':'✦ Heads-ups on';badge.dataset.state=trouble?'offline':'ready';
+ badge.title=value.error||(value.lastCheck?`Last checked ${ago(value.lastCheck)}`:'Waiting for the first check');
+}
+async function renderHeadsUps(page){
+ const body=node('div','heads-up-settings');page.append(body);
+ if(!bridge.proactiveStatus){append(body,node('h2','','Let Grok Bot reach out first'),node('p','muted','Open the installed desktop app to turn on heads-ups. They run in the background on this computer.'));return;}
+ const save=async changes=>{try{proactiveStatus=await result(bridge.proactiveConfigure({...proactiveStatus.config,...changes}));showHeadsUpBadge(proactiveStatus);draw();}catch(error){toast(error.message);draw();}};
+ const toggle=(label,key,detail,extra)=>{
+  const row=node('div','setting-row toggle-row');const check=node('input','switch');check.type='checkbox';check.setAttribute('role','switch');check.checked=!!proactiveStatus.config[key];check.disabled=key!=='enabled'&&!proactiveStatus.config.enabled;check.setAttribute('aria-label',label);
+  check.addEventListener('change',()=>save({[key]:check.checked}));
+  const text=append(node('span','toggle-text'),node('strong','',label),detail&&node('small','muted',detail));text.addEventListener('click',()=>{if(!check.disabled)check.click();});
+  append(row,text,extra,check);return row;
+ };
+ const time=(key,label)=>{const field=node('input','time-field');field.type='time';field.value=proactiveStatus.config[key];field.setAttribute('aria-label',label);field.disabled=!proactiveStatus.config.enabled;field.addEventListener('change',()=>{if(/^\d\d:\d\d$/.test(field.value))save({[key]:field.value});});return field;};
+ const account=(name,state)=>append(node('div','account-row'),node('span','account-dot'),node('span','',name),node('small','muted',state==='ok'?'Connected':state==='error'?'Couldn’t reach it':state==='not-connected'?'Not connected':proactiveStatus.composio?'Checks after you turn heads-ups on':'Not connected'));
+ async function draw(){
+  try{proactiveStatus=await result(bridge.proactiveStatus());}catch(error){body.replaceChildren(node('p','',error.message));return;}
+  const config=proactiveStatus.config;body.replaceChildren();
+  append(body,node('h2','','Let Grok Bot reach out first'),node('p','muted intro','Grok Bot watches your Gmail and Google Calendar in the background and messages you when something needs you, so you don’t have to keep checking.'));
+  const master=append(node('div','settings-card master-card'),toggle('Heads-ups','enabled',config.enabled?(proactiveStatus.checking?'Checking now…':`On · last checked ${ago(proactiveStatus.lastCheck)}`):'Off'));
+  body.append(master);
+  if(config.enabled){const status=node('div','account-list');status.append(account('Gmail',proactiveStatus.gmail),account('Google Calendar',proactiveStatus.calendar));status.children[0].dataset.state=proactiveStatus.gmail;status.children[1].dataset.state=proactiveStatus.calendar;master.append(status);
+   if(!proactiveStatus.composio||proactiveStatus.gmail==='not-connected'||proactiveStatus.calendar==='not-connected')master.append(append(node('div','setting-row'),node('small','muted','Connect Gmail and Google Calendar through Connect apps. Heads-ups use whichever ones are connected.'),button('Connect apps',()=>showApps(),'pill')));
+   if(proactiveStatus.error)master.append(node('p','heads-up-error',proactiveStatus.error));
+   master.append(append(node('div','setting-row'),button(proactiveStatus.checking?'Checking…':'Check now',async event=>{event.currentTarget.disabled=true;try{proactiveStatus=await result(bridge.proactiveCheck());showHeadsUpBadge(proactiveStatus);}catch(error){toast(error.message);}draw();},'pill')));}
+  const lead=node('select');lead.setAttribute('aria-label','Minutes before a meeting');for(const minutes of [5,10,15,30]){const option=node('option','',`${minutes} min before`);option.value=minutes;lead.append(option);}lead.value=config.leadMinutes;lead.disabled=!config.enabled;lead.addEventListener('change',()=>save({leadMinutes:Number(lead.value)}));
+  append(body,node('p','settings-label','Tell me about'),append(node('div','settings-card'),
+   toggle('Important new email','email','Mail from real people and anything time-sensitive. Newsletters and promotions stay quiet.'),
+   toggle('Upcoming meetings','meetings','A reminder with the join link.',lead),
+   toggle('Double-bookings','conflicts','When two events on your calendar overlap.'),
+   toggle('Morning brief','brief','Your day at a glance: meetings, gaps and email waiting on you.',time('briefTime','Morning brief time'))));
+  append(body,node('p','settings-label','When'),append(node('div','settings-card'),
+   toggle('Quiet hours','quietHours','Heads-ups still land in the chat, without a sound or banner.',append(node('span','time-range'),time('quietStart','Quiet hours start'),node('span','muted','to'),time('quietEnd','Quiet hours end'))),
+   toggle('Open at sign-in','openAtLogin','Starts in the tray when you sign in to Windows. Closing the window keeps heads-ups running; quit from the tray icon.')));
+  body.append(node('p','muted footnote','New email previews go to your selected AI CLI so it can decide what matters. Heads-up turns can’t use tools, send email or change anything. Ask Grok Bot directly when you want it to act.'));
+ }
+ headsUpRefresh=()=>{if(body.isConnected&&!body.contains(document.activeElement))draw();else if(!body.isConnected)headsUpRefresh=null;};
+ await draw();
+}
 function currentBot() { return workspace.bots.find(bot => bot.id === selected); }
 function entries(bot) { return workspace.entries.filter(entry => entry.botID === bot.id); }
 function applyTheme(value) {
@@ -75,14 +163,14 @@ async function persist(next) {
   try { await result(bridge.save(next)); workspace = next; return true; }
   catch (error) { toast(error.message); return false; }
 }
-function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});if(bot?.unread){bot.unread=false;bridge.organizeBot?.(id,{unread:null}).catch?.(()=>{});}render(); }
+function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;if(banner.botID===id)hideBanner();const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});if(bot?.unread){bot.unread=false;bridge.organizeBot?.(id,{unread:null}).catch?.(()=>{});}render(); }
 function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
   const matches=bot=>(!bot.hidden||!!search)&&(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
   const primary=$('#primary-bot');primary.replaceChildren();
   const matching=orderedBots().filter(x=>matches(x));const heroes=[...matching.filter(x=>x.isMain&&isPinned(x)),...matching.filter(x=>!x.isMain&&isPinned(x))];
   for(const bot of heroes){const face=avatar(bot,true),state=waitingOn(bot)?'attention':running.has(bot.id)?'working':'';if(state)face.classList.add(state);const tile=append(button('',()=>selectBot(bot.id),`primary-card ${selected===bot.id?'selected':''}${bot.unread&&bot.id!==selected?' unread':''}`),face,node('span','',bot.name));tile.addEventListener('contextmenu',event=>{event.preventDefault();showBotActions(bot);});wireBotDrag(tile,bot);primary.append(tile);}
-  const lastText=new Map();for(const entry of workspace.entries)lastText.set(entry.botID,entry.text);
+  const lastText=new Map();for(const entry of workspace.entries)lastText.set(entry.botID,entry.label||entry.text);
   const list=$('#bot-list');list.replaceChildren();
   const visible=recentBots(matching.filter(bot=>!isPinned(bot)));
   for(const bot of visible){
@@ -139,14 +227,15 @@ const chatResizeObserver=new ResizeObserver(()=>scheduleChatBottom());chatResize
 function renderMessages(bot){
  let messages=$('#message-content');if(!messages){messages=node('div');messages.id='message-content';chatViewport.replaceChildren(messages);chatResizeObserver.observe(messages);}
  const previousScroll=chatViewport.scrollTop;
+ const initial=chatScroll.bot!==bot.id;
  if(chatScroll.bot!==bot.id){chatScroll.bot=bot.id;chatScroll.follow=true;chatScroll.userUntil=0;messages.replaceChildren();messages.dataset.bot=bot.id;messages.rows=new Map();}
  const rows=messages.rows||=new Map();
  for(const el of messages.querySelectorAll('[data-extra]'))el.remove();
  const list=entries(bot),live=new Set();let index=0;const lastEntryID=list.at(-1)?.id;
- const lastUserID=list.findLast(x=>x.kind==='user'&&x.delivery!=='scheduled')?.id,lastTalkID=list.findLast(x=>x.kind!=='activity')?.id;
+ const lastUserID=list.findLast(x=>x.kind==='user'&&!['scheduled','proactive'].includes(x.delivery))?.id,lastTalkID=list.findLast(x=>x.kind!=='activity')?.id;
  for(const entry of list){
   live.add(entry.id);let row=rows.get(entry.id);const kind=entryKind(entry);
-  if(!row||row.kind!==kind){row?.remove();row=node('div',kind==='activity'?'activity':`message-row ${kind==='botnote'?'bot botnote':entry.kind}${entry.senderBotID&&entry.kind==='bot'?' from-bot':''}`);row.kind=kind;row.dataset.entry=entry.id;row.append(node('div','message-body'));rows.set(entry.id,row);}
+  if(!row||row.kind!==kind){row?.remove();row=node('div',kind==='activity'?'activity':`message-row ${kind==='botnote'?'bot botnote':entry.kind}${entry.senderBotID&&entry.kind==='bot'?' from-bot':''}`);row.kind=kind;row.dataset.entry=entry.id;row.append(node('div','message-body'));rows.set(entry.id,row);if(entry.headsUp&&entry.kind==='bot'){row.classList.add('heads-up');if(!initial)row.classList.add('arriving');}}
   const canAnswer=entry.id===lastTalkID&&entry.kind==='bot'&&entry.state!=='streaming'&&!running.has(bot.id);
   const key=[entry.text,entry.state||'',entry.id===lastUserID,canAnswer,entry.id===lastEntryID,entry.senderName||'',entry.provider||''].join('\u0001');
   const body=row.firstElementChild;if(row.renderKey!==key){row.renderKey=key;row.toolsKey='';body.replaceChildren();renderEntryBody(bot,entry,body,{isLastUser:entry.id===lastUserID,canAnswer,canSuggest:canAnswer&&entry.id===lastEntryID});row.dataset.state=entry.state||'';}
@@ -163,7 +252,7 @@ function renderMessages(bot){
  if(chatScroll.follow)scheduleChatBottom();else chatViewport.scrollTop=previousScroll;
 }
 // ---- 0.9.2: Grok Bot chat parts: tool pills, typing dots, Bot-to-Bot messages, question and approval cards ----
-function entryKind(entry){if(entry.kind==='activity'&&entry.senderBotID&&String(entry.text||'').startsWith('Message from '))return 'botnote';return entry.kind==='activity'||entry.delivery==='scheduled'?'activity':'message';}
+function entryKind(entry){if(entry.kind==='activity'&&entry.senderBotID&&String(entry.text||'').startsWith('Message from '))return 'botnote';return entry.kind==='activity'||entry.delivery==='scheduled'||entry.delivery==='proactive'?'activity':'message';}
 function splitChoices(text){
  const value=String(text||''),match=/```choices[ \t]*\n([\s\S]*?)```/.exec(value);if(!match)return {text:value,prompt:null};
  const lines=match[1].split('\n').map(x=>x.trim().replace(/^[-*•]+/,'').trim()).filter(Boolean);let multiple=false;
@@ -198,7 +287,8 @@ function questionCard(bot,prompt,canAnswer){
 const markdownContext=bot=>({openLink:url=>bridge.openLink?bridge.openLink(url).then(r=>{if(r&&!r.ok)toast(r.error);}).catch(()=>{}):window.open(url,'_blank','noopener'),loadImage:path=>bridge.botImage?result(bridge.botImage(bot.id,path)).catch(()=>null):Promise.resolve(null)});
 function renderEntryBody(bot,entry,body,{isLastUser,canAnswer,canSuggest}){
  const kind=entryKind(entry);
- if(kind==='activity'){body.append(activityPill(entry.text,entry.delivery==='scheduled'));return;}
+ // Automatic heads-up checks show their short label, never the prompt with email text.
+ if(kind==='activity'){body.append(activityPill(entry.delivery==='proactive'?entry.label||'Automatic check':entry.text,entry.delivery==='scheduled'));return;}
  if(kind==='botnote'){
   const [,...rest]=String(entry.text).split('\n'),message=rest.join('\n')||entry.text,from=entry.senderName||'Another Bot';
   const label=append(node('small','sender-line'),node('strong','',from),node('span','arrow','→'),node('span','',bot.name));
@@ -209,6 +299,7 @@ function renderEntryBody(bot,entry,body,{isLastUser,canAnswer,canSuggest}){
  // Follow-up chips (0.9.5): the Bot's suggested next requests, shown under the latest reply only.
  const follow=entry.kind==='bot'?splitSuggestions(choice.text):{text:choice.text,suggestions:[]},text=follow.text;
  const stack=node('div','stack');
+ if(entry.headsUp&&entry.kind==='bot')stack.append(headsUpTag(entry));
  if(fromBot){body.append(senderFace(entry));stack.append(node('small','sender-line',bot.memberIDs?(entry.senderName||'Bot'):`${entry.senderName||'Another Bot'} replied`));}
  if(!entry.text&&entry.state==='streaming')stack.append(typingBubble());
  else if(text){
@@ -383,6 +474,7 @@ async function renderComposio(content){
         const row=append(node('div','setting-row'),node('strong','',toolkit.name),node('small','muted',toolkit.connected?'Connected':toolkit.noAuth?'No sign-in required':toolkit.status||'Not connected'));
         if(!toolkit.connected&&!toolkit.noAuth)row.append(button('Connect',async()=>{try{await result(bridge.composioLink(toolkit.slug));toast('Finish authorizing in your browser, then refresh connections.');}catch(error){toast(error.message);}}));body.append(row);
       }
+      if(status.toolkits.some(x=>['gmail','googlecalendar'].includes(x.slug)&&x.connected)&&bridge.proactiveStatus)body.append(append(node('div','heads-up-nudge'),append(node('div'),node('strong','','Want Grok Bot to keep an eye on these?'),node('p','muted','Turn on heads-ups and it will message you about important email and upcoming meetings.')),button('Set up heads-ups',()=>showSettings('Heads-ups'),'pill primary')));
       append(body,node('p','muted','Selected tools reach your CLI through MCP. Tool actions follow the CLI’s permission settings.'),button('Remove project from this device',async()=>{try{await result(bridge.composioRemove());draw();}catch(error){toast(error.message);}}),button('Manage or revoke accounts in Composio ↗',()=>bridge.openDocs('https://platform.composio.dev')));
     }
   };await draw();
@@ -392,7 +484,7 @@ function unavailable(title, detail) { return append(node('div', 'unavailable'), 
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
   const layout = node('div', 'settings-layout'); const nav = node('nav', 'settings-nav'); const page = node('section', 'settings-page');
-  for (const [name, glyph] of [['General','⚙'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Secure Logins','⚿'],['Vault','⚿'],['Voice','♫'],['Local models','◫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), node('span','',glyph), node('div','',name)));
+  for (const [name, glyph] of [['General','⚙'],['Heads-ups','✦'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Secure Logins','⚿'],['Vault','⚿'],['Voice','♫'],['Local models','◫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) {const icon=node('span','',glyph);icon.setAttribute('aria-hidden','true');nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), icon, node('div','',name)));}
   append(page, append(node('header','panel-head'), node('h1','',tab), button('×', () => dialog.close(), 'close-panel')));
   append(layout, nav, page); dialog.append(layout); if (!dialog.open) dialog.showModal();
   if (tab === 'General') {
@@ -408,6 +500,7 @@ function showSettings(tab = 'General') {
   else if (tab === 'Permissions') renderPermissions(page);
   else if (tab === 'Local models') renderLocalModels(page);
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
+  else if (tab === 'Heads-ups') renderHeadsUps(page);
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
   else if (tab === 'API Keys') renderApiKeys({ bridge, result, toast, page });
@@ -524,7 +617,9 @@ $('#new-button').addEventListener('click',showNewBot); $('#profile-button').addE
 for(const control of document.querySelectorAll('[data-window]')) control.addEventListener('click',async()=>{if(control.dataset.window==='close'&&bridge.saveDrafts){clearTimeout(draftTimer);try{await result(bridge.saveDrafts(Object.fromEntries(drafts)));}catch(error){toast(error.message);return;}}window.desktop?.windowAction(control.dataset.window);});
 window.addEventListener('blur',()=>{focusGeneration++;for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key==='n'){event.preventDefault();showNewBot();}else if(event.key===','){event.preventDefault();showSettings();}else if(event.key==='f'){event.preventDefault();$('#search-button').click();}else if(event.key==='Enter'&&!dialog.open){event.preventDefault();$('#composer').requestSubmit();}});
-bridge.onChange?.(value=>{workspace=value.workspace;running=new Set(value.running);render();});
+bridge.onChange?.(value=>{workspace=value.workspace;running=new Set(value.running);noticeHeadsUps();render();});
+bridge.onProactiveChange?.(value=>{proactiveStatus=value;showHeadsUpBadge(value);headsUpRefresh?.();});
+bridge.proactiveStatus?.().then(response=>{if(response.ok){proactiveStatus=response.value;showHeadsUpBadge(response.value);}}).catch(()=>{});
 bridge.onOpenBot?.(id=>{if(workspace.bots.some(bot=>bot.id===id))selectBot(id);});
 function showCloudStatus(value){
  const old=cloudStatus?.phase;cloudStatus=value;let badge=$('#phone-state');if(!badge){badge=button('',()=>showSettings('Computer'),'phone-state');badge.id='phone-state';$('#status-button').before(badge);}badge.textContent=value.phase==='approval-required'?'Approve your iPhone':value.enabled?value.phase==='offline'?'Phone connection offline · retrying':value.phase==='connecting'?'Connecting your iPhone…':'Phone access ready':'Connect your iPhone';badge.title=value.feedback;badge.dataset.state=value.phase;if(value.phase==='approval-required'&&old!==value.phase)toast(value.feedback);
@@ -532,6 +627,7 @@ function showCloudStatus(value){
 bridge.onCloudChange?.(showCloudStatus);
 bridge.cloudStatus?.().then(response=>{if(response.ok)showCloudStatus(response.value);}).catch(()=>{});
 try { workspace=await result(bridge.load());selected=workspace.bots[0]?.id; setup=await result(bridge.scanCLIs()); }catch(error){toast(error.message);}
+noticeHeadsUps();
 render();
 
 if(window.desktop&&!setup.complete)showConnection();
@@ -886,7 +982,8 @@ async function renderCatalog(content) {
   search.addEventListener('input', () => { query = search.value; draw(); });
   if (!status.configured && window.desktop) append(setup, node('p', 'muted', 'Use your own Composio project to connect apps to your CLI. This is optional. Add the apps you want, paste your project key, then connect.'), key, append(node('div', 'panel-bottom'), button('Get a project key ↗', () => bridge.openDocs('https://platform.composio.dev')), link), node('p', 'muted', 'The project key and tool session are encrypted with Windows device storage. Composio has its own pricing and usage limits.')), link.disabled = true;
   else if (!window.desktop) append(setup, node('p', 'muted', 'Open the installed desktop app to store your project key securely.'));
-  else { append(setup, node('p', 'muted', 'Apps are chosen when the project is connected. To change them, remove the project below and connect again.'), button('Remove project from this device', async () => { try { await result(bridge.composioRemove()); await showApps(); } catch (error) { toast(error.message); } }), button('Manage or revoke accounts in Composio ↗', () => bridge.openDocs('https://platform.composio.dev'))); addAllowToggle(setup); }
+  else { if ((connected.has('gmail') || connected.has('googlecalendar')) && bridge.proactiveStatus) setup.append(append(node('div', 'heads-up-nudge'), append(node('div'), node('strong', '', 'Want Grok Bot to keep an eye on these?'), node('p', 'muted', 'Turn on heads-ups and it will message you about important email and upcoming meetings.')), button('Set up heads-ups', () => showSettings('Heads-ups'), 'pill primary')));
+    append(setup, node('p', 'muted', 'Apps are chosen when the project is connected. To change them, remove the project below and connect again.'), button('Remove project from this device', async () => { try { await result(bridge.composioRemove()); await showApps(); } catch (error) { toast(error.message); } }), button('Manage or revoke accounts in Composio ↗', () => bridge.openDocs('https://platform.composio.dev'))); addAllowToggle(setup); }
   append(content, header, search, chips, setup, body); draw();
 }
 

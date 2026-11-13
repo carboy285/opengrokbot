@@ -15,11 +15,12 @@ enum MacPanel: String, Identifiable {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "General", computer = "Computer", permissions = "Permissions", apiKeys = "API Keys", secureLogins = "Secure Logins", vault = "Vault", voice = "Voice", localModels = "Local Models", usage = "Usage & Billing", updates = "Updates"
+    case general = "General", headsUps = "Heads-ups", computer = "Computer", permissions = "Permissions", apiKeys = "API Keys", secureLogins = "Secure Logins", vault = "Vault", voice = "Voice", localModels = "Local Models", usage = "Usage & Billing", updates = "Updates"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .general: "gearshape"
+        case .headsUps: "sparkles"
         case .computer: "desktopcomputer"
         case .permissions: "shield"
         case .apiKeys: "key"
@@ -76,6 +77,7 @@ final class MacAppModel: ObservableObject {
     @Published var setupFeedback: String?
     @Published var runningBots: Set<UUID> = [] { didSet { refreshAwake() } }
     let triggers = MacTriggers()
+    let headsUps = MacHeadsUps()
     private var awakeActivity: NSObjectProtocol?
     private var routinesWantAwake = false
 
@@ -233,6 +235,8 @@ final class MacAppModel: ObservableObject {
                 self.routinesWantAwake = UserDefaults.standard.bool(forKey: "keepAwakeForRoutines") && app.workspace.bots.contains { ($0.schedules ?? []).contains(where: \.enabled) }
                 self.refreshAwake()
                 if ticks % 12 == 0 { await self.triggers.poll(app: app) }
+                // Heads-ups look at Mail and Calendar about every three minutes.
+                if ticks % 36 == 6 { await self.headsUps.poll(app: app) }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }

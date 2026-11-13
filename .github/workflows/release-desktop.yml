@@ -17,7 +17,7 @@ concurrency:
 jobs:
   mac:
     runs-on: macos-26
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
       MACOS_SIGN_IDENTITY: ${{ github.event_name == 'workflow_dispatch' && inputs.signed && secrets.MACOS_SIGN_IDENTITY || '-' }}
@@ -49,10 +49,17 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN"
           xcrun notarytool store-credentials OpenGrokBotCI --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
           echo 'MACOS_NOTARY_PROFILE=OpenGrokBotCI' >> "$GITHUB_ENV"
+      - name: Run heads-up tests on the Mac
+        # Compiles the Mac app and its tests, then runs the heads-up rules. A failure stops the release.
+        run: >-
+          xcodebuild -project GrokBot.xcodeproj -scheme GrokBotMac
+          -destination 'platform=macOS'
+          -only-testing:GrokBotMacTests/HeadsUpRulesTests
+          CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
       - name: Package universal Mac installer
         run: ./scripts/build-macos.sh
       - name: Archive matching sources
-        run: git archive --format=zip --prefix=OpenGrokBot-0.9.5/ --output=artifacts/OpenGrokBot-0.9.5-Source.zip HEAD
+        run: git archive --format=zip --prefix=OpenGrokBot-0.9.6/ --output=artifacts/OpenGrokBot-0.9.6-Source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
@@ -121,6 +128,7 @@ jobs:
           SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.signed }}
         run: |
           cat > /tmp/desktop-release.md <<'NOTES'
+          0.9.6: heads-ups. Grok Bot now reaches out first instead of waiting to be asked. Turn it on in Settings → Heads-ups. On Windows it watches Gmail and Google Calendar through your Composio project: new unread mail goes to your AI CLI, which tells you only about the emails that need you (a person waiting on a reply, deadlines, money, security, travel); otherwise you get one quiet “nothing needs you” line. You also get a reminder before each meeting with the join link, a note when two events overlap, and a morning brief at the time you choose. Quiet hours keep heads-ups in the chat without a sound; while heads-ups are on, closing the window keeps the app in the tray, and Open at sign-in starts it there. On the Mac it uses Mail and Calendar on the Mac itself (switch them on under Connect apps → This Mac): meeting reminders, double-bookings, a morning brief, and new mail from people (automated senders stay quiet); phone alerts follow your phone notification setting. Heads-ups are read-only: they never send, reply, accept or change anything, Windows heads-up turns run without connected-app tools, and email text is treated as untrusted data. Reply to Grok Bot when you want it to act. The first check only records what is already in your inbox, so turning heads-ups on does not flood the chat. Built on 0.9.5. Checked with fixture accounts and a fixture AI CLI; live Gmail, Google Calendar, Apple Mail and Calendar, and notifications on real devices have not been tried yet.
           0.9.5: smarter chats and a faster voice. ChatGPT-style help: Bots offer two or three tap-to-send follow-ups under each answer, an empty chat shows starter ideas for that Bot, and you can edit and resend your last message or regenerate a reply. Rich replies: headings, numbered and nested lists, real tables, syntax-highlighted code with Copy, links and the Bot's own images (Mac and Windows). Voice speaks one sentence at a time and starts at the first pause, so it begins talking sooner; the next sentence is made while the current one plays. Codex answers stream as they are written, so voice and chat start sooner. Settings → Local models: an Ollama manager to see, download (with progress) and remove models, with recommendations for your computer and the quickest one picked for voice. Search every chat (⌘K / search button) and jump to the message; pin messages and find them again; export a chat as Markdown or PDF; share a single message (Mac); Copy diagnostics for bug reports. Voice from anywhere: Option-Space on Mac, Ctrl+Shift+Space on Windows. iPhone voice keeps going with the screen locked. Windows uses its native title-bar buttons, and long chats scroll more smoothly. Fix: choosing Ollama or LM Studio for a Bot no longer fails to save on Windows. Compiled for Mac and iPhone by CI; not yet tried on real devices.
           0.9.4: fixes from a real Mac (M5). The open-source voice now starts on the Mac: the Mac app's web engine could not read Kokoro's pronunciation data (WebKit has no async stream iteration), so it failed at startup; a small compatibility shim fixes it. Safer, faster defaults: Kokoro's small model (92 MB) on the processor, now using several cores (the engine page is cross-origin isolated), and Whisper base instead of small. On the Mac, Apple's on-device recognizer stays the recommended listener (quickest, with live captions) and Whisper is optional. A graphics-chip load that fails falls back to the processor by itself, and missing model files are named instead of the vague “Unsupported model type”. New Test speed and Use the graphics chip if it's faster buttons in Settings → Voice measure this computer and keep the faster option. UI: messages fade out under the chat header so the Bot name and model never cover text, the model label is shorter and quieter, and the dictation, voice and send buttons are one grouped control. scripts/diagnose-local-voice.mjs tests the app's default models, sends proper file sizes, and has --headed for real GPU timing.
           0.9.3: voice mode, rebuilt. Free open-source voice on your Mac or PC: Whisper listens and Kokoro-82M speaks, nothing leaves the computer, and Settings → Voice recommends the right model sizes for your machine and downloads them once. Turn-taking waits when you trail off (“and…”, “um”) with Quick / Normal / Relaxed patience, and you can hold the orb or Space to keep talking. While a Bot works you hear a short “one sec” and what it is doing. In voice mode Bots answer in short spoken sentences from quicker models (Claude Code → Haiku, Gemini CLI → Flash, Codex → low reasoning effort), including when you talk from your iPhone. Voice shows as a small card, full screen or a small pill, can be minimized and expanded, and keeps running when you open another Bot. Bot names help recognition, and Apple devices can opt in to more accurate server recognition. New: Ollama and LM Studio as self-hosted chat models for any Bot. Built on 0.9.2. Compiled for Mac and iPhone by CI; model downloads, WebGPU speed and recognition quality have not been tried on real devices.
@@ -143,6 +151,6 @@ jobs:
           release_files=(downloads/*.zip downloads/macos/*.dmg downloads/macos/*.sha256 downloads/*.exe)
           test "${#release_files[@]}" -ge 3 || { echo 'Expected Mac, Windows and source downloads.' >&2; exit 1; }
           # A failed asset upload can leave an unpublished draft. Public releases are kept.
-          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.9.5" and .draft == true)] | .[0].id // empty')
+          draft_id=$(gh api 'repos/carboy285/opengrokbot/releases?per_page=100' --jq '[.[] | select(.tag_name == "v0.9.6" and .draft == true)] | .[0].id // empty')
           if [ -n "$draft_id" ]; then gh api --method DELETE "repos/carboy285/opengrokbot/releases/$draft_id"; fi
-          gh release create v0.9.5 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.9.5 · Smarter chats, faster voice' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"
+          gh release create v0.9.6 --target "$GITHUB_SHA" --title 'OpenGrokBot 0.9.6 · Heads-ups: Grok Bot reaches out first' --prerelease --notes-file /tmp/desktop-release.md "${release_files[@]}"

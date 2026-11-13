@@ -45,6 +45,12 @@ enum BotAvatarShape: String, Codable, CaseIterable, Sendable {
     var label: String { rawValue.capitalized }
 }
 
+/// What a heads-up is about. Same shape as the Windows app's `headsUp`, so chats mirrored between computers decode.
+struct HeadsUpTag: Codable, Equatable, Sendable {
+    var kind: String
+    var title: String?
+}
+
 struct Entry: Identifiable, Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable { case user, bot, activity }
     let id: UUID
@@ -62,6 +68,10 @@ struct Entry: Identifiable, Codable, Equatable, Sendable {
     var reaction: String? = nil
     /// Pinned by the human so it is easy to find again (0.9.5).
     var pinned: Bool? = nil
+    /// Set when Grok Bot reached out on its own: a heads-up about mail, a meeting or the day (0.9.6).
+    var headsUp: HeadsUpTag? = nil
+    /// Short text shown instead of an automatic turn's full prompt (0.9.6).
+    var label: String? = nil
     let date: Date
 
     init(botID: UUID, kind: Kind, text: String, id: UUID = UUID(), date: Date = Date()) {

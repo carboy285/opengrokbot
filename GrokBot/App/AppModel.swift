@@ -275,6 +275,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A message Grok Bot sends on its own (heads-ups, 0.9.6): finished, with a small tag saying what it is about.
+    @discardableResult
+    func postHeadsUp(_ text: String, kind: String, title: String, to botID: UUID) -> Bool {
+        guard workspace.bots.contains(where: { $0.id == botID }) else { return false }
+        return commit { var entry = Entry(botID: botID, kind: .bot, text: text); entry.state = .complete; entry.provider = "Heads-up"; entry.headsUp = HeadsUpTag(kind: kind, title: title); $0.entries.append(entry) }
+    }
+
     func activity(_ text: String, for botID: UUID, detail: String? = nil) {
         _ = commit { var entry = Entry(botID: botID, kind: .activity, text: text); entry.detail = detail; $0.entries.append(entry) }
     }

@@ -22,6 +22,7 @@ const settingsBundles=require('./settings-bundle.cjs');
 const backup=require('./backup.cjs');
 const { CloudHost } = require('./cloud-host.cjs');
 const updates = require('./updates.cjs');
+const proactive = require('./proactive.cjs');
 const stoppedBots=new Set();
 let remoteTray, quitting = false, revision = randomUUID(), updateState;
 class PublicError extends Error {}
@@ -111,7 +112,8 @@ function notifyFinished(botID,reply){
   note.show();
  }catch{}
 }
-async function startChat(botID,text,delivery,requestID,browserDepth=0){
+async function startChat(botID,text,delivery,requestID,browserDepth=0,options={}){
+ const headsUp=options.headsUp;
  const bot=state.bots.find(x=>x.id===botID);
  const scheduledTask=(requestID&&bot?.schedules?.find(task=>task.occurrence===requestID))||(!text&&!delivery&&bot?.schedules?.find(task=>task.id===routineRuns.get(botID)?.id));
  if(composioBusy)throw new PublicError('Wait for Composio setup to finish before sending a message.');
@@ -125,7 +127,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
  stoppedBots.delete(botID);
  pendingBots.add(botID);
  try{
-  if(delivery)teamwork.begin(state,delivery);else if(text)state.entries.push({id:requestID||randomUUID(),botID,kind:'user',text,delivery:scheduledTask?'scheduled':'delivered',date:new Date().toISOString()});
+  if(delivery)teamwork.begin(state,delivery);else if(text)state.entries.push({id:requestID||randomUUID(),botID,kind:'user',text,delivery:headsUp?'proactive':scheduledTask?'scheduled':'delivered',...(headsUp?{label:headsUp.label}:{}),date:new Date().toISOString()});
   await atomicJSON('preview-workspace.json',state);
   const history=state.entries.filter(x=>x.botID===botID&&!['failed','stopped'].includes(x.state)&&x.text).slice(-30);
   const runs=new Set();active.set(botID,runs);
@@ -138,14 +140,15 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
    const prompt=teamwork.instructions(bot,state,!!delivery,composioConfiguration?composioConfiguration.toolkits:[])+'\n'+await vmStatusNote()+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
-   const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming'};state.entries.push(reply);
-   const run=cli.runCLI({installation,prompt:prompt+(voiceTurn?teamwork.VOICE_STYLE:''),session,model:voiceTurn&&voicePrefs.fastModel!==false?teamwork.voiceModel(installation.provider,choice.model,voicePrefs.voiceModels?.[installation.provider]):choice.model,fast:voiceTurn&&voicePrefs.fastModel!==false,directory:botDirectory(botID),mcpURL:composioConfiguration?.session.mcp.url,allowConnectedApps:settings.allowConnectedApps===true,env:await cliKeyEnv(installation.provider),onEvent:event=>{
+   const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming',...(headsUp?{headsUp:{kind:headsUp.kind,title:headsUp.label}}:{})};state.entries.push(reply);
+   const run=cli.runCLI({installation,prompt:prompt+(voiceTurn?teamwork.VOICE_STYLE:''),session,model:voiceTurn&&voicePrefs.fastModel!==false?teamwork.voiceModel(installation.provider,choice.model,voicePrefs.voiceModels?.[installation.provider]):choice.model,fast:voiceTurn&&voicePrefs.fastModel!==false,directory:botDirectory(botID),mcpURL:headsUp?undefined:composioConfiguration?.session.mcp.url,allowConnectedApps:!headsUp&&settings.allowConnectedApps===true,env:await cliKeyEnv(installation.provider),onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
     if(event.type==='notice'){state.entries.push({id:randomUUID(),botID,kind:'activity',text:String(event.text).slice(0,400),date:new Date().toISOString()});notify();}
-    if(event.type==='text'){finalText=event.text;reply.text=teamwork.parse(event.text).text;notifyStreaming();}
+    if(event.type==='text'){finalText=event.text;const visible=teamwork.parse(event.text).text;reply.text=headsUp&&proactive.isQuiet(visible)?'':visible;notifyStreaming();}
    }});
    runs.add(run);
    run.done.then(async()=>{if(scheduledTask&&!routineRuns.has(botID))routineRuns.set(botID,{id:scheduledTask.id,runID:requestID,failed:false});settings.providerHealth||={};settings.providerHealth[installation.provider]={state:'ready',detail:'Last message succeeded',at:new Date().toISOString()};teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');
+    if(headsUp)return; // heads-up turns are read-only: no VM, browser or device steps
     if(teamwork.parse(finalText).actions.some(x=>x.action==='open_vm')){let text;try{await localVMs.open(botID);text='Opened this Bot’s VM console on the host. AI CLI still runs on the host; guest automation is separate.';}catch(error){text=error.message;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
     const guest=teamwork.parse(finalText).actions.find(x=>x.action==='vm_exec');if(guest){let text;if(browserSteps>=teamwork.MAX_STEPS){text=teamwork.STEP_LIMIT_MESSAGE;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}else{browserSteps++;try{const link=(await vmLinks()).shared;text='Linux VM result (untrusted context):\n'+(link?`Linux guest on ${link.hostName} (${link.vmName}):\n`+await remoteVMExec(link,guest.argv):await localVMs.execute(homeBotID(botID),guest.argv));}catch(error){text=error.message;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}continueBrowser=!delivery;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
     const action=teamwork.parse(finalText).actions.find(x=>x.action==='browse_web');
@@ -158,11 +161,12 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0){
      state.entries.push({id:randomUUID(),botID,kind:'activity',text,...(detail?{detail}:{}),date:new Date().toISOString()});}
    },error=>{reply.state=error.message==='Response stopped.'?'stopped':'failed';if(scheduledTask)scheduledTask.lastResult=reply.state==='stopped'?'cancelled':'failed';reply.error=error.message;settings.providerHealth||={};settings.providerHealth[installation.provider]={state:/sign.in|login|auth/i.test(error.message)?'needs-login':'error',detail:error.message,at:new Date().toISOString()};if(!reply.text)reply.text=error.message;if(delivery)teamwork.finish(state,delivery,reply.state);}).catch(error=>{reply.state='failed';if(scheduledTask)scheduledTask.lastResult='failed';reply.error='The app could not finish this response. Retry after checking Bot settings.';if(!reply.text)reply.text=reply.error;}).finally(async()=>{
     runs.delete(run);if(!runs.size)active.delete(botID);
+    if(options.onSettled)try{options.onSettled(reply);}catch{}
     try{await atomicJSON('preview-workspace.json',state);await saveSettings();}catch{reply.state='failed';reply.error='The response could not be saved. Check available storage.';}
     let continuing=false;
     if(continueBrowser&&!quitting&&!stoppedBots.has(botID)){try{await startChat(botID,undefined,undefined,undefined,browserSteps);continuing=true;}catch{if(scheduledTask)scheduledTask.lastResult='failed';}}
     if(scheduledTask&&!continuing){if(scheduledTask.lastResult==='running')scheduledTask.lastResult=stoppedBots.has(botID)?'cancelled':routineRuns.get(botID)?.failed?'failed':'completed';const history=scheduledTask.history?.find(run=>run.id===routineRuns.get(botID)?.runID);if(history)history.status=scheduledTask.lastResult;routineRuns.delete(botID);await atomicJSON('preview-workspace.json',state);}
-    if(!continuing)notifyFinished(botID,reply);
+    if(!continuing&&!headsUp)notifyFinished(botID,reply);
     notify();await deliverQueued();
    });
   }
@@ -195,6 +199,63 @@ async function tickSchedules(){
  }finally{scheduling=false;}
 }
 setInterval(()=>tickSchedules().catch(()=>{}),5000).unref();
+
+// ---------- Heads-ups: Grok Bot reaches out first ----------
+let proactiveState=null,toolsCheckedAt=0;
+const headsUpConfig=()=>proactive.sanitizeConfig(settings?.proactive);
+const keepRunning=()=>cloud.active||headsUpConfig().enabled;
+const mainBot=()=>state?.bots.find(x=>x.isMain);
+const firstLine=text=>String(text).split('\n').map(x=>x.trim()).find(Boolean)||'';
+async function linkedAccounts(){
+ if(!composioConfiguration)return {gmail:false,calendar:false};
+ if(!connectedTools.length||Date.now()-toolsCheckedAt>15*60000){try{connectedTools=await composio.toolkits(composioConfiguration.key,composioConfiguration.session.session_id);toolsCheckedAt=Date.now();}catch{}}
+ const linked=slug=>connectedTools.some(x=>x.slug===slug&&x.connected);
+ return {gmail:linked('gmail'),calendar:linked('googlecalendar')};
+}
+function headsUpBanner(botID,title,body,silent){
+ if(!Notification.isSupported())return;
+ const banner=new Notification({title,body:String(body).slice(0,240),silent:!!silent});
+ banner.on('click',()=>{showHost();if(window&&!window.isDestroyed())window.webContents.send('bot:open',botID);});
+ banner.show();
+}
+// Quiet "nothing needs you" lines are useful for a while, then only clutter the chat.
+function pruneQuietLines(){const quiet=state.entries.filter(x=>x.kind==='activity'&&x.headsUp);if(quiet.length>20){const drop=new Set(quiet.slice(0,quiet.length-20).map(x=>x.id));state.entries=state.entries.filter(x=>!drop.has(x.id));}}
+const watcher=new proactive.Watcher({
+ config:headsUpConfig,
+ timeZone:()=>Intl.DateTimeFormat().resolvedOptions().timeZone,
+ connections:linkedAccounts,
+ execute:(tool,args)=>proactive.execute(composioConfiguration.key,settings.composioUserID,tool,args),
+ load:async()=>proactiveState||=await loadJSON('proactive-state.json',{}),
+ save:async value=>{proactiveState=value;await atomicJSON('proactive-state.json',value);},
+ say:async({kind,title,text,silent})=>{
+  const bot=mainBot();if(!bot)return;
+  state.entries.push({id:randomUUID(),botID:bot.id,kind:'bot',text,state:'complete',provider:'Heads-up',headsUp:{kind,title},date:new Date().toISOString()});
+  await atomicJSON('preview-workspace.json',state);notify();headsUpBanner(bot.id,title,text,silent);
+ },
+ ask:async({kind,label,prompt,count,silent})=>{
+  const bot=mainBot();if(!bot)throw new Error('No main Bot.');
+  if(active.has(bot.id)||pendingBots.has(bot.id))throw proactive.busy('The Bot is already answering.');
+  // Don't cut into a conversation the human is having right now.
+  const recent=state.entries.findLast(x=>x.botID===bot.id&&x.kind==='user'&&!['proactive','scheduled'].includes(x.delivery));
+  if(recent?.date&&Date.now()-Date.parse(recent.date)<90000)throw proactive.busy('The human is mid-conversation.');
+  if(!configuredProviders(bot).length||configuredProviders(bot).some(x=>!x.installation))throw new Error('No AI provider is set up.');
+  const requestID=randomUUID();
+  await startChat(bot.id,prompt,undefined,requestID,0,{headsUp:{kind,label},onSettled:reply=>{
+   if(reply.state!=='complete')return;
+   if(proactive.isQuiet(reply.text)){
+    state.entries=state.entries.filter(x=>x.id!==requestID);
+    reply.kind='activity';reply.text=kind==='email'?`Checked ${count} new email${count===1?'':'s'} · nothing needs you right now`:'Checked in · nothing needs you right now';
+    delete reply.state;delete reply.provider;pruneQuietLines();return;
+   }
+   headsUpBanner(bot.id,kind==='brief'?'Morning brief':bot.name,firstLine(reply.text),silent);
+  }});
+ }
+});
+function proactiveStatus(){const {checking,lastCheck,nextCheck,gmail,calendar,error}=watcher.status;return {config:headsUpConfig(),composio:!!composioConfiguration,checking,lastCheck,nextCheck,gmail,calendar,error};}
+function pushProactive(){if(window&&!window.isDestroyed())window.webContents.send('proactive:changed',proactiveStatus());}
+function applyLoginItem(){const config=headsUpConfig();if(!['win32','darwin'].includes(process.platform))return;try{app.setLoginItemSettings({openAtLogin:config.enabled&&config.openAtLogin,args:['--background']});}catch{}}
+async function checkHeadsUps(force=false){if(!state||!composioConfiguration||!headsUpConfig().enabled)return proactiveStatus();await watcher.tick({force});pushProactive();return proactiveStatus();}
+setInterval(()=>checkHeadsUps().catch(()=>{}),30000).unref();
 async function deliverQueued(){
  for(const message of state.teamMessages||[]){
   if(message.status!=='queued'||active.has(message.to)||pendingBots.has(message.to))continue;
@@ -203,9 +264,13 @@ async function deliverQueued(){
 }
 
 function showHost(){if(window&&!window.isDestroyed()){window.show();if(window.isMinimized())window.restore();}}
+// The tray keeps the app alive while the phone host or heads-ups need it.
 function remoteTrayUpdate(){
- if(cloud.active&&!remoteTray){remoteTray=new Tray(path.join(__dirname,'icon.ico'));remoteTray.setToolTip('OpenGrokBot · phone access on');remoteTray.setContextMenu(Menu.buildFromTemplate([{label:'Open OpenGrokBot',click:showHost},{label:'Quit and stop host',click:()=>{quitting=true;app.quit();}}]));remoteTray.on('double-click',showHost);}
- else if(!cloud.active&&remoteTray){remoteTray.destroy();remoteTray=null;showHost();}
+ if(keepRunning()&&!remoteTray){remoteTray=new Tray(path.join(__dirname,'icon.ico'));remoteTray.on('double-click',showHost);}
+ else if(!keepRunning()&&remoteTray){remoteTray.destroy();remoteTray=null;showHost();}
+ if(!remoteTray)return;
+ remoteTray.setToolTip('OpenGrokBot · '+[cloud.active&&'phone access on',headsUpConfig().enabled&&'watching email and calendar'].filter(Boolean).join(' · '));
+ remoteTray.setContextMenu(Menu.buildFromTemplate([{label:'Open OpenGrokBot',click:showHost},...(headsUpConfig().enabled?[{label:'Check email and calendar now',click:()=>checkHeadsUps(true).catch(()=>{})}]:[]),{label:cloud.active?'Quit and stop host':'Quit',click:()=>{quitting=true;app.quit();}}]));
 }
 const cloud = new CloudHost({
  load: async()=>{const value=await loadJSON('cloud-account.encrypted.json',null);if(!value)return null;requireVault();const decrypted=await safeStorage.decryptStringAsync(Buffer.from(value.encrypted,'base64'));return JSON.parse(decrypted.result);},
@@ -561,6 +626,17 @@ function configureIPC() {
  handle('mirror:pin',(bot,value)=>mirrorAction(()=>{if(typeof bot!=='string'||!/^[a-f0-9-]{36}$/i.test(bot)||typeof value!=='boolean')throw new Error('Invalid pin setting.');return mirror.pin(bot,value);}));
  handle('mirror:close',()=>{mirrorWindow?.close();});
  handle('tasks:cancel',async(botID,id)=>{await ensureState();const bot=state.bots.find(x=>x.id===botID);if(!bot)throw new PublicError('Unknown Bot');bot.schedules=bot.schedules?.filter(x=>x.id!==id);await atomicJSON('preview-workspace.json',state);notify();});
+ handle('proactive:status',async()=>{await ensureState();return proactiveStatus();});
+ handle('proactive:configure',async changes=>{
+  await ensureState();const before=headsUpConfig();settings.proactive=proactive.sanitizeConfig(changes,before);await saveSettings();
+  applyLoginItem();remoteTrayUpdate();
+  if(settings.proactive.enabled&&!before.enabled)checkHeadsUps(true).catch(()=>{});
+  pushProactive();return proactiveStatus();
+ });
+ handle('proactive:check',async()=>{
+  await ensureState();if(!headsUpConfig().enabled)throw new PublicError('Turn on heads-ups first.');if(!composioConfiguration)throw new PublicError('Connect Gmail or Google Calendar in Connect apps first.');
+  try{return await checkHeadsUps(true);}catch(error){throw new PublicError('The check could not finish. Try again in a minute.');}
+ });
  handle('cloud:status',()=>cloud.status());
  handle('cloud:sign-in',(email,password,create)=>cloudAction(()=>cloud.signIn(email,password,create===true)));
  handle('cloud:sign-out',()=>cloudAction(()=>cloud.signOut()));
@@ -824,8 +900,9 @@ app.whenReady().then(() => {
   ipcMain.on('localvoice:progress',(event,value)=>{if(voiceEngine&&event.sender===voiceEngine.webContents&&window&&!window.isDestroyed())window.webContents.send('localvoice:progress',{kind:value?.kind==='stt'?'stt':'tts',loaded:Number(value?.loaded)||0,total:Number(value?.total)||0});});
   // 0.9.5: the native Windows caption buttons (minimize, maximize, close) over our own dark title area.
   const nativeTitleBar = process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0a0a0b', symbolColor: '#ececee', height: 40 } } : { frame: false };
-  window = new BrowserWindow({ width: 1370, height: 940, minWidth: 860, minHeight: 620, ...nativeTitleBar, backgroundColor: '#0f0f10', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
-  window.on('close',event=>{if(cloud.active&&!quitting){event.preventDefault();window.hide();}});
+  const background = process.argv.includes('--background');
+  window = new BrowserWindow({ show: !background, width: 1370, height: 940, minWidth: 860, minHeight: 620, ...nativeTitleBar, backgroundColor: '#0f0f10', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  window.on('close',event=>{if(keepRunning()&&!quitting){event.preventDefault();window.hide();if(!cloud.active&&settings&&!settings.trayHintShown){settings.trayHintShown=true;saveSettings().catch(()=>{});headsUpBanner(mainBot()?.id,'Still watching for you','OpenGrokBot keeps running in the tray so heads-ups keep coming. Quit from the tray icon.',true);}}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('render-process-gone',()=>denyAllApprovals());window.on('closed',()=>{denyAllApprovals();voiceEngine?.destroy();voiceEngine=null;});
   window.webContents.on('will-navigate', event => event.preventDefault());
@@ -835,8 +912,8 @@ app.whenReady().then(() => {
   window.loadFile(rendererFile);
   // Ctrl+Shift+Space anywhere starts (or stops) voice with the open Bot.
   try { globalShortcut.register('Control+Shift+Space', () => { if (!window || window.isDestroyed()) return; if (!window.isVisible()) window.show(); if (window.isMinimized()) window.restore(); window.focus(); window.webContents.send('voice:hotkey'); }); } catch {}
-  (async()=>{try{await ensureState();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
+  (async()=>{try{await ensureState();remoteTrayUpdate();if(background&&!keepRunning())window.show();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{if(!window.isVisible())window.show();cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
 });
 app.on('will-quit',()=>{try{globalShortcut.unregisterAll();}catch{}});
 app.on('before-quit',()=>{quitting=true;localBrowsers.closeAll();mirror.stop();cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
-app.on('window-all-closed', () => {if(!cloud.active)app.quit();});
+app.on('window-all-closed', () => {if(!keepRunning())app.quit();});
