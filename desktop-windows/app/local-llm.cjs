@@ -43,8 +43,42 @@ function friendlyError(server, status, body) {
   return `${server.name} stopped with an error (HTTP ${status}). Check the model is loaded and try again.`;
 }
 
+/**
+ * Tools for local models (0.9.7). One native tool, app_action, carries any operation the instructions describe.
+ * A call is turned into the same opengrokbot-action block a CLI writes, so the app runs it exactly as it would
+ * for a CLI: the same tools, the same approval cards, the same automatic continuation with the result.
+ */
+const APP_TOOL = {
+  type: 'function',
+  function: {
+    name: 'app_action',
+    description: 'Ask OpenGrokBot to do something for the human: any operation listed in your instructions, such as searching the web, reading a page, adding a reminder, scheduling a task, making an image, finding or running a connected-app tool, or messaging another Bot. Put the operation name in "action" and its fields next to it, exactly as the instructions show. The result comes back in the next turn.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'The operation, for example search_web, browse_web, apple_add_reminder, schedule_task, generate_image, composio_find, composio_run, remember or message_bot.' },
+        query: { type: 'string' }, url: { type: 'string' }, text: { type: 'string' }, prompt: { type: 'string' }, name: { type: 'string' },
+        at: { type: 'string' }, to: { type: 'string' }, tool: { type: 'string' }, arguments: { type: 'object' }
+      },
+      required: ['action'],
+      additionalProperties: true
+    }
+  }
+};
+/** Turns finished tool calls into action blocks. Calls that are not valid app actions are dropped. */
+function actionBlocks(calls) {
+  const fence = '```';
+  return calls.map(call => {
+    if (call.name && call.name !== 'app_action') return '';
+    let value; try { value = typeof call.arguments === 'string' ? JSON.parse(call.arguments || '{}') : call.arguments; } catch { return ''; }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.action !== 'string' || !/^[a-z_]{2,40}$/.test(value.action)) return '';
+    const json = JSON.stringify(value); if (json.length > 16000) return '';
+    return `\n${fence}opengrokbot-action\n${json}\n${fence}`;
+  }).join('');
+}
+
 /** Same shape as a CLI run: { done: Promise<text>, cancel(immediately) }. Calls onEvent({type:'text', text}) as text streams in. */
-function run({ provider, base, prompt, model = '', onEvent = () => {}, timeout = 600000, fetchImpl = fetch, maxTokens }) {
+function run({ provider, base, prompt, model = '', onEvent = () => {}, timeout = 600000, fetchImpl = fetch, maxTokens, tools = true }) {
   const server = SERVERS[provider];
   const controller = new AbortController();
   let cancelled = false, timedOut = false;
@@ -60,11 +94,17 @@ function run({ provider, base, prompt, model = '', onEvent = () => {}, timeout =
       if (!chosen) throw new Error(`${server.name} has no models yet. ${server.pull}, then retry.`);
     }
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeout); timer.unref?.();
-    let response;
-    try {
+    let response, withTools = tools;
+    const send = async () => {
       const body = { model: chosen, stream: true, messages: [{ role: 'user', content: prompt }] };
       if (maxTokens) body.max_tokens = maxTokens;
-      response = await fetchImpl(origin + '/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
+      if (withTools) body.tools = [APP_TOOL];
+      return fetchImpl(origin + '/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
+    };
+    try {
+      response = await send();
+      // Models without tool support reject the request; they still read the instructions and can write action blocks.
+      if (withTools && response.status === 400) { const text = await response.text().catch(() => ''); if (/tool/i.test(text)) { withTools = false; response = await send(); } else response = new Response(text, { status: 400 }); }
     } catch (error) {
       clearTimeout(timer);
       if (cancelled) throw new Error('Response stopped.');
@@ -73,6 +113,7 @@ function run({ provider, base, prompt, model = '', onEvent = () => {}, timeout =
     }
     if (!response.ok) { clearTimeout(timer); const text = await response.text().catch(() => ''); throw new Error(friendlyError(server, response.status, text.slice(0, 2000))); }
     let raw = '', pending = '';
+    const calls = [];
     const decoder = new TextDecoder();
     const consume = line => {
       const data = line.replace(/^data:\s*/, '').trim();
@@ -80,6 +121,15 @@ function run({ provider, base, prompt, model = '', onEvent = () => {}, timeout =
       let value; try { value = JSON.parse(data); } catch { return; }
       const piece = value?.choices?.[0]?.delta?.content ?? value?.choices?.[0]?.message?.content;
       if (typeof piece === 'string' && piece) { raw += piece; if (raw.length > 400000) controller.abort(); onEvent({ type: 'text', text: visibleText(raw) }); }
+      // Tool calls stream in pieces: a name first, then the arguments a few characters at a time.
+      for (const delta of value?.choices?.[0]?.delta?.tool_calls || value?.choices?.[0]?.message?.tool_calls || []) {
+        const index = Number.isInteger(delta?.index) ? delta.index : calls.length;
+        const call = calls[index] ||= { name: '', arguments: '' };
+        if (typeof delta?.function?.name === 'string') call.name += delta.function.name;
+        const args = delta?.function?.arguments;
+        if (typeof args === 'string') call.arguments += args; else if (args && typeof args === 'object') call.arguments = args;
+        if (calls.length > 8) controller.abort();
+      }
     };
     try {
       for await (const chunk of response.body) {
@@ -92,8 +142,10 @@ function run({ provider, base, prompt, model = '', onEvent = () => {}, timeout =
       if (timedOut) throw new Error(`${server.name} did not finish within ten minutes.`);
       throw new Error(`The connection to ${server.name} was lost. Retry.`);
     } finally { clearTimeout(timer); }
-    const text = visibleText(raw).trim();
+    const blocks = actionBlocks(calls.filter(Boolean));
+    const text = (visibleText(raw).trim() + blocks).trim();
     if (!text) throw new Error(`${server.name} returned an empty reply. Try another model.`);
+    if (blocks) onEvent({ type: 'text', text });
     return text;
   })();
   return { done, cancel };
@@ -151,4 +203,4 @@ function voicePick(models) {
   return models.find(m => quick.includes(m.name))?.name || [...models].sort((a, b) => a.bytes - b.bytes)[0]?.name || '';
 }
 
-module.exports = { SERVERS, serverURL, visibleText, listModels, run, OLLAMA_RECOMMENDED, ollamaModels, ollamaPull, ollamaDelete, voicePick };
+module.exports = { SERVERS, serverURL, visibleText, listModels, run, APP_TOOL, actionBlocks, OLLAMA_RECOMMENDED, ollamaModels, ollamaPull, ollamaDelete, voicePick };

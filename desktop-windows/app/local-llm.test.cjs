@@ -51,3 +51,35 @@ test('Ollama manager lists, downloads with progress and picks a quick voice mode
   assert.deepEqual(seen, ['pulling', 'success']);
   await assert.rejects(llm.ollamaPull(undefined, 'rm -rf /', { fetchImpl }), /valid model name/);
 });
+
+test('local models get one native tool; streamed tool calls become app action blocks', async () => {
+  const sse = lines => new Response(lines.map(x => 'data: ' + JSON.stringify(x) + '\n').join('') + 'data: [DONE]\n', { headers: { 'content-type': 'text/event-stream' } });
+  const bodies = [];
+  const fetchImpl = async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return sse([
+      { choices: [{ delta: { content: 'Adding it now.' } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'app_action', arguments: '{"action":"apple_add_re' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'minder","text":"Call the plumber"}' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 1, function: { name: 'something_else', arguments: '{"action":"x"}' } }] } }] }
+    ]);
+  };
+  const events = [];
+  const text = await llm.run({ provider: 'ollama', base: 'http://127.0.0.1:11434', prompt: 'remind me', model: 'qwen3:8b', fetchImpl, onEvent: e => events.push(e) }).done;
+  assert.equal(bodies[0].tools[0].function.name, 'app_action');
+  assert.equal(text, 'Adding it now.\n```opengrokbot-action\n{"action":"apple_add_reminder","text":"Call the plumber"}\n```');
+  assert.equal(events.at(-1).text, text, 'the final text with the action block is shown');
+  assert.equal(llm.actionBlocks([{ name: 'app_action', arguments: '{"action":"Bad Action!"}' }, { name: 'app_action', arguments: 'not json' }]), '');
+});
+
+test('a model without tool support is asked again without tools', async () => {
+  const bodies = [];
+  const fetchImpl = async (url, options) => {
+    const body = JSON.parse(options.body); bodies.push(body);
+    if (body.tools) return new Response('{"error":"registry.ollama.ai/library/gemma3 does not support tools"}', { status: 400 });
+    return new Response('data: {"choices":[{"delta":{"content":"Plain answer"}}]}\ndata: [DONE]\n');
+  };
+  assert.equal(await llm.run({ provider: 'ollama', base: 'http://127.0.0.1:11434', prompt: 'hi', model: 'gemma3:4b', fetchImpl }).done, 'Plain answer');
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[1].tools, undefined);
+});
