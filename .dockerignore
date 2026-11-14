@@ -1,0 +1,9 @@
+.git
+node_modules
+artifacts
+GrokBot
+GrokBotMac
+GrokBotTests
+GrokBotMacUITests
+GrokBot.xcodeproj
+docs/screenshots

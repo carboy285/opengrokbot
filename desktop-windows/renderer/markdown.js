@@ -59,6 +59,11 @@ function blocks(list, context) {
       copy.type = 'button';
       copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(block.text); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); } catch {} });
       bar.append(el('span', 'md-lang', block.lang || 'code'), copy);
+      if (typeof context?.onCanvas === 'function') {
+        const open = el('button', 'md-copy', 'Canvas'); open.type = 'button'; open.title = 'Edit this in Canvas';
+        open.addEventListener('click', () => context.onCanvas({ lang: block.lang || '', text: block.text }));
+        bar.append(open);
+      }
       const pre = el('pre'), code = el('code');
       for (const token of highlight(block.text)) code.append(token.type === 'plain' ? document.createTextNode(token.text) : el('span', 'tok-' + token.type, token.text));
       pre.append(code); wrap.append(bar, pre); fragment.append(wrap);

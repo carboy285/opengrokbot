@@ -16,7 +16,7 @@ const INVOKE = new Set([
   'bot:touch', 'bot:organize', 'bots:reorder', 'bot:configure', 'bot:image', 'models:list', 'files:list', 'drafts:load', 'drafts:save',
   'setup:status', 'setup:scan', 'composio:status', 'proactive:status', 'proactive:configure', 'proactive:check', 'headsup:snooze', 'headsup:dismiss',
   'headsup:mute', 'tasks:cancel', 'tasks:pause', 'approval:answer', 'approval:pending', 'media-keys:status', 'cloud:status', 'rules:get',
-  'connected-apps:allow-get', 'ollama:models'
+  'connected-apps:allow-get', 'ollama:models', 'canvas:save'
 ]);
 // Events another device receives.
 const EVENTS = new Set(['workspace:changed', 'proactive:changed', 'approval:request', 'bot:open']);

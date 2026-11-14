@@ -201,3 +201,22 @@ test('pdf.js reads real PDF text on this machine', async () => {
   out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('') + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   assert.deepEqual(await pdfPages(Buffer.from(out)), ['Hello Knowledge']);
 });
+
+test('read_feed returns numbered, citable items and explains failures without leaking details', async () => {
+  const make = feedReader => da.create({ browsers: fakeBrowsers(), feedReader, approve: async () => { throw new Error('reading a public feed needs no approval'); }, logins: da.createLoginStore(memoryStore()), directory: () => os.tmpdir() });
+  const ctx = { botID: 'b', botName: 'News', unattended: true };
+  const ok = await make(async () => ({ label: 'r/technology', items: [{ title: 'One', url: 'https://a.example/1', snippet: 'first' }, { title: 'Two', url: 'https://a.example/2', snippet: '' }] })).run({ action: 'read_feed', text: 'r/technology' }, ctx);
+  assert.match(ok, /^Read feed r\/technology · 2 items/);
+  assert.match(ok, /untrusted/);
+  assert.match(ok, /\n1\. One — https:\/\/a\.example\/1 — first\n2\. Two — https:\/\/a\.example\/2$/);
+  assert.match(await make(async () => ({ label: 'x', items: [] })).run({ action: 'read_feed', text: 'x' }, ctx), /no readable items/);
+  assert.equal(await make(async () => { throw new Error('The feed answered HTTP 404.'); }).run({ action: 'read_feed', text: 'x' }, ctx), 'read_feed failed: The feed answered HTTP 404.');
+  assert.ok(da.ACTIONS.has('read_feed'));
+});
+
+test('plugin actions route to the plugin runner with the Bot context and approval', async () => {
+  const seen = [];
+  const devices = da.create({ browsers: fakeBrowsers(), plugins: () => ({ plugins: new Map() }), approve: async (...x) => { seen.push(x); return true; }, logins: da.createLoginStore(memoryStore()), directory: () => os.tmpdir() });
+  assert.match(await devices.run({ action: 'plugin', plugin: 'ghost', name: 'x' }, { botID: 'b', botName: 'B', unattended: false }), /not installed or not allowed/);
+  assert.ok(da.ACTIONS.has('plugin'));
+});

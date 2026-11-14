@@ -5,6 +5,7 @@ import { renderSecureLogins } from './secure-logins.js';
 import { encodeWav, splitSuggestions, starters } from './voice-core.mjs';
 import { renderMarkdown } from './markdown.js';
 import * as catalog from './catalog.js';
+import { companions } from './companions.js';
 
 const $ = selector => document.querySelector(selector);
 const node = (tag, className = '', text = '') => { const value = document.createElement(tag); value.className = className; value.textContent = text; return value; };
@@ -421,7 +422,7 @@ function questionCard(bot,prompt,canAnswer){
  if(canAnswer)card.append(append(node('div','question-actions'),button('Something else…',()=>$('#draft').focus(),'link'),submit));
  return card;
 }
-const markdownContext=bot=>({openLink:url=>bridge.openLink?bridge.openLink(url).then(r=>{if(r&&!r.ok)toast(r.error);}).catch(()=>{}):window.open(url,'_blank','noopener'),loadImage:path=>bridge.botImage?result(bridge.botImage(bot.id,path)).catch(()=>null):Promise.resolve(null),loadVideo:path=>bridge.botMedia?result(bridge.botMedia(bot.id,path)).then(value=>value?URL.createObjectURL(new Blob([value.data],{type:value.type})):null).catch(()=>null):Promise.resolve(null)});
+const markdownContext=bot=>({onCanvas:block=>openCanvas(bot,block),openLink:url=>bridge.openLink?bridge.openLink(url).then(r=>{if(r&&!r.ok)toast(r.error);}).catch(()=>{}):window.open(url,'_blank','noopener'),loadImage:path=>bridge.botImage?result(bridge.botImage(bot.id,path)).catch(()=>null):Promise.resolve(null),loadVideo:path=>bridge.botMedia?result(bridge.botMedia(bot.id,path)).then(value=>value?URL.createObjectURL(new Blob([value.data],{type:value.type})):null).catch(()=>null):Promise.resolve(null)});
 function renderEntryBody(bot,entry,body,{isLastUser,canAnswer,canSuggest}){
  const kind=entryKind(entry);
  // Automatic heads-up checks show their short label, never the prompt with email text.
@@ -469,11 +470,15 @@ $('#save-note').addEventListener('click',event=>{const bot=currentBot();if(bot&&
 const waitingOn=bot=>[...approvals.values()].some(x=>x.title.startsWith(`Let ${bot.name} `));
 bridge.onApproval?.(request=>{if(!request?.id)return;approvals.set(request.id,request);render();});
 bridge.pendingApprovals?.().then(response=>{if(response?.ok)for(const request of response.value||[])approvals.set(request.id,request);if(approvals.size)render();}).catch(()=>{});
+// Think / Deep Search apply to the next message only.
+let answerMode=null;
+function showAnswerMode(){for(const [name,id] of [['think','#mode-think'],['deep','#mode-deep']]){const button=$(id);if(button){button.setAttribute('aria-pressed',String(answerMode===name));button.classList.toggle('on',answerMode===name);}}}
+for(const [name,id] of [['think','#mode-think'],['deep','#mode-deep']])$(id)?.addEventListener('click',()=>{answerMode=answerMode===name?null:name;showAnswerMode();$('#draft')?.focus();});
 async function submitMessage(bot,text,id=crypto.randomUUID(),files=pendingFiles.get(bot.id)||[]){
  if(running.has(bot.id)||pendingSends.get(bot.id)&&!pendingSends.get(bot.id).failed)return;
  if(selected===bot.id)chatScroll.follow=true;
  const pending={id,text:text||(files.length?`📎 ${files.length} attachment${files.length===1?'':'s'}`:''),failed:false};pendingSends.set(bot.id,pending);drafts.set(bot.id,text);persistDrafts();renderMessages(bot);
- try{workspace=await result(bridge.send(bot.id,text,id,files.length?files:undefined));pendingSends.delete(bot.id);if(files.length&&pendingFiles.get(bot.id)===files){pendingFiles.delete(bot.id);renderChips();}if(drafts.get(bot.id)===text){drafts.delete(bot.id);if(selected===bot.id&&$('#draft').value.trim()===text)$('#draft').value='';}persistDrafts();render();if(selected===bot.id)$('#draft').focus();}
+ const mode=answerMode;try{workspace=await result(bridge.send(bot.id,text,id,files.length?files:undefined,mode||undefined));answerMode=null;showAnswerMode();pendingSends.delete(bot.id);if(files.length&&pendingFiles.get(bot.id)===files){pendingFiles.delete(bot.id);renderChips();}if(drafts.get(bot.id)===text){drafts.delete(bot.id);if(selected===bot.id&&$('#draft').value.trim()===text)$('#draft').value='';}persistDrafts();render();if(selected===bot.id)$('#draft').focus();}
  catch(error){pending.failed=true;toast(error.message);if(selected===bot.id)renderMessages(bot);}
 }
 function configuration(bot){const active=setup.installed.find(x=>x.id===setup.selected);return bot.aiConfiguration||{providers:active?[{provider:active.provider,model:''}]:[],activeProvider:active?.provider,replyMode:'one'};}
@@ -1001,6 +1006,22 @@ function showBotActions(bot) {
 }
 
 // Create a Bot: live preview, name, 14 shapes, 10 colours; description and templates are optional.
+// Canvas: edit a code block or draft in a larger editor, then copy it or save it into the Bot's folder (Library).
+function openCanvas(bot, block) {
+  const content = panel('Canvas');
+  const name = node('input', 'field'); name.maxLength = 80; name.value = ''; name.placeholder = 'File name, like notes.md'; name.setAttribute('aria-label', 'File name');
+  const editor = node('textarea', 'field canvas-editor'); editor.value = block.text; editor.spellcheck = false; editor.setAttribute('aria-label', 'Canvas editor');
+  const status = node('p', 'panel-footnote', `${block.lang || 'text'} · ${block.text.split('\n').length} lines`);
+  editor.addEventListener('input', () => { status.textContent = `${block.lang || 'text'} · ${editor.value.split('\n').length} lines · edited`; });
+  const copy = button('Copy', async () => { try { await navigator.clipboard.writeText(editor.value); toast('Copied.'); } catch { toast('Copying is not available here.'); } });
+  const save = button('Save to ' + bot.name + '’s folder', async () => {
+    if (!bridge.saveCanvas) { toast('Saving needs the desktop app.'); return; }
+    try { const saved = await result(bridge.saveCanvas(bot.id, name.value, editor.value, block.lang)); toast(`Saved ${saved.name}. Find it in the Library.`); } catch (error) { toast(error.message); }
+  }, 'pill primary');
+  append(content, name, editor, status, append(node('div', 'panel-bottom'), button('Close', () => dialog.close()), copy, save));
+  editor.focus();
+}
+
 function showNewBot() {
   const content = panel('Create a Bot');
   const colors = ['purple', 'pink', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'gray', 'black'];
@@ -1019,7 +1040,13 @@ function showNewBot() {
   };
   redraw();
   name.addEventListener('input', () => create.disabled = !name.value.trim());
-  append(form, preview, name, shapes, dots, more, append(node('div', 'panel-bottom'), button('Cancel', () => dialog.close()), create));
+  // Characters to start from; picking one fills the form, and the Bot is an ordinary Bot afterwards.
+  const characters = node('div', 'character-row'); characters.setAttribute('role', 'group'); characters.setAttribute('aria-label', 'Start from a character');
+  for (const item of companions) {
+    const chip = button(item.name, () => { name.value = item.name; purpose.value = item.purpose; more.open = true; shape = item.shape; color = item.color; create.disabled = false; redraw(); }, 'character-chip');
+    chip.title = item.tagline; characters.append(chip);
+  }
+  append(form, preview, name, node('p', 'panel-footnote', 'Or start from a character:'), characters, shapes, dots, more, append(node('div', 'panel-bottom'), button('Cancel', () => dialog.close()), create));
   form.addEventListener('submit', async event => {
     event.preventDefault(); const clean = name.value.trim(); if (!clean) return;
     if (workspace.bots.some(bot => bot.name.toLowerCase() === clean.toLowerCase())) { toast('A Bot with this name already exists.'); return; }

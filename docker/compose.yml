@@ -1,0 +1,18 @@
+# docker compose -f docker/compose.yml up --build   (set OPENGROKBOT_WEB_PASSWORD first; see docs/DOCKER.md)
+services:
+  opengrokbot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        CLIS: "@anthropic-ai/claude-code"
+    ports:
+      - "127.0.0.1:8765:8765"   # only this computer; change deliberately to share on your network
+    environment:
+      OPENGROKBOT_WEB_PASSWORD: ${OPENGROKBOT_WEB_PASSWORD:?set a password of 10 or more characters}
+      OPENGROKBOT_WEB_USER: ${OPENGROKBOT_WEB_USER:-admin}
+    volumes:
+      - opengrokbot-data:/data
+    restart: unless-stopped
+volumes:
+  opengrokbot-data:

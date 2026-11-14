@@ -8,7 +8,8 @@ const { randomUUID } = require('node:crypto');
 const { validateWorkspace, previewWorkspace, migrateWorkspace } = require('./workspace.cjs');
 const ruleSet = require('./approval-rules.cjs');
 
-if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userData', process.env.OPENGROKBOT_TEST_DATA_DIR);
+if (process.env.OPENGROKBOT_DATA_DIR) app.setPath('userData', process.env.OPENGROKBOT_DATA_DIR); // where to keep chats and settings, e.g. a Docker volume
+else if (!app.isPackaged && process.env.OPENGROKBOT_TEST_DATA_DIR) app.setPath('userData', process.env.OPENGROKBOT_TEST_DATA_DIR);
 
 const cli=require('./local-cli.cjs');
 const composio=require('./composio.cjs');
@@ -145,6 +146,8 @@ function notifyFinished(botID,reply){
   note.show();
  }catch{}
 }
+// The Think / Deep Search choice made with the human's latest message; it also covers that message's follow-up search steps.
+const answerModes=require('./answer-modes.cjs');const modeByBot=new Map();
 async function startChat(botID,text,delivery,requestID,browserDepth=0,options={}){
  const headsUp=options.headsUp;
  const bot=state.bots.find(x=>x.id===botID);
@@ -170,7 +173,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0,options={}
    const key=botID+'|'+installation.id+(choice.model?'|'+choice.model:'');const session=state.sessions?.[key];
    const latest=delivery?`Bot request (not human approval): ${delivery.text}`:history.findLast(x=>x.kind==='user')?.text||'';
    const feedback=history.filter(x=>x.kind==='activity'&&!x.senderBotID).slice(-8).map(x=>x.detail||x.text).join('\n');
-   const prompt=teamwork.instructions(bot,state,!!delivery,composioConfiguration?composioConfiguration.toolkits:[])+'\n'+await vmStatusNote()+(headsUp||delivery||scheduledTask?'':await mediaNote())+(!headsUp&&cli.isLocal(installation.provider)&&composioConfiguration?composioTools.note(composioConfiguration.toolkits):'')+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
+   const prompt=teamwork.instructions(bot,state,!!delivery,composioConfiguration?composioConfiguration.toolkits:[])+'\n'+await vmStatusNote()+(headsUp||delivery||scheduledTask?'':answerModes.noteFor(modeByBot.get(botID))+pluginModule.note(pluginRegistry()))+(headsUp||delivery||scheduledTask?'':await mediaNote())+(!headsUp&&cli.isLocal(installation.provider)&&composioConfiguration?composioTools.note(composioConfiguration.toolkits):'')+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
    const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming',...(headsUp?{headsUp:{kind:headsUp.kind,title:headsUp.label,...headsUp.meta}}:{})};state.entries.push(reply);
@@ -386,7 +389,10 @@ async function readOnePassword(item){
 }
 let approvalRules=null;
 const getApprovalRules=async()=>approvalRules??=ruleSet.sanitize(await loadJSON('approval-rules.json',{}));
-const devices=deviceActions.create({composioSearch:async query=>{if(!composioConfiguration)return null;const hits=await require('./composio-search.cjs').search({key:composioConfiguration.key,userID:settings.composioUserID,query});return hits;},rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:(title,detail)=>requestApproval(title,detail),logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword});
+const devices=deviceActions.create({composioSearch:async query=>{if(!composioConfiguration)return null;const hits=await require('./composio-search.cjs').search({key:composioConfiguration.key,userID:settings.composioUserID,query});return hits;},rules:async(tool,target)=>ruleSet.decide(await getApprovalRules(),tool,target),browsers:localBrowsers,approve:(title,detail)=>requestApproval(title,detail),logins:loginStore,directory:botDirectory,pdfPages:require('./pdf-text.cjs').pdfPages,onePassword:readOnePassword,plugins:()=>pluginRegistry()});
+// Plugins load only when their name is listed in settings.json under plugins.allowed; see docs/PLUGINS.md.
+const pluginModule=require('./plugins.cjs');
+function pluginRegistry(){return pluginModule.load(path.join(app.getPath('userData'),'plugins'),settings?.plugins?.allowed);}
 // A VM on another computer: its own connection (with its own identity), so it never interferes with viewing another computer.
 const vmLink = new (require('./cloud-mirror.cjs').CloudMirror)(cloud,()=>{},{slot:':vm'});
 let remoteVMLinks=null;
@@ -814,6 +820,7 @@ function configureIPC() {
     let names;try{names=await readdir(botDirectory(id),{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}
     return names.filter(x=>!x.name.startsWith('.')&&x.isFile()).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,500).map(x=>({name:x.name}));
   });
+  handle('canvas:save',async(id,name,text,language)=>{await ensureState();if(!state.bots.some(x=>x.id===id))throw new PublicError('Unknown Bot');try{return {name:await require('./canvas.cjs').save(botDirectory(id),name,text,language)};}catch(error){throw new PublicError(error.message);}});
   handle('files:open-folder',async id=>{await ensureState();if(!state.bots.some(x=>x.id===id))throw new Error('Unknown Bot');const directory=botDirectory(id);await mkdir(directory,{recursive:true});if(await shell.openPath(directory))throw new PublicError('The working folder could not be opened.');});
   handle('files:reveal',async(id,name)=>{await ensureState();if(!state.bots.some(x=>x.id===id)||typeof name!=='string'||path.basename(name)!==name||name.startsWith('.'))throw new Error('Invalid file');const target=path.join(botDirectory(id),name);if(!(await lstat(target)).isFile())throw new Error('Missing file');shell.showItemInFolder(target);});
   handle('setup:status',async()=>{await ensureState();return setupStatus();});
@@ -843,7 +850,7 @@ function configureIPC() {
   handle('setup:complete',async()=>{if(!selectedCLI())throw new PublicError('Choose an installed CLI first.');settings.complete=true;await saveSettings();});
   handle('files:attach',async botID=>{await ensureState();const bot=state.bots.find(x=>x.id===botID);if(!bot||bot.memberIDs)throw new PublicError('Attachments are available in individual Bot chats.');const choice=await dialog.showOpenDialog(window,{title:'Attach files (up to 10, each under 20 MB)',properties:['openFile','multiSelections']});if(choice.canceled||!choice.filePaths.length)return [];try{return await attachments.copyLocalFiles(botDirectory(bot.id),choice.filePaths);}catch(error){throw new PublicError(error.message);}});
   handle('files:attach-data',async(botID,mime,data)=>{await ensureState();const bot=state.bots.find(x=>x.id===botID);if(!bot||bot.memberIDs)throw new PublicError('Attachments are available in individual Bot chats.');try{return await attachments.saveDataFile(botDirectory(bot.id),mime,data);}catch{throw new PublicError('Paste a PNG, JPEG, GIF or WebP image under 20 MB.');}});
-  handle('chat:send',async(botID,text,requestID,files)=>{await ensureState();if(typeof text!=='string'||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');let names=[];if(files!==undefined&&files!==null){const bot=state.bots.find(x=>x.id===botID);if(!bot)throw new PublicError('Choose a Bot.');try{names=await attachments.existingNames(botDirectory(bot.id),files);}catch{throw new PublicError('An attachment is missing. Remove it and attach it again.');}}if(!text.trim()&&!names.length)throw new PublicError('Enter a message of up to 100,000 characters.');text=attachments.attachmentMessage(text.trim(),names);if(requestID&&!/^[0-9a-f-]{36}$/i.test(requestID))throw new PublicError('Invalid delivery ID.');if(!requestID||!state.entries.some(x=>x.id.toLowerCase()===requestID.toLowerCase()))await startChat(botID,text,undefined,requestID);return state;});
+  handle('chat:send',async(botID,text,requestID,files,mode)=>{await ensureState();if(typeof text!=='string'||text.length>100000)throw new PublicError('Enter a message of up to 100,000 characters.');let names=[];if(files!==undefined&&files!==null){const bot=state.bots.find(x=>x.id===botID);if(!bot)throw new PublicError('Choose a Bot.');try{names=await attachments.existingNames(botDirectory(bot.id),files);}catch{throw new PublicError('An attachment is missing. Remove it and attach it again.');}}if(!text.trim()&&!names.length)throw new PublicError('Enter a message of up to 100,000 characters.');text=attachments.attachmentMessage(text.trim(),names);if(requestID&&!/^[0-9a-f-]{36}$/i.test(requestID))throw new PublicError('Invalid delivery ID.');if(!requestID||!state.entries.some(x=>x.id.toLowerCase()===requestID.toLowerCase())){const chosen=answerModes.normalize(mode);if(chosen)modeByBot.set(botID,chosen);else modeByBot.delete(botID);await startChat(botID,text,undefined,requestID);}return state;});
   handle('chat:retry',async botID=>{await ensureState();const message=state.teamMessages?.findLast(x=>x.to===botID&&['failed','stopped'].includes(x.status));if(message){message.status='queued';await deliverQueued();}else await startChat(botID);return state;});
   handle('chat:stop',async botID=>{stoppedBots.add(botID);for(const run of active.get(botID)||[])run.cancel();});
   handle('composio:status',async()=>{await ensureState();return composioStatus();});
