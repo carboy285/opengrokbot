@@ -1,0 +1,40 @@
+name: Branch checks
+# Compiles and tests work-in-progress branches without publishing anything.
+on:
+  push:
+    branches: ['claude/**']
+    paths-ignore: ['**/*.md', 'LICENSE']
+permissions:
+  contents: read
+concurrency:
+  group: branch-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apple:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Mac app and run its unit tests
+        run: >-
+          xcodebuild -project GrokBot.xcodeproj -scheme GrokBotMac
+          -configuration Debug -destination 'platform=macOS'
+          -only-testing:GrokBotMacTests
+          CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
+      - name: Compile the iPhone app
+        run: >-
+          xcodebuild -project GrokBot.xcodeproj -scheme GrokBot
+          -configuration Release -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO build
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:desktop
+      - run: node scripts/test-heads-ups-main.cjs
