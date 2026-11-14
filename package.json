@@ -1,6 +1,6 @@
 {
   "name": "opengrokbot-windows",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "private": true,
   "description": "Free desktop chat for local AI CLIs with optional Composio tools",
   "author": "OpenGrokBot contributors",

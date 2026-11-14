@@ -553,7 +553,8 @@ function panel(title) {
   return content;
 }
 dialog.addEventListener('click', event => { if (event.target === dialog) { const box = dialog.getBoundingClientRect(); if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close(); } });
-dialog.addEventListener('close', () => dialog.replaceChildren());
+// A panel opened right after another closed must not be wiped by the old panel's late close event.
+dialog.addEventListener('close', () => { if (!dialog.open) dialog.replaceChildren(); });
 async function showConnection(detail='') {
   let step=0,provider='codex',verified=false;
   async function draw(){
