@@ -330,7 +330,7 @@ struct MacHeadsUpsSettings: View {
         VStack(alignment: .leading, spacing: 28) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Let Grok Bot reach out first").font(.system(size: 18, weight: .medium))
-                Text("Grok Bot keeps an eye on Mail and Calendar on this Mac and messages you when something needs you, so you don’t have to keep checking.")
+                Text("Grok Bot keeps an eye on your Gmail and Google Calendar through Composio and messages you when something needs you, so you don’t have to keep checking. The Mail and Calendar apps on this Mac are never opened.")
                     .font(.system(size: 15)).lineSpacing(5).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
             }
             card {
@@ -339,15 +339,7 @@ struct MacHeadsUpsSettings: View {
                 }
                 if enabled {
                     divider
-                    access("Mail", on: apple.canRead(.mail))
-                    access("Calendar", on: apple.canRead(.calendar))
-                    if !apple.canRead(.mail) || !apple.canRead(.calendar) {
-                        HStack {
-                            Text("Turn on Mail and Calendar under This Mac. Heads-ups use whichever ones are on.").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
-                            Spacer()
-                            MacPillButton(title: "Open This Mac", prominent: false) { desktop.panel = .apple }
-                        }.padding(.horizontal, 20).padding(.bottom, 16)
-                    }
+                    MacHeadsUpSources(composio: desktop.composio, headsUps: desktop.headsUps) { desktop.panel = .apps }
                 }
             }
             section("Tell me about") {
@@ -370,7 +362,7 @@ struct MacHeadsUpsSettings: View {
                     }
                 }
                 divider
-                row("Reminders due today", detail: "From Reminders on this Mac.") { toggle($reminders, "Reminders due today") }
+                row("Reminders due today", detail: "From Reminders on this Mac (turn it on under This Mac).") { toggle($reminders, "Reminders due today") }
                 divider
                 row("Deliveries", detail: "Packages out for delivery or delivered today.") { toggle($deliveries, "Deliveries") }
             }
@@ -395,7 +387,7 @@ struct MacHeadsUpsSettings: View {
                     }.disabled(!enabled)
                 }
             }
-            Text("Heads-ups read Mail and Calendar on this Mac and only post messages. They never reply, send, accept or change anything. Ask Grok Bot directly when you want it to act. Phone alerts follow Settings → Computer → Phone notifications.")
+            Text("Heads-ups read Gmail and Google Calendar through your Composio project and only post messages. They never reply, send, accept or change anything. Ask Grok Bot directly when you want it to act. Phone alerts follow Settings → Computer → Phone notifications.")
                 .font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .animation(.spring(response: 0.35, dampingFraction: 1), value: enabled)
@@ -676,5 +668,44 @@ struct MacMediaKeysView: View {
 
     private func remove(_ provider: MediaProvider) {
         do { try MediaKeys.remove(provider); saved.remove(provider); feedback = "\(provider.shortName) key removed." } catch { feedback = "The key could not be removed." }
+    }
+}
+
+
+/// Which of Gmail and Google Calendar heads-ups can reach through Composio, with a shortcut to connect them.
+struct MacHeadsUpSources: View {
+    @ObservedObject var composio: ComposioModel
+    @ObservedObject var headsUps: MacHeadsUps
+    let openConnectApps: () -> Void
+
+    private func connected(_ slug: String) -> Bool { composio.toolkits.contains { $0.slug == slug && $0.connected } }
+
+    var body: some View {
+        let gmail = connected("gmail"), calendar = connected("googlecalendar")
+        VStack(alignment: .leading, spacing: 0) {
+            source("Gmail", on: gmail)
+            source("Google Calendar", on: calendar)
+            if let problem = headsUps.lastError {
+                Text(problem).font(.system(size: 13)).foregroundStyle(.orange).padding(.horizontal, 20).padding(.bottom, 12)
+            }
+            if !gmail || !calendar {
+                HStack {
+                    Text(composio.configured ? "Connect Gmail and Google Calendar in Connect apps. Heads-ups use whichever ones are connected." : "Set up your Composio project in Connect apps, then connect Gmail and Google Calendar.")
+                        .font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+                    Spacer()
+                    MacPillButton(title: "Open Connect apps", prominent: false, action: openConnectApps)
+                }.padding(.horizontal, 20).padding(.bottom, 16)
+            }
+        }
+        .task { _ = await composio.headsUpLinks(maxAge: 0) }
+    }
+
+    private func source(_ name: String, on: Bool) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(on ? Color.green : MacTheme.tertiary).frame(width: 8, height: 8)
+            Text(name).font(.system(size: 15))
+            Spacer()
+            Text(on ? "Connected" : "Not connected").font(.system(size: 13)).foregroundStyle(MacTheme.secondary)
+        }.padding(.horizontal, 20).padding(.vertical, 10)
     }
 }

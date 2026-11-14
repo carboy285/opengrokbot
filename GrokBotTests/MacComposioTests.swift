@@ -901,6 +901,73 @@ final class MacVoiceProvidersTests: XCTestCase {
     }
 }
 
+final class ComposioHeadsUpSourceTests: XCTestCase {
+    private func json(_ text: String) throws -> Any { try JSONSerialization.jsonObject(with: Data(text.utf8)) }
+
+    func testGmailMessagesBecomeHeadsUpMailWhereverComposioNestsThem() throws {
+        let data = try json("""
+        {"response_data":{"messages":[
+          {"messageId":"m1","sender":"Ana Ruiz <ana@example.com>","subject":"Lunch Friday?","preview":{"body":"Are you   free\\nFriday"}},
+          {"id":"m2","payload":{"headers":[{"name":"From","value":"Bo <bo@example.com>"},{"name":"Subject","value":"Invoice"}]},"snippet":"Due soon"},
+          {"subject":"no id, dropped"}
+        ]}}
+        """)
+        let mail = ComposioHeadsUpSource.mail(from: data)
+        XCTAssertEqual(mail.map(\.key), ["m1", "m2"])
+        XCTAssertEqual(mail[0].sender, "Ana Ruiz <ana@example.com>")
+        XCTAssertEqual(mail[0].snippet, "Are you free Friday")
+        XCTAssertEqual(mail[1].sender, "Bo <bo@example.com>")
+        XCTAssertEqual(mail[1].subject, "Invoice")
+        XCTAssertEqual(HeadsUpRules.address(mail[0].sender), "ana@example.com")
+    }
+
+    func testCalendarEventsKeepJoinLinksDeclinesAndAllDayFlags() throws {
+        let data = try json("""
+        {"items":[
+          {"id":"e1","summary":"Standup","start":{"dateTime":"2026-11-14T15:00:00Z"},"end":{"dateTime":"2026-11-14T15:30:00Z"},"hangoutLink":"https://meet.google.com/abc"},
+          {"id":"e2","summary":"Skipped","start":{"dateTime":"2026-11-14T16:00:00-05:00"},"end":{"dateTime":"2026-11-14T17:00:00-05:00"},"attendees":[{"self":true,"responseStatus":"declined"}]},
+          {"id":"e3","summary":"Holiday","start":{"date":"2026-11-14"},"end":{"date":"2026-11-15"}},
+          {"id":"e4","summary":"Gone","status":"cancelled","start":{"dateTime":"2026-11-14T18:00:00Z"}},
+          {"id":"e5","summary":"Call","start":{"dateTime":"2026-11-14T19:00:00Z"},"location":"Room 4 https://example.com/call","conferenceData":{"entryPoints":[{"entryPointType":"video","uri":"http://insecure.example.com"}]}}
+        ]}
+        """)
+        let events = ComposioHeadsUpSource.events(from: data)
+        XCTAssertEqual(events.map(\.id), ["e1", "e2", "e3", "e5"])
+        XCTAssertEqual(events[0].link, "https://meet.google.com/abc")
+        XCTAssertEqual(events[0].end.timeIntervalSince(events[0].start), 1800)
+        XCTAssertTrue(events[1].declined)
+        XCTAssertTrue(events[2].allDay)
+        XCTAssertFalse(events[0].allDay)
+        XCTAssertEqual(events[3].link, "https://example.com/call", "Only https links are offered to join")
+        XCTAssertEqual(events[3].end, events[3].start, "A missing end falls back to the start")
+    }
+
+    func testDatesAcceptIsoFractionsAndUnixTimes() {
+        let expected = ISO8601DateFormatter().date(from: "2026-11-14T15:00:00Z")!
+        XCTAssertEqual(ComposioHeadsUpSource.date("2026-11-14T15:00:00Z"), expected)
+        XCTAssertEqual(ComposioHeadsUpSource.date("2026-11-14T15:00:00.000Z"), expected)
+        XCTAssertEqual(ComposioHeadsUpSource.date(expected.timeIntervalSince1970), expected)
+        XCTAssertEqual(ComposioHeadsUpSource.date(String(Int(expected.timeIntervalSince1970 * 1000))), expected)
+        XCTAssertNil(ComposioHeadsUpSource.date("not a date"))
+    }
+
+    func testStartingSoonSkipsAllDayDeclinedAndFarAwayEvents() {
+        let now = Date()
+        func event(_ id: String, in minutes: Double, allDay: Bool = false, declined: Bool = false) -> HeadsUpEvent {
+            HeadsUpEvent(id: id, title: id, start: now.addingTimeInterval(minutes * 60), end: now.addingTimeInterval(minutes * 60 + 1800), allDay: allDay, declined: declined, link: nil)
+        }
+        let soon = ComposioHeadsUpSource.startingSoon([event("a", in: 5), event("b", in: 30), event("c", in: 5, allDay: true), event("d", in: 5, declined: true), event("e", in: -10)], minutes: 10, now: now)
+        XCTAssertEqual(soon.map(\.id), ["a"])
+    }
+
+    func testHeadsUpsCanOnlyRunTheTwoReadOnlyTools() {
+        XCTAssertEqual(ComposioHeadsUpSource.allowed, ["GMAIL_FETCH_EMAILS", "GOOGLECALENDAR_EVENTS_LIST"])
+        XCTAssertFalse(ComposioTools.isWrite(ComposioHeadsUpSource.mailTool))
+        XCTAssertFalse(ComposioTools.isWrite(ComposioHeadsUpSource.calendarTool))
+        XCTAssertEqual(ComposioHeadsUpSource.mailArguments()["include_payload"] as? Bool, false)
+    }
+}
+
 #endif
 
 @MainActor

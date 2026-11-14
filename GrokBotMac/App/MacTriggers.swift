@@ -21,21 +21,25 @@ final class MacTriggers {
         }
     }
 
-    func poll(app: AppModel, apple: AppleConnections = .shared) async {
+    func poll(app: AppModel, composio: ComposioModel) async {
         let tasks = app.workspace.bots.flatMap { bot in (bot.schedules ?? []).filter { $0.enabled && $0.source != nil }.map { (bot.id, $0.source ?? "") } }
         guard !tasks.isEmpty else { return }
         let mailBots = Set(tasks.filter { $0.1 == "mail" }.map(\.0)), calendarBots = Set(tasks.filter { $0.1 == "calendar" }.map(\.0))
-        if !mailBots.isEmpty, apple.canRead(.mail), let text = try? await AppleReaders.mail(query: "") {
-            let records = Self.mailRecords(text)
+        // Mail and Calendar come from Gmail and Google Calendar through Composio, so the Mail and Calendar apps never open.
+        var links = (gmail: false, calendar: false)
+        if !mailBots.isEmpty || !calendarBots.isEmpty { links = await composio.headsUpLinks() }
+        if !mailBots.isEmpty, links.gmail, let data = try? await composio.headsUpFetch(ComposioHeadsUpSource.mailTool, arguments: ComposioHeadsUpSource.mailArguments()) {
+            let records = ComposioHeadsUpSource.mail(from: data).map { MailRecord(key: $0.key, sender: $0.sender, subject: $0.subject) }
             // The first look only records what is already there, so old mail never starts a routine.
             let fresh = mailPrimed ? records.filter { !mailSeen.contains($0.key) } : []
             mailSeen.formUnion(records.map(\.key)); mailPrimed = true
             for record in fresh.prefix(5) { for id in mailBots { app.triggerEvent("New email from \(record.sender): \(record.subject)", source: "mail", for: id) } }
         }
-        if !calendarBots.isEmpty, apple.canRead(.calendar) {
-            for item in AppleReaders.startingSoon(minutes: 10) where !announced.contains(item.id) {
-                announced.insert(item.id)
-                for id in calendarBots { app.triggerEvent("Event starting soon: \(item.text)", source: "calendar", for: id) }
+        if !calendarBots.isEmpty, links.calendar, let data = try? await composio.headsUpFetch(ComposioHeadsUpSource.calendarTool, arguments: ComposioHeadsUpSource.calendarArguments(now: Date())) {
+            let soon = ComposioHeadsUpSource.startingSoon(ComposioHeadsUpSource.events(from: data), minutes: 10, now: Date())
+            for event in soon where !announced.contains(HeadsUpRules.key(event)) {
+                announced.insert(HeadsUpRules.key(event))
+                for id in calendarBots { app.triggerEvent("Event starting soon: \(event.title) at \(HeadsUpRules.time(event.start))", source: "calendar", for: id) }
             }
             if announced.count > 500 { announced = [] }
         }
@@ -340,11 +344,14 @@ enum HeadsUpNotifier {
     }
 }
 
-/// Watches Mail, Calendar and Reminders on this Mac and posts heads-ups into the main Bot's chat.
+/// Watches Gmail and Google Calendar (through Composio) and Reminders on this Mac and posts heads-ups into the main Bot's chat.
+/// Mail and Calendar are never read from the Mail and Calendar apps, because those open on screen.
 /// What it has already said is saved, so restarting the app never repeats a reminder.
 @MainActor
 final class MacHeadsUps: ObservableObject {
     @Published private(set) var today: HeadsUpToday?
+    /// The last problem reaching Gmail or Google Calendar, shown in Settings → Heads-ups.
+    @Published private(set) var lastError: String?
     private let store: UserDefaults
     private var mailSeen: Set<String>
     private var mailPrimed: Bool
@@ -356,8 +363,8 @@ final class MacHeadsUps: ObservableObject {
 
     init(store: UserDefaults = .standard) {
         self.store = store
-        mailSeen = Set(store.stringArray(forKey: "headsUps.state.mailSeen") ?? [])
-        mailPrimed = store.bool(forKey: "headsUps.state.mailPrimed")
+        mailSeen = Set(store.stringArray(forKey: "headsUps.state.gmailSeen") ?? [])
+        mailPrimed = store.bool(forKey: "headsUps.state.gmailPrimed")
         reminded = Set(store.stringArray(forKey: "headsUps.state.reminded") ?? [])
         knownOverlaps = Set(store.stringArray(forKey: "headsUps.state.overlaps") ?? [])
         eventStarts = store.dictionary(forKey: "headsUps.state.eventStarts") as? [String: Double] ?? [:]
@@ -365,8 +372,8 @@ final class MacHeadsUps: ObservableObject {
     }
 
     private func persist() {
-        store.set(Array(mailSeen.suffix(2000)), forKey: "headsUps.state.mailSeen")
-        store.set(mailPrimed, forKey: "headsUps.state.mailPrimed")
+        store.set(Array(mailSeen.suffix(2000)), forKey: "headsUps.state.gmailSeen")
+        store.set(mailPrimed, forKey: "headsUps.state.gmailPrimed")
         store.set(Array(reminded.suffix(500)), forKey: "headsUps.state.reminded")
         store.set(Array(knownOverlaps.suffix(500)), forKey: "headsUps.state.overlaps")
         store.set(eventStarts, forKey: "headsUps.state.eventStarts")
@@ -395,7 +402,7 @@ final class MacHeadsUps: ObservableObject {
     }
 
     func poll(app: AppModel, desktop: MacAppModel, apple: AppleConnections = .shared, now: Date = Date()) async {
-        guard HeadsUpSettings.enabled, let bot = app.workspace.bots.first(where: { $0.isMain == true }) else { today = nil; return }
+        guard HeadsUpSettings.enabled, let bot = app.workspace.bots.first(where: { $0.isMain == true }) else { today = nil; lastError = nil; return }
         defer { persist() }
         let quiet = HeadsUpRules.inQuietHours(now, on: HeadsUpSettings.quiet, start: HeadsUpSettings.quietStart, end: HeadsUpSettings.quietEnd)
         let due = snoozed.filter { $0.at <= now }
@@ -403,9 +410,18 @@ final class MacHeadsUps: ObservableObject {
             snoozed = snoozed.filter { $0.at > now }
             for item in due { post(item.text, tag: item.tag, bot: bot, app: app, quiet: quiet) }
         }
+        let composio = desktop.composio
+        let links = await composio.headsUpLinks()
+        var problem: String?
         var events: [HeadsUpEvent] = []
-        if apple.canRead(.calendar) {
-            events = AppleReaders.headsUpEvents(hours: 24)
+        var calendarOK = false
+        if links.calendar {
+            do {
+                let data = try await composio.headsUpFetch(ComposioHeadsUpSource.calendarTool, arguments: ComposioHeadsUpSource.calendarArguments(now: now))
+                events = ComposioHeadsUpSource.events(from: data); calendarOK = true
+            } catch { problem = ComposioModel.message(error) }
+        }
+        if calendarOK {
             if HeadsUpSettings.meetings {
                 for event in HeadsUpRules.dueReminders(events, lead: HeadsUpSettings.lead, now: now, reminded: reminded) {
                     reminded.insert(HeadsUpRules.key(event))
@@ -437,31 +453,42 @@ final class MacHeadsUps: ObservableObject {
             for item in fresh { duesSaid.insert(day + "|" + item.id) }
             if !fresh.isEmpty { post(HeadsUpRules.dueText(fresh), tag: HeadsUpTag(kind: "reminder", title: fresh.count == 1 ? fresh[0].title : "Reminders due today"), bot: bot, app: app, quiet: quiet) }
         }
-        if (HeadsUpSettings.email || HeadsUpSettings.deliveries), apple.canRead(.mail), let text = try? await AppleReaders.mail(query: "") {
-            let items = HeadsUpRules.mailItems(text), muted = Set(HeadsUpSettings.muted)
-            let wanted = { (mail: HeadsUpMail) in !muted.contains(HeadsUpRules.address(mail.sender)) }
-            waiting = items.filter { wanted($0) && HeadsUpRules.isFromPerson($0.sender) && !HeadsUpRules.isDelivery($0) }.count
-            // The first look only records what is already in the inbox, so turning heads-ups on never floods the chat.
-            let fresh = mailPrimed ? items.filter { !mailSeen.contains($0.key) && wanted($0) } : []
-            let deliveries = fresh.filter(HeadsUpRules.isDelivery)
-            let people = fresh.filter { HeadsUpRules.isFromPerson($0.sender) && !HeadsUpRules.isDelivery($0) }
-            var handled = Set(items.map(\.key))
-            if HeadsUpSettings.deliveries {
-                for mail in deliveries { post("\(HeadsUpRules.senderName(mail.sender)): \(mail.subject)", tag: HeadsUpTag(kind: "delivery", title: "Delivery"), bot: bot, app: app, quiet: quiet) }
-            }
-            if HeadsUpSettings.email, !people.isEmpty {
-                let label = "Checked your inbox · \(people.count) new email\(people.count == 1 ? "" : "s")"
-                let tag = HeadsUpTag(kind: "email", title: label, senders: HeadsUpRules.senders(people))
-                switch desktop.headsUpTurn(HeadsUpRules.emailPrompt(Array(people.prefix(15))), label: label, tag: tag, count: people.count, bot: bot, app: app, quiet: quiet,
-                                           fallback: HeadsUpRules.emailText(people)) {
-                case .started, .noAI: break
-                case .busy: for mail in people { handled.remove(mail.key) } // try again on the next check
-                }
-            }
-            mailSeen.formUnion(handled); mailPrimed = true
-            if mailSeen.count > 2000 { mailSeen = Set(items.map(\.key)) }
+        var mailOK = false
+        if (HeadsUpSettings.email || HeadsUpSettings.deliveries), links.gmail {
+            do {
+                let data = try await composio.headsUpFetch(ComposioHeadsUpSource.mailTool, arguments: ComposioHeadsUpSource.mailArguments())
+                mailOK = true
+                await handleMail(ComposioHeadsUpSource.mail(from: data), bot: bot, app: app, desktop: desktop, quiet: quiet)
+            } catch { problem = problem ?? ComposioModel.message(error) }
         }
-        today = HeadsUpRules.today(events, waiting: apple.canRead(.mail) ? waiting : nil, now: now)
+        lastError = problem
+        today = HeadsUpRules.today(events, waiting: mailOK ? waiting : nil, now: now)
+    }
+
+    /// New unread mail: deliveries and people worth a look. The first look only records what is already in the inbox.
+    private func handleMail(_ items: [HeadsUpMail], bot: Bot, app: AppModel, desktop: MacAppModel, quiet: Bool) async {
+        let muted = Set(HeadsUpSettings.muted)
+        let wanted = { (mail: HeadsUpMail) in !muted.contains(HeadsUpRules.address(mail.sender)) }
+        waiting = items.filter { wanted($0) && HeadsUpRules.isFromPerson($0.sender) && !HeadsUpRules.isDelivery($0) }.count
+        // The first look only records what is already in the inbox, so turning heads-ups on never floods the chat.
+        let fresh = mailPrimed ? items.filter { !mailSeen.contains($0.key) && wanted($0) } : []
+        let deliveries = fresh.filter(HeadsUpRules.isDelivery)
+        let people = fresh.filter { HeadsUpRules.isFromPerson($0.sender) && !HeadsUpRules.isDelivery($0) }
+        var handled = Set(items.map(\.key))
+        if HeadsUpSettings.deliveries {
+            for mail in deliveries { post("\(HeadsUpRules.senderName(mail.sender)): \(mail.subject)", tag: HeadsUpTag(kind: "delivery", title: "Delivery"), bot: bot, app: app, quiet: quiet) }
+        }
+        if HeadsUpSettings.email, !people.isEmpty {
+            let label = "Checked your inbox · \(people.count) new email\(people.count == 1 ? "" : "s")"
+            let tag = HeadsUpTag(kind: "email", title: label, senders: HeadsUpRules.senders(people))
+            switch desktop.headsUpTurn(HeadsUpRules.emailPrompt(Array(people.prefix(15))), label: label, tag: tag, count: people.count, bot: bot, app: app, quiet: quiet,
+                                       fallback: HeadsUpRules.emailText(people)) {
+            case .started, .noAI: break
+            case .busy: for mail in people { handled.remove(mail.key) } // try again on the next check
+            }
+        }
+        mailSeen.formUnion(handled); mailPrimed = true
+        if mailSeen.count > 2000 { mailSeen = Set(items.map(\.key)) }
     }
 
     private func post(_ text: String, tag: HeadsUpTag, bot: Bot, app: AppModel, quiet: Bool, urgent: Bool = false) {

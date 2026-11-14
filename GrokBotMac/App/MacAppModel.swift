@@ -236,8 +236,8 @@ final class MacAppModel: ObservableObject {
                 ticks += 1
                 self.routinesWantAwake = UserDefaults.standard.bool(forKey: "keepAwakeForRoutines") && app.workspace.bots.contains { ($0.schedules ?? []).contains(where: \.enabled) }
                 self.refreshAwake()
-                if ticks % 12 == 0 { await self.triggers.poll(app: app) }
-                // Heads-ups look at Mail and Calendar about every three minutes.
+                if ticks % 12 == 0 { await self.triggers.poll(app: app, composio: self.composio) }
+                // Heads-ups look at Gmail and Google Calendar (through Composio) about every three minutes.
                 if ticks % 36 == 6 { await self.headsUps.poll(app: app, desktop: self) }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }

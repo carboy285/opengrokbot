@@ -12,6 +12,7 @@ final class ComposioModel: ObservableObject {
     private var session: ComposioSession?
     private var key: String?
     private var generation = 0
+    private var linksCheckedAt = Date.distantPast
     var connectedCount: Int { toolkits.filter(\.connected).count }
     static let choices: [(slug: String, name: String)] = ComposioCatalog.apps.map { ($0.slug, $0.name) }
     /// Apps the current Composio session was actually created with. `selected` may differ while the user is choosing.
@@ -251,5 +252,43 @@ extension ComposioModel {
         }
         let result = (try? JSONSerialization.data(withJSONObject: body["data"] ?? [:], options: [.fragmentsAllowed])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return (false, result.count > 12_000 ? String(result.prefix(12_000)) + "…(cut)" : result)
+    }
+}
+
+// MARK: - Heads-ups through Composio
+// Heads-ups read Gmail and Google Calendar here instead of the Mail and Calendar apps, which would open on screen.
+
+extension ComposioModel {
+    /// Whether Gmail and Google Calendar are authorized in the connected project. Asks Composio at most once per `maxAge` seconds.
+    func headsUpLinks(maxAge: TimeInterval = 600) async -> (gmail: Bool, calendar: Bool) {
+        guard configured, let key, let session else { return (false, false) }
+        if toolkits.isEmpty || Date().timeIntervalSince(linksCheckedAt) > maxAge {
+            linksCheckedAt = Date()
+            if let items = try? await client(key).toolkits(sessionID: session.session_id) { toolkits = items }
+        }
+        func linked(_ slug: String) -> Bool { toolkits.contains { $0.slug == slug && $0.connected } }
+        return (linked("gmail"), linked("googlecalendar"))
+    }
+
+    /// Runs one of the two read-only tools heads-ups use and returns Composio's `data`. Any other tool is refused.
+    func headsUpFetch(_ tool: String, arguments: [String: Any]) async throws -> Any {
+        guard ComposioHeadsUpSource.allowed.contains(tool) else { throw CloudError.message("Heads-ups only read mail and calendar.") }
+        guard configured, let key else { throw ComposioError.missing }
+        guard let url = URL(string: "https://backend.composio.dev/api/v3/tools/execute/" + tool) else { throw ComposioError.invalidResponse }
+        var request = URLRequest(url: url, timeoutInterval: 45)
+        request.httpMethod = "POST"
+        request.setValue(key, forHTTPHeaderField: "x-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": installationUserID(), "arguments": arguments, "version": "latest"] as [String: Any])
+        let (data, response) = try await client(key).transport.data(for: request)
+        guard let status = (response as? HTTPURLResponse)?.statusCode else { throw ComposioError.invalidResponse }
+        guard (200..<300).contains(status) else { throw ComposioError.status(status) }
+        guard data.count < 8_000_000, let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ComposioError.invalidResponse }
+        if (body["successful"] as? Bool) == false || (body["successfull"] as? Bool) == false || body["error"] is String {
+            let detail = String(((body["error"] as? String) ?? "").prefix(160))
+            let needsAccount = detail.range(of: "connect|auth|account", options: [.regularExpression, .caseInsensitive]) != nil
+            throw CloudError.message(needsAccount ? "Reconnect this account in Connect apps." : "The account check failed" + (detail.isEmpty ? "." : ": " + detail))
+        }
+        return body["data"] ?? [String: Any]()
     }
 }
