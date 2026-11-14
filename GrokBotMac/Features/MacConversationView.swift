@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import SwiftUI
 
 struct MacConversationView: View {
@@ -856,8 +857,23 @@ struct MacInlineImage: View {
         return NSImage(contentsOfFile: resolved)
     }
 
+    /// A video a Bot made (0.9.7), from the same folder as local images.
+    private var localVideo: URL? {
+        let path = source.hasPrefix("file://") ? (URL(string: source)?.path ?? "") : source
+        let allowed = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/OpenGrokBot").standardizedFileURL.path
+        let resolved = URL(fileURLWithPath: path).standardizedFileURL
+        guard resolved.path.hasPrefix(allowed + "/"), ["mp4", "mov", "m4v", "webm"].contains(resolved.pathExtension.lowercased()),
+              FileManager.default.fileExists(atPath: resolved.path) else { return nil }
+        return resolved
+    }
+
     var body: some View {
-        if source.hasPrefix("https://"), let url = URL(string: source) {
+        if let video = localVideo {
+            VideoPlayer(player: AVPlayer(url: video))
+                .frame(width: 420, height: 260)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityLabel(alt.isEmpty ? "Video" : alt)
+        } else if source.hasPrefix("https://"), let url = URL(string: source) {
             AsyncImage(url: url) { image in image.resizable().scaledToFit() } placeholder: { Text(alt.isEmpty ? "Loading image…" : alt).foregroundStyle(MacTheme.secondary) }
                 .frame(maxWidth: 420, maxHeight: 320, alignment: .leading)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

@@ -52,7 +52,36 @@ enum LocalModelServer {
     }
 
     /// Streams a reply. `onText` gets the visible text so far.
-    static func chat(provider: CLIProvider, base: String, prompt: String, model: String, onText: @escaping @Sendable (String) -> Void) async throws -> String {
+    /// Tools for local models (0.9.7): one native tool, app_action, carries any operation the instructions describe. A
+    /// call becomes the same opengrokbot-action block a CLI writes, so the app runs it exactly as it would for a CLI.
+    static func appTool() -> [String: Any] {
+        let text: [String: Any] = ["type": "string"]
+        return ["type": "function", "function": [
+            "name": "app_action",
+            "description": "Ask OpenGrokBot to do something for the human: any operation listed in your instructions, such as searching the web, reading a page, adding a reminder, scheduling a task, making an image, finding or running a connected-app tool, or messaging another Bot. Put the operation name in \"action\" and its fields next to it, exactly as the instructions show. The result comes back in the next turn.",
+            "parameters": [
+                "type": "object",
+                "properties": ["action": ["type": "string", "description": "The operation, for example search_web, apple_add_reminder, schedule_task, generate_image, composio_find or composio_run."],
+                               "query": text, "url": text, "text": text, "prompt": text, "name": text, "at": text, "to": text, "tool": text, "arguments": ["type": "object"]],
+                "required": ["action"],
+                "additionalProperties": true
+            ] as [String: Any]
+        ] as [String: Any]]
+    }
+
+    /// Turns finished tool calls into action blocks. Calls that are not valid app actions are dropped.
+    static func actionBlocks(_ calls: [(name: String, arguments: String)]) -> String {
+        calls.compactMap { call -> String? in
+            guard call.name.isEmpty || call.name == "app_action", let data = call.arguments.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let action = value["action"] as? String, action.range(of: "^[a-z_]{2,40}$", options: .regularExpression) != nil,
+                  let json = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), json.count <= 16_000,
+                  let text = String(data: json, encoding: .utf8) else { return nil }
+            return "\n```opengrokbot-action\n" + text + "\n```"
+        }.joined()
+    }
+
+    static func chat(provider: CLIProvider, base: String, prompt: String, model: String, tools: Bool = true, onText: @escaping @Sendable (String) -> Void) async throws -> String {
         let name = provider.name
         guard let origin = origin(base), let url = URL(string: origin + "/v1/chat/completions") else {
             throw Failure("The \(name) address must be on this Mac or your local network.")
@@ -63,21 +92,33 @@ enum LocalModelServer {
             guard let first = available.first else { throw Failure("\(name) has no models yet. \(provider == .ollama ? "Run ollama pull llama3.2 in Terminal" : "Load a model in LM Studio"), then retry.") }
             chosen = first
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"; request.timeoutInterval = 600
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": chosen, "stream": true, "messages": [["role": "user", "content": prompt]]])
-        let connection: (URLSession.AsyncBytes, URLResponse)
-        do { connection = try await URLSession.shared.bytes(for: request) }
-        catch is CancellationError { throw CLIError.stopped }
-        catch { if Task.isCancelled { throw CLIError.stopped }; throw Failure("\(name) isn’t running at \(origin). Open \(name) and start its server, then retry.") }
-        let (bytes, response) = connection
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        func open(withTools: Bool) async throws -> (URLSession.AsyncBytes, Int) {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"; request.timeoutInterval = 600
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            var body: [String: Any] = ["model": chosen, "stream": true, "messages": [["role": "user", "content": prompt]]]
+            if withTools { body["tools"] = [appTool()] }
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            do {
+                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                return (bytes, (response as? HTTPURLResponse)?.statusCode ?? 0)
+            }
+            catch is CancellationError { throw CLIError.stopped }
+            catch { if Task.isCancelled { throw CLIError.stopped }; throw Failure("\(name) isn’t running at \(origin). Open \(name) and start its server, then retry.") }
+        }
+        var (bytes, status) = try await open(withTools: tools)
+        if tools, status == 400 {
+            // Models without tool support reject the request; they still read the instructions and can write action blocks.
+            var reason = ""
+            for try await line in bytes.lines { reason += line; if reason.count > 2000 { break } }
+            if reason.lowercased().contains("tool") { (bytes, status) = try await open(withTools: false) }
+        }
         guard status == 200 else {
             if status == 404 { throw Failure("That model isn’t available in \(name). Choose another in the Bot’s side panel.") }
             throw Failure("\(name) stopped with an error (HTTP \(status)). Check the model is loaded and try again.")
         }
         var raw = ""
+        var calls: [(name: String, arguments: String)] = []
         do {
             for try await line in bytes.lines {
                 try Task.checkCancellation()
@@ -86,7 +127,17 @@ enum LocalModelServer {
                 guard payload != "[DONE]", let data = payload.data(using: .utf8),
                       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let choice = (object["choices"] as? [[String: Any]])?.first else { continue }
-                let piece = ((choice["delta"] as? [String: Any])?["content"] as? String) ?? ((choice["message"] as? [String: Any])?["content"] as? String) ?? ""
+                let delta = (choice["delta"] as? [String: Any]) ?? (choice["message"] as? [String: Any]) ?? [:]
+                // Tool calls stream in pieces: a name first, then the arguments a few characters at a time.
+                for item in delta["tool_calls"] as? [[String: Any]] ?? [] {
+                    let index = item["index"] as? Int ?? calls.count
+                    while calls.count <= index && calls.count < 8 { calls.append((name: "", arguments: "")) }
+                    guard index < calls.count, let function = item["function"] as? [String: Any] else { continue }
+                    if let part = function["name"] as? String { calls[index].name += part }
+                    if let part = function["arguments"] as? String { calls[index].arguments += part }
+                    else if let object = function["arguments"], let data = try? JSONSerialization.data(withJSONObject: object), let part = String(data: data, encoding: .utf8) { calls[index].arguments = part }
+                }
+                let piece = (delta["content"] as? String) ?? ""
                 guard !piece.isEmpty else { continue }
                 raw += piece
                 guard raw.count <= 400_000 else { break }
@@ -94,8 +145,10 @@ enum LocalModelServer {
             }
         } catch is CancellationError { throw CLIError.stopped }
         catch { if Task.isCancelled { throw CLIError.stopped }; throw Failure("The connection to \(name) was lost. Retry.") }
-        let text = visibleText(raw)
+        let blocks = actionBlocks(calls)
+        let text = (visibleText(raw) + blocks).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw Failure("\(name) returned an empty reply. Try another model.") }
+        if !blocks.isEmpty { onText(text) }
         return text
     }
 }

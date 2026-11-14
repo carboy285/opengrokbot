@@ -40,6 +40,40 @@ struct BotAction: Decodable, Sendable {
     var list: String?
     var tags: [String]?
     var page: Int?
+    /// 0.9.7: image and video generation, and connected-app tools for local models.
+    var prompt: String?
+    var provider: String?
+    var query: String?
+    var tool: String?
+    var arguments: JSONValue?
+}
+
+/// Any JSON value, for tool input whose shape the app does not know in advance (connected-app tools).
+enum JSONValue: Codable, Sendable, Equatable {
+    case string(String), number(Double), bool(Bool), null
+    case array([JSONValue]), object([String: JSONValue])
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if value.decodeNil() { self = .null }
+        else if let flag = try? value.decode(Bool.self) { self = .bool(flag) }
+        else if let number = try? value.decode(Double.self) { self = .number(number) }
+        else if let text = try? value.decode(String.self) { self = .string(text) }
+        else if let list = try? value.decode([JSONValue].self) { self = .array(list) }
+        else { self = .object(try value.decode([String: JSONValue].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        switch self {
+        case .string(let text): try value.encode(text)
+        case .number(let number): try value.encode(number)
+        case .bool(let flag): try value.encode(flag)
+        case .null: try value.encodeNil()
+        case .array(let list): try value.encode(list)
+        case .object(let object): try value.encode(object)
+        }
+    }
 }
 
 /// What the chat shows for a page the Bot's browser read: the tab heading and the site, never the page text.

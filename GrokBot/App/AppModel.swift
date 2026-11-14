@@ -282,6 +282,12 @@ final class AppModel: ObservableObject {
         return commit { var entry = Entry(botID: botID, kind: .bot, text: text); entry.state = .complete; entry.provider = "Heads-up"; entry.headsUp = tag; $0.entries.append(entry) }
     }
 
+    /// A picture or video a Bot made (0.9.7): a finished message whose text is the image line.
+    func postMedia(_ text: String, provider: String, to botID: UUID) {
+        guard workspace.bots.contains(where: { $0.id == botID }) else { return }
+        _ = commit { var entry = Entry(botID: botID, kind: .bot, text: text); entry.state = .complete; entry.provider = provider; $0.entries.append(entry) }
+    }
+
     /// The automatic check behind an AI heads-up. The chat shows only its short label; the full text is the prompt.
     @discardableResult
     func addAutomaticCheck(_ text: String, label: String, to bot: Bot, id: UUID) -> Bool {
@@ -323,7 +329,7 @@ final class AppModel: ObservableObject {
             func target(_ name: String) -> Bot? { value.bots.first { $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame || $0.name.caseInsensitiveCompare(name) == .orderedSame } }
             for action in parsed.actions {
                 switch action.action {
-                case "browse_web", "open_vm", "vm_exec", "vm_use": break // Executed by the desktop after successful CLI completion.
+                case "browse_web", "open_vm", "vm_exec", "vm_use", "generate_image", "generate_video", "composio_find", "composio_run": break // Executed by the desktop after successful CLI completion.
                 case let name where name.hasPrefix("apple_") || name.hasPrefix("browser_") || ["secure_login", "search_web", "search_knowledge", "read_knowledge"].contains(name): break // Mac-only tools, executed by the Mac app after successful CLI completion.
                 case "schedule_task":
                     guard delivery == nil, value.entries.last(where: { $0.botID == bot.id && $0.kind == .user })?.text.hasPrefix("Scheduled task:") != true, !(value.bots.first(where: { $0.id == bot.id })?.schedules ?? []).contains(where: { $0.name == action.name && $0.enabled }),

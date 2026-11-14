@@ -44,7 +44,7 @@ struct MacSettingsView: View {
                         case .headsUps: MacHeadsUpsSettings()
                         case .computer: computer
                         case .permissions: unavailable(title: "Your CLI keeps its permissions", detail: "Codex runs with read-only workspace access. Other CLIs keep their own configured permissions. This app does not add approval-bypass flags or auto-approve tools.", icon: "shield")
-                        case .apiKeys: MacAPIKeysView()
+                        case .apiKeys: VStack(alignment: .leading, spacing: 28) { MacAPIKeysView(); MacMediaKeysView() }
                         case .secureLogins: MacSecureLoginsView()
                         case .vault: MacVaultView()
                         case .voice: MacVoiceSettingsPage()
@@ -598,5 +598,83 @@ struct MacTodayCard: View {
         if let waiting = today.waiting { list.append(waiting == 0 ? "Inbox clear" : "\(waiting) email\(waiting == 1 ? "" : "s") waiting on you") }
         if today.overlaps > 0 { list.append("⚠︎ \(today.overlaps) overlap\(today.overlaps == 1 ? "" : "s")") }
         return list
+    }
+}
+
+
+/// Settings → API Keys → Image & video (0.9.7). Keys stay in the Keychain; the app calls the provider, never the Bot.
+struct MacMediaKeysView: View {
+    @State private var drafts: [MediaProvider: String] = [:]
+    @State private var saved: Set<MediaProvider> = Set(MediaKeys.ready)
+    @State private var feedback: String?
+    @AppStorage("media.default.image") private var imageDefault = ""
+    @AppStorage("media.default.video") private var videoDefault = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Image & video").font(.system(size: 18, weight: .medium))
+            Text("Add a key and any Bot can make pictures or videos when you ask. The app calls the provider with your key, saves the result in that Bot’s folder and shows it in the chat. Each provider bills its own account.")
+                .font(.system(size: 14)).lineSpacing(4).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(MediaProvider.allCases) { provider in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(provider.name).font(.system(size: 15, weight: .medium))
+                            Spacer()
+                            Text(saved.contains(provider) ? "Key saved" : "No key").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                        }
+                        HStack(spacing: 8) {
+                            SecureField(saved.contains(provider) ? "Saved — paste a new key to replace" : "Paste API key", text: Binding(get: { drafts[provider] ?? "" }, set: { drafts[provider] = $0 }))
+                                .textFieldStyle(.roundedBorder).accessibilityLabel("\(provider.name) API key")
+                            MacPillButton(title: "Save", prominent: false) { save(provider) }
+                            if saved.contains(provider) { MacPillButton(title: "Remove", prominent: false) { remove(provider) } }
+                            Link("Get a key ↗", destination: provider.keyHelp).font(.system(size: 12))
+                        }
+                        HStack(spacing: 12) {
+                            ForEach(provider.kinds, id: \.self) { kind in
+                                HStack(spacing: 6) {
+                                    Text(kind == "video" ? "Video model" : "Image model").font(.system(size: 12)).foregroundStyle(MacTheme.secondary)
+                                    TextField(provider.defaultModel(kind), text: modelBinding(provider, kind)).textFieldStyle(.roundedBorder).frame(width: 230)
+                                }
+                            }
+                        }
+                    }.padding(.horizontal, 20).padding(.vertical, 14)
+                    if provider != MediaProvider.allCases.last { Rectangle().fill(MacTheme.line).frame(height: 1).padding(.leading, 20) }
+                }
+            }.background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+            HStack(spacing: 20) {
+                defaultPicker("Default for images", kind: "image", selection: $imageDefault)
+                defaultPicker("Default for videos", kind: "video", selection: $videoDefault)
+            }
+            if let feedback { Text(feedback).font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
+        }
+    }
+
+    private func modelBinding(_ provider: MediaProvider, _ kind: String) -> Binding<String> {
+        let key = "media.model.\(provider.rawValue).\(kind)"
+        return Binding(get: { UserDefaults.standard.string(forKey: key) ?? "" }, set: { value in
+            let clean = value.trimmingCharacters(in: .whitespaces)
+            if clean.isEmpty || MediaGenerator.validModel(clean) { UserDefaults.standard.set(clean, forKey: key); feedback = nil }
+            else { feedback = "Write models like flux-pro-1.1 or owner/name." }
+        })
+    }
+
+    private func defaultPicker(_ title: String, kind: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            Text("First one with a key").tag("")
+            ForEach(MediaProvider.allCases.filter { $0.kinds.contains(kind) }) { provider in Text(provider.shortName).tag(provider.rawValue) }
+        }.frame(maxWidth: 320)
+    }
+
+    private func save(_ provider: MediaProvider) {
+        let text = drafts[provider] ?? ""
+        do {
+            if try MediaKeys.save(text, for: provider) { saved.insert(provider); drafts[provider] = ""; feedback = "\(provider.shortName) key saved." }
+            else { feedback = "That does not look like an API key. Paste only the key, with no spaces or line breaks." }
+        } catch { feedback = "The key could not be saved in the Keychain." }
+    }
+
+    private func remove(_ provider: MediaProvider) {
+        do { try MediaKeys.remove(provider); saved.remove(provider); feedback = "\(provider.shortName) key removed." } catch { feedback = "The key could not be removed." }
     }
 }

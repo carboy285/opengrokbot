@@ -143,4 +143,47 @@ final class HeadsUpRulesTests: XCTestCase {
         XCTAssertEqual(entry.label, "x")
     }
 }
+
+/// 0.9.7: local-model tools, connected-app tools and image/video generation.
+final class LocalToolsAndMediaTests: XCTestCase {
+    func testToolCallsBecomeActionBlocksAndBadCallsAreDropped() {
+        let text = LocalModelServer.actionBlocks([(name: "app_action", arguments: #"{"action":"apple_add_reminder","text":"Call the plumber"}"#),
+                                                 (name: "app_action", arguments: #"{"action":"Bad Action!"}"#),
+                                                 (name: "other_tool", arguments: #"{"action":"search_web"}"#),
+                                                 (name: "app_action", arguments: "not json")])
+        XCTAssertEqual(text, "\n```opengrokbot-action\n{\"action\":\"apple_add_reminder\",\"text\":\"Call the plumber\"}\n```")
+        XCTAssertEqual(BotTeamwork.parse("Adding it." + text).actions.first?.action, "apple_add_reminder")
+    }
+
+    func testConnectedAppToolsAskBeforeChangesAndDescribeTheirFields() {
+        XCTAssertTrue(ComposioTools.isWrite("GMAIL_SEND_EMAIL"))
+        XCTAssertTrue(ComposioTools.isWrite("GOOGLECALENDAR_CREATE_EVENT"))
+        XCTAssertFalse(ComposioTools.isWrite("GMAIL_FETCH_EMAILS"))
+        XCTAssertFalse(ComposioTools.validSlug("gmail send"))
+        let data = Data(#"{"items":[{"slug":"GMAIL_SEND_EMAIL","description":"Send an email","input_parameters":{"properties":{"recipient_email":{},"body":{}},"required":["recipient_email"]}},{"slug":"bad slug"}]}"#.utf8)
+        XCTAssertEqual(ComposioTools.describe(data, app: "gmail"), ["GMAIL_SEND_EMAIL (gmail, asks first): Send an email Fields: body, recipient_email*"])
+        XCTAssertTrue(ComposioTools.note(["gmail"]).contains("composio_find"))
+        XCTAssertEqual(ComposioTools.note([]), "")
+    }
+
+    func testActionsCarryFreeFormToolInput() throws {
+        let parsed = BotTeamwork.parse("```opengrokbot-action\n{\"action\":\"composio_run\",\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{\"recipient_email\":\"a@b.c\",\"cc\":[\"d@e.f\"],\"html\":false,\"count\":2}}\n```")
+        let action = try XCTUnwrap(parsed.actions.first)
+        XCTAssertEqual(action.tool, "GMAIL_SEND_EMAIL")
+        XCTAssertEqual(action.arguments, .object(["recipient_email": .string("a@b.c"), "cc": .array([.string("d@e.f")]), "html": .bool(false), "count": .number(2)]))
+        let again = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(action.arguments))
+        XCTAssertEqual(again, action.arguments)
+    }
+
+    func testMediaNamesModelsAndProviders() {
+        XCTAssertEqual(MediaGenerator.fileName("A red bike, at sunset!!", fileExtension: "png", date: Date(timeIntervalSince1970: 1_794_708_184)).components(separatedBy: "-").dropFirst().joined(separator: "-"), "a-red-bike-at-sunset.png")
+        XCTAssertTrue(MediaGenerator.fileName("../../", fileExtension: "mp4").hasSuffix("-media.mp4"))
+        XCTAssertTrue(MediaGenerator.validModel("black-forest-labs/flux-schnell"))
+        XCTAssertFalse(MediaGenerator.validModel("../../etc"))
+        XCTAssertEqual(MediaGenerator.fileExtension("image/jpeg", kind: "image"), "jpg")
+        XCTAssertEqual(MediaGenerator.fileExtension("", kind: "video"), "mp4")
+        XCTAssertEqual(MediaProvider.flux.kinds, ["image"])
+        XCTAssertEqual(MediaProvider.google.defaultModel("video"), "veo-3.0-generate-001")
+    }
+}
 #endif
