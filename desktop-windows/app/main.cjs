@@ -25,6 +25,32 @@ const updates = require('./updates.cjs');
 const proactive = require('./proactive.cjs');
 const media = require('./media.cjs');
 const composioTools = require('./composio-tools.cjs');
+const webAccessModule = require('./web-access.cjs');
+// ---------- Web access (0.9.7): this app from another device's browser ----------
+const webAccess = new webAccessModule.WebAccess({
+ invoke:async(channel,args)=>{const callback=webAccessModule.INVOKE.has(channel)&&channelHandlers.get(channel);return callback?runHandler(callback,args):{ok:false,error:'Not available over web access.'};},
+ config:()=>({username:settings?.webAccess?.username,passwordHash:settings?.webAccess?.passwordHash}),
+ rendererDir:path.resolve(__dirname,'../renderer'),preloadFile:path.join(__dirname,'preload.cjs')
+});
+let webState={address:null,urls:[],error:null};
+const WEB_PORT=8765;
+function lanAddresses(port){return Object.values(require('node:os').networkInterfaces()).flat().filter(x=>x&&x.family==='IPv4'&&!x.internal&&require('./remote-host.cjs').localHost(x.address)).map(x=>`http://${x.address}:${port}`);}
+function webStatus(){const config=settings?.webAccess||{};return {enabled:!!config.enabled&&webAccess.active,configured:!!config.passwordHash,username:config.username||'',mode:config.mode==='tailscale'?'tailscale':'wifi',urls:webState.urls,error:webState.error};}
+async function applyWebAccess(){
+ const config=settings?.webAccess||{};
+ if(webState.address){await require('./tailscale.cjs').remove(WEB_PORT,webState.address,false).catch(()=>{});webState.address=null;}
+ await webAccess.stop();webState={address:null,urls:[],error:null};
+ if(!config.enabled||!config.passwordHash)return webStatus();
+ const tailnet=config.mode==='tailscale';
+ try{await webAccess.start({port:WEB_PORT,lan:!tailnet,secure:tailnet});}
+ catch(error){webState.error=error?.code==='EADDRINUSE'?`Port ${WEB_PORT} is already in use on this computer.`:'Web access could not start.';return webStatus();}
+ if(tailnet){
+  const address=await require('./tailscale.cjs').configure(WEB_PORT,false).catch(()=>null);
+  if(!address){await webAccess.stop();webState.error='Tailscale isn’t running or signed in on this computer, or port 8443 is already used by another Tailscale serve.';return webStatus();}
+  webState.address=address;webState.urls=[address];
+ } else webState.urls=lanAddresses(WEB_PORT);
+ return webStatus();
+}
 const stoppedBots=new Set();
 let remoteTray, quitting = false, revision = randomUUID(), updateState;
 class PublicError extends Error {}
@@ -41,11 +67,16 @@ function authorized(event) {
   try { return (event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame && fileURLToPath(event.senderFrame.url) === rendererFile) || (event.sender === mirrorWindow?.webContents && event.senderFrame === mirrorWindow.webContents.mainFrame && fileURLToPath(event.senderFrame.url) === mirrorFile); }
   catch { return false; }
 }
+const channelHandlers=new Map();
+async function runHandler(callback,args){
+  try { return { ok: true, value: await callback(...args) }; }
+  catch(error) { return { ok: false, error: error instanceof PublicError?error.message:'The action could not be completed. Your existing data was kept; unlock your device or check available storage and try again.' }; }
+}
 function handle(name, callback) {
+  channelHandlers.set(name,callback);
   ipcMain.handle(name, async (event, ...args) => {
     if (!authorized(event) || event.sender === mirrorWindow?.webContents && !name.startsWith('mirror:')) return { ok: false, error: 'Untrusted request' };
-    try { return { ok: true, value: await callback(...args) }; }
-    catch(error) { return { ok: false, error: error instanceof PublicError?error.message:'The action could not be completed. Your existing data was kept; unlock your device or check available storage and try again.' }; }
+    return runHandler(callback,args);
   });
 }
 async function atomicJSON(name, value) {
@@ -250,7 +281,7 @@ setInterval(()=>tickSchedules().catch(()=>{}),5000).unref();
 // ---------- Heads-ups: Grok Bot reaches out first ----------
 let proactiveState=null,toolsCheckedAt=0;
 const headsUpConfig=()=>proactive.sanitizeConfig(settings?.proactive);
-const keepRunning=()=>cloud.active||headsUpConfig().enabled;
+const keepRunning=()=>cloud.active||headsUpConfig().enabled||webAccess.active;
 const mainBot=()=>state?.bots.find(x=>x.isMain);
 const firstLine=text=>String(text).split('\n').map(x=>x.trim()).find(Boolean)||'';
 async function linkedAccounts(){
@@ -691,6 +722,17 @@ function configureIPC() {
   if(settings.proactive.enabled&&!before.enabled)checkHeadsUps(true).catch(()=>{});
   pushProactive();return proactiveStatus();
  });
+ handle('web:status',async()=>{await ensureState();return webStatus();});
+ handle('web:configure',async value=>{
+  await ensureState();const current=settings.webAccess||{},next={...current};
+  if(typeof value?.username==='string'){if(!webAccessModule.USER.test(value.username.trim()))throw new PublicError('Use a username of 3–64 letters, numbers, dots, dashes or @.');next.username=value.username.trim();}
+  if(typeof value?.password==='string'&&value.password){const problem=webAccessModule.passwordProblem(value.password);if(problem)throw new PublicError(problem);next.passwordHash=webAccessModule.hashPassword(value.password);webAccess.signOutEverywhere();}
+  if(['wifi','tailscale'].includes(value?.mode))next.mode=value.mode;
+  if(typeof value?.enabled==='boolean')next.enabled=value.enabled;
+  if(next.enabled&&(!next.username||!next.passwordHash))throw new PublicError('Choose a username and password first.');
+  settings.webAccess=next;await saveSettings();return applyWebAccess();
+ });
+ handle('web:signout',async()=>{webAccess.signOutEverywhere();return webStatus();});
  handle('headsup:snooze',async(id,minutes)=>{
   await ensureState();if(![60,180].includes(minutes))throw new PublicError('Choose 1 or 3 hours.');
   const entry=headsUpCard(id),at=new Date(Date.now()+minutes*60000),saved=await watcher.deps.load();
@@ -995,6 +1037,7 @@ app.whenReady().then(() => {
   const nativeTitleBar = process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0a0a0b', symbolColor: '#ececee', height: 40 } } : { frame: false };
   const background = process.argv.includes('--background');
   window = new BrowserWindow({ show: !background, width: 1370, height: 940, minWidth: 860, minHeight: 620, ...nativeTitleBar, backgroundColor: '#0f0f10', title: 'OpenGrokBot', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  {const send=window.webContents.send.bind(window.webContents);window.webContents.send=(channel,...args)=>{send(channel,...args);webAccess.broadcast(channel,args[0]);};}
   window.on('close',event=>{if(keepRunning()&&!quitting){event.preventDefault();window.hide();if(!cloud.active&&settings&&!settings.trayHintShown){settings.trayHintShown=true;saveSettings().catch(()=>{});headsUpBanner(mainBot()?.id,'Still watching for you','OpenGrokBot keeps running in the tray so heads-ups keep coming. Quit from the tray icon.',true);}}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('render-process-gone',()=>denyAllApprovals());window.on('closed',()=>{denyAllApprovals();voiceEngine?.destroy();voiceEngine=null;});
@@ -1005,8 +1048,8 @@ app.whenReady().then(() => {
   window.loadFile(rendererFile);
   // Ctrl+Shift+Space anywhere starts (or stops) voice with the open Bot.
   try { globalShortcut.register('Control+Shift+Space', () => { if (!window || window.isDestroyed()) return; if (!window.isVisible()) window.show(); if (window.isMinimized()) window.restore(); window.focus(); window.webContents.send('voice:hotkey'); }); } catch {}
-  (async()=>{try{await ensureState();remoteTrayUpdate();if(background&&!keepRunning())window.show();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{if(!window.isVisible())window.show();cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
+  (async()=>{try{await ensureState();remoteTrayUpdate();applyWebAccess().catch(()=>{});if(background&&!keepRunning())window.show();installed=await cli.discover(settings.overrides);await cloud.restore();}catch{if(!window.isVisible())window.show();cloud.transition('offline','The desktop could not be restored. Unlock Windows and reopen the app.');}})();
 });
 app.on('will-quit',()=>{try{globalShortcut.unregisterAll();}catch{}});
-app.on('before-quit',()=>{quitting=true;localBrowsers.closeAll();mirror.stop();cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
+app.on('before-quit',()=>{quitting=true;webAccess.stop().catch(()=>{});localBrowsers.closeAll();mirror.stop();cloud.stop();for(const runs of active.values())for(const run of runs)run.cancel(true);});
 app.on('window-all-closed', () => {if(!keepRunning())app.quit();});

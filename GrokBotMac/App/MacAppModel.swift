@@ -78,6 +78,8 @@ final class MacAppModel: ObservableObject {
     @Published var runningBots: Set<UUID> = [] { didSet { refreshAwake() } }
     let triggers = MacTriggers()
     let headsUps = MacHeadsUps()
+    /// Images and videos being made right now (0.9.7); at most two at a time.
+    var mediaJobs = 0
     private var awakeActivity: NSObjectProtocol?
     private var routinesWantAwake = false
 
@@ -667,8 +669,6 @@ extension MacAppModel {
         UserDefaults.standard.set(true, forKey: "localCLISetupComplete")
         panel = nil
     }
-
-    private var mediaJobs = 0
 
     /// Makes an image or video for a Bot with the human's own key, saves it in the Bot's folder and shows it in the chat.
     func makeMedia(_ request: BotAction, bot: Bot, app: AppModel) {

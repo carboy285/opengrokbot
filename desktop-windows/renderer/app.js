@@ -213,6 +213,40 @@ function showHeadsUpBadge(value){
  badge.textContent=trouble?'Heads-ups need attention':'✦ Heads-ups on';badge.dataset.state=trouble?'offline':'ready';
  badge.title=value.error||(value.lastCheck?`Last checked ${ago(value.lastCheck)}`:'Waiting for the first check');
 }
+// Settings → Web access (0.9.7): use OpenGrokBot from a phone, tablet or another computer's browser.
+async function renderWebAccess(page){
+ const body=node('div','heads-up-settings web-access');page.append(body);
+ if(window.desktop?.webAccess){append(body,node('h2','','Web access'),node('p','muted intro','You’re using OpenGrokBot from another device. Change web access on the computer that runs it.'));return;}
+ if(!bridge.webStatus){append(body,node('h2','','Use OpenGrokBot from any device'),node('p','muted intro','Open the installed desktop app to turn on web access.'));return;}
+ let status;
+ async function draw(){
+  try{status=await result(bridge.webStatus());}catch(error){body.replaceChildren(node('p','',error.message));return;}
+  body.replaceChildren();
+  append(body,node('h2','','Use OpenGrokBot from any device'),node('p','muted intro','Open the address below in a browser on your phone, tablet or another computer and sign in. Bots still run on this PC, so it needs to stay on with OpenGrokBot open (closing the window keeps it running in the tray).'));
+  const save=async changes=>{try{status=await result(bridge.webConfigure(changes));draw();}catch(error){toast(error.message);draw();}};
+  const user=node('input','field');user.value=status.username;user.placeholder='Username';user.autocomplete='off';user.setAttribute('aria-label','Web access username');
+  const pass=node('input','field');pass.type='password';pass.autocomplete='new-password';pass.placeholder=status.configured?'Password saved — type a new one to change it':'Password (10+ characters)';pass.setAttribute('aria-label','Web access password');
+  const keep=button(status.configured?'Save changes':'Save sign-in',()=>{const value={username:user.value};if(pass.value)value.password=pass.value;pass.value='';save(value);},'pill');
+  const master=node('label','setting-row toggle-row');const check=node('input','switch');check.type='checkbox';check.setAttribute('role','switch');check.setAttribute('aria-label','Web access');check.checked=status.enabled;check.disabled=!status.configured;
+  check.addEventListener('change',()=>save({enabled:check.checked}));
+  append(master,append(node('span','toggle-text'),node('strong','','Web access'),node('small','muted',status.enabled?'On':status.configured?'Off':'Save a username and password first')),check);
+  const where=node('div','web-modes');where.setAttribute('role','radiogroup');where.setAttribute('aria-label','Where it can be reached');
+  for(const [value,title,detail] of [['wifi','Wi-Fi','Devices on the same network as this PC.'],['tailscale','Tailscale','Your devices anywhere on your tailnet, over HTTPS. Needs Tailscale on this PC and the other device.']]){
+   const option=button('',()=>save({mode:value}),`web-mode ${status.mode===value?'selected':''}`);option.setAttribute('role','radio');option.setAttribute('aria-checked',String(status.mode===value));
+   append(option,node('strong','',title),node('small','muted',detail));where.append(option);
+  }
+  append(body,append(node('div','settings-card'),master,append(node('div','web-signin'),user,pass,keep)),node('p','settings-label','Where'),where);
+  if(status.error)body.append(node('p','heads-up-error',status.error));
+  if(status.enabled&&status.urls.length){
+   const list=node('div','settings-card web-urls');
+   for(const url of status.urls)list.append(append(node('div','setting-row'),node('code','',url),button('Copy',async()=>{try{await navigator.clipboard.writeText(url);toast('Address copied.');}catch{toast(url);}},'pill')));
+   append(body,node('p','settings-label','Open this address'),list);
+  }
+  if(status.configured)body.append(button('Sign out all devices',async()=>{try{await result(bridge.webSignOut());toast('Every device was signed out.');}catch(error){toast(error.message);}},'pill'));
+  body.append(node('p','muted footnote','Sign-in is checked on this PC; the password is stored only as a hash. Five wrong tries lock that device out for a while. Over the web you can chat, use Bots, heads-ups and approvals. The vault, API keys, app connections and this page stay on this PC.'));
+ }
+ await draw();
+}
 async function renderHeadsUps(page){
  const body=node('div','heads-up-settings');page.append(body);
  if(!bridge.proactiveStatus){append(body,node('h2','','Let Grok Bot reach out first'),node('p','muted','Open the installed desktop app to turn on heads-ups. They run in the background on this computer.'));return;}
@@ -265,7 +299,7 @@ async function persist(next) {
   try { await result(bridge.save(next)); workspace = next; return true; }
   catch (error) { toast(error.message); return false; }
 }
-function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;if(banner.botID===id)hideBanner();document.querySelector('.heads-up-menu')?.remove();const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});if(bot?.unread){bot.unread=false;bridge.organizeBot?.(id,{unread:null}).catch?.(()=>{});}render(); }
+function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;window.closeSidebarOnNarrow?.();if(banner.botID===id)hideBanner();document.querySelector('.heads-up-menu')?.remove();const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});if(bot?.unread){bot.unread=false;bridge.organizeBot?.(id,{unread:null}).catch?.(()=>{});}render(); }
 function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
   const matches=bot=>(!bot.hidden||!!search)&&(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
@@ -587,7 +621,7 @@ function unavailable(title, detail) { return append(node('div', 'unavailable'), 
 function showSettings(tab = 'General') {
   dialog.replaceChildren();
   const layout = node('div', 'settings-layout'); const nav = node('nav', 'settings-nav'); const page = node('section', 'settings-page');
-  for (const [name, glyph] of [['General','⚙'],['Heads-ups','✦'],['Computer','▣'],['Permissions','♧'],['API Keys','⚷'],['Secure Logins','⚿'],['Vault','⚿'],['Voice','♫'],['Local models','◫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) {const icon=node('span','',glyph);icon.setAttribute('aria-hidden','true');nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), icon, node('div','',name)));}
+  for (const [name, glyph] of [['General','⚙'],['Heads-ups','✦'],['Computer','▣'],['Web access','⌂'],['Permissions','♧'],['API Keys','⚷'],['Secure Logins','⚿'],['Vault','⚿'],['Voice','♫'],['Local models','◫'],['Backup','⛁'],['Usage & Billing','▥'],['Updates','⇩']]) {const icon=node('span','',glyph);icon.setAttribute('aria-hidden','true');nav.append(append(button('', () => showSettings(name), name === tab ? 'active' : ''), icon, node('div','',name)));}
   append(page, append(node('header','panel-head'), node('h1','',tab), button('×', () => dialog.close(), 'close-panel')));
   append(layout, nav, page); dialog.append(layout); if (!dialog.open) dialog.showModal();
   if (tab === 'General') {
@@ -604,6 +638,7 @@ function showSettings(tab = 'General') {
   else if (tab === 'Local models') renderLocalModels(page);
   else if (tab === 'Usage & Billing') page.append(unavailable('No usage to report', 'Usage is billed or limited by your AI provider and Composio project. Check those accounts for current usage; the app does not invent a percentage.'));
   else if (tab === 'Heads-ups') renderHeadsUps(page);
+  else if (tab === 'Web access') renderWebAccess(page);
   else if (tab === 'Updates') renderUpdates(page);
   else if (tab === 'Vault') renderVault(page);
   else if (tab === 'API Keys') renderApiKeys({ bridge, result, toast, page });
@@ -721,6 +756,23 @@ for(const control of document.querySelectorAll('[data-window]')) control.addEven
 window.addEventListener('blur',()=>{focusGeneration++;for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key==='n'){event.preventDefault();showNewBot();}else if(event.key===','){event.preventDefault();showSettings();}else if(event.key==='f'){event.preventDefault();$('#search-button').click();}else if(event.key==='Enter'&&!dialog.open){event.preventDefault();$('#composer').requestSubmit();}});
 bridge.onChange?.(value=>{workspace=value.workspace;running=new Set(value.running);noticeHeadsUps();render();});
+// ---- Narrow screens and web access (0.9.7): the Bot list becomes a panel that slides in from the left ----
+if(window.desktop?.webAccess)document.documentElement.classList.add('web');
+{
+ const workspaceNode=$('#workspace'),sidebar=$('.sidebar'),narrow=matchMedia('(max-width: 760px)');
+ const toggle=button('☰',()=>setSidebar(!workspaceNode.classList.contains('show-sidebar')),'sidebar-toggle circle');toggle.setAttribute('aria-label','Show Bots');toggle.setAttribute('aria-expanded','false');
+ const scrim=node('div','sidebar-scrim');scrim.addEventListener('click',()=>setSidebar(false));
+ $('.conversation').append(toggle);workspaceNode.append(scrim);
+ function setSidebar(open){workspaceNode.classList.toggle('show-sidebar',open);toggle.setAttribute('aria-expanded',String(open));sidebar.style.transform='';if(open)sidebar.querySelector('button')?.focus();}
+ window.closeSidebarOnNarrow=()=>{if(narrow.matches)setSidebar(false);};
+ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&workspaceNode.classList.contains('show-sidebar'))setSidebar(false);});
+ // Drag the panel closed: it follows the finger, and the flick's velocity decides whether it closes.
+ let drag=null;
+ sidebar.addEventListener('pointerdown',event=>{if(!narrow.matches||event.pointerType==='mouse'||!workspaceNode.classList.contains('show-sidebar'))return;drag={x:event.clientX,t:event.timeStamp,last:event.clientX,lastT:event.timeStamp,moved:false};});
+ sidebar.addEventListener('pointermove',event=>{if(!drag)return;const dx=event.clientX-drag.x;if(!drag.moved&&Math.abs(dx)<10)return;if(!drag.moved){drag.moved=true;sidebar.setPointerCapture(event.pointerId);sidebar.classList.add('dragging');}drag.v=(event.clientX-drag.last)/Math.max(1,event.timeStamp-drag.lastT)*1000;drag.last=event.clientX;drag.lastT=event.timeStamp;sidebar.style.transform=`translateX(${Math.min(0,dx)}px)`;});
+ const end=event=>{if(!drag)return;const moved=drag.moved,dx=event.clientX-drag.x,velocity=drag.v||0;drag=null;sidebar.classList.remove('dragging');if(!moved)return;const projected=dx+velocity/1000*0.998/(1-0.998);setSidebar(!(projected< -sidebar.offsetWidth/3));};
+ sidebar.addEventListener('pointerup',end);sidebar.addEventListener('pointercancel',end);
+}
 bridge.onProactiveChange?.(value=>{proactiveStatus=value;showHeadsUpBadge(value);headsUpRefresh?.();if(currentBot()?.isMain)renderMessages(currentBot());});
 bridge.proactiveStatus?.().then(response=>{if(response.ok){proactiveStatus=response.value;showHeadsUpBadge(response.value);if(currentBot()?.isMain)renderMessages(currentBot());}}).catch(()=>{});
 bridge.onOpenBot?.(id=>{if(workspace.bots.some(bot=>bot.id===id))selectBot(id);});

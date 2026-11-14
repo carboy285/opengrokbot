@@ -547,3 +547,41 @@ body.native-titlebar .chat-heading{-webkit-app-region:no-drag;z-index:4}
 .media-model-row { display:flex; align-items:center; gap:8px; font-size:13px; }
 .media-model { background:var(--raised); border:1px solid var(--line); border-radius:10px; padding:6px 10px; font-size:13px; width:240px; color:var(--text); }
 .md-image video { display:block; max-width:min(480px,100%); max-height:360px; border-radius:12px; background:#000; }
+
+/* Settings → Web access (0.9.7) */
+.web-signin { display:grid; grid-template-columns:1fr 1fr auto; gap:10px; padding:4px 0 14px; }
+.web-modes { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.web-mode { display:grid; gap:4px; text-align:left; padding:16px 18px; border-radius:16px; background:var(--panel); border:1.5px solid transparent; transition:border-color 160ms var(--ease-settle), transform 100ms ease-out; }
+.web-mode:active { transform:scale(.985); }
+.web-mode.selected { border-color:var(--hu-email); }
+.web-mode small { font-size:13px; line-height:1.45; }
+.web-urls code { font-size:15px; flex:1; overflow-wrap:anywhere; }
+@media (max-width:700px) { .web-signin, .web-modes { grid-template-columns:1fr; } }
+
+/* ---------- Narrow screens and web access (0.9.7) ---------- */
+.sidebar-toggle, .sidebar-scrim { display:none; }
+html.web .traffic, html.web .window-actions { display:none; }
+@media (max-width:760px) {
+  #workspace, #workspace.inspector-open { grid-template-columns:minmax(0,1fr); }
+  #workspace > .sidebar, #workspace.inspector-open > .sidebar { display:flex; position:fixed; inset:0 auto 0 0; width:min(86vw,340px); z-index:20; transform:translateX(-102%); transition:transform 340ms var(--ease-settle); box-shadow:0 0 40px #0009; }
+  #workspace.show-sidebar > .sidebar { transform:translateX(0); }
+  #workspace > .sidebar.dragging { transition:none; }
+  .sidebar-scrim { display:block; position:fixed; inset:0; z-index:19; background:#0008; opacity:0; pointer-events:none; transition:opacity 260ms ease; }
+  #workspace.show-sidebar > .sidebar-scrim { opacity:1; pointer-events:auto; }
+  .sidebar-toggle { display:grid; place-items:center; position:absolute; top:13px; left:12px; z-index:4; width:40px; height:40px; font-size:17px; }
+  .chat-heading { max-width:calc(100% - 120px); }
+  #bot-inspector { position:fixed; inset:0; z-index:21; }
+  #messages { padding-left:14px !important; padding-right:14px !important; }
+  .composer-area { padding:6px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .starters { grid-template-columns:1fr !important; }
+  .heads-up-banner { width:calc(100% - 24px); top:60px; }
+  .today-card { margin-left:0; margin-right:0; }
+  #panel { width:calc(100vw - 16px); height:calc(100dvh - 16px); }
+  .settings-layout { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
+  .settings-nav { display:flex; gap:4px; overflow-x:auto; padding:10px; border-right:0; border-bottom:1px solid var(--line); }
+  .settings-nav button { width:auto; flex:none; padding:9px 12px; font-size:15px; }
+  .settings-page { padding:20px 16px; }
+}
+@media (prefers-reduced-motion:reduce) { #workspace > .sidebar, .sidebar-scrim { transition:none; } }
+/* App connections are managed on the computer that runs OpenGrokBot. */
+html.web #apps-button { display:none; }
