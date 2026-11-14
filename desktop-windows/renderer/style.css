@@ -540,3 +540,10 @@ body.native-titlebar .chat-heading{-webkit-app-region:no-drag;z-index:4}
 @media (prefers-contrast:more) { .today-card, .heads-up-menu { border:1px solid var(--text); } }
 /* Warning text needs a darker orange to stay readable on light surfaces. */
 :root[data-theme=light] { --hu-conflict:#b25e00; --hu-delivery:#7d6143; }
+
+/* Image & video keys and inline videos (0.9.7) */
+.media-keys h2 { margin-top:26px; }
+.media-models { display:flex; flex-wrap:wrap; gap:8px 16px; margin:4px 0 2px; }
+.media-model-row { display:flex; align-items:center; gap:8px; font-size:13px; }
+.media-model { background:var(--raised); border:1px solid var(--line); border-radius:10px; padding:6px 10px; font-size:13px; width:240px; color:var(--text); }
+.md-image video { display:block; max-width:min(480px,100%); max-height:360px; border-radius:12px; background:#000; }

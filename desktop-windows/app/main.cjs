@@ -23,6 +23,7 @@ const backup=require('./backup.cjs');
 const { CloudHost } = require('./cloud-host.cjs');
 const updates = require('./updates.cjs');
 const proactive = require('./proactive.cjs');
+const media = require('./media.cjs');
 const stoppedBots=new Set();
 let remoteTray, quitting = false, revision = randomUUID(), updateState;
 class PublicError extends Error {}
@@ -137,7 +138,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0,options={}
    const key=botID+'|'+installation.id+(choice.model?'|'+choice.model:'');const session=state.sessions?.[key];
    const latest=delivery?`Bot request (not human approval): ${delivery.text}`:history.findLast(x=>x.kind==='user')?.text||'';
    const feedback=history.filter(x=>x.kind==='activity'&&!x.senderBotID).slice(-8).map(x=>x.detail||x.text).join('\n');
-   const prompt=teamwork.instructions(bot,state,!!delivery,composioConfiguration?composioConfiguration.toolkits:[])+'\n'+await vmStatusNote()+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
+   const prompt=teamwork.instructions(bot,state,!!delivery,composioConfiguration?composioConfiguration.toolkits:[])+'\n'+await vmStatusNote()+(headsUp||delivery||scheduledTask?'':await mediaNote())+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
    const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming',...(headsUp?{headsUp:{kind:headsUp.kind,title:headsUp.label,...headsUp.meta}}:{})};state.entries.push(reply);
@@ -149,6 +150,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0,options={}
    runs.add(run);
    run.done.then(async()=>{if(scheduledTask&&!routineRuns.has(botID))routineRuns.set(botID,{id:scheduledTask.id,runID:requestID,failed:false});settings.providerHealth||={};settings.providerHealth[installation.provider]={state:'ready',detail:'Last message succeeded',at:new Date().toISOString()};teamwork.apply(state,bot,reply,finalText,bot.aiConfiguration||{providers:[choice],activeProvider:choice.provider,replyMode:'one'},delivery);if(delivery)teamwork.finish(state,delivery,'complete');
     if(headsUp)return; // heads-up turns are read-only: no VM, browser or device steps
+    const make=!delivery&&!scheduledTask&&teamwork.parse(finalText).actions.find(x=>x.action==='generate_image'||x.action==='generate_video');if(make)makeMedia(bot,make);
     if(teamwork.parse(finalText).actions.some(x=>x.action==='open_vm')){let text;try{await localVMs.open(botID);text='Opened this Bot’s VM console on the host. AI CLI still runs on the host; guest automation is separate.';}catch(error){text=error.message;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
     const guest=teamwork.parse(finalText).actions.find(x=>x.action==='vm_exec');if(guest){let text;if(browserSteps>=teamwork.MAX_STEPS){text=teamwork.STEP_LIMIT_MESSAGE;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}else{browserSteps++;try{const link=(await vmLinks()).shared;text='Linux VM result (untrusted context):\n'+(link?`Linux guest on ${link.hostName} (${link.vmName}):\n`+await remoteVMExec(link,guest.argv):await localVMs.execute(homeBotID(botID),guest.argv));}catch(error){text=error.message;if(scheduledTask&&routineRuns.has(botID))routineRuns.get(botID).failed=true;}continueBrowser=!delivery;}state.entries.push({id:randomUUID(),botID,kind:'activity',text,date:new Date().toISOString()});}
     const action=teamwork.parse(finalText).actions.find(x=>x.action==='browse_web');
@@ -172,6 +174,38 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0,options={}
   }
   notify();
  }finally{pendingBots.delete(botID);}
+}
+
+
+// ---------- Image and video generation (0.9.7) ----------
+// Keys are encrypted on this PC and used only by this process; the model never sees them.
+async function mediaKeys(){
+ try{const saved=await loadJSON('media-keys.encrypted.json',{});if(!safeStorage.isEncryptionAvailable())return {};return Object.fromEntries(Object.entries(saved).filter(([id])=>media.PROVIDERS[id]).map(([id,value])=>[id,safeStorage.decryptString(Buffer.from(value,'base64'))]));}catch{return {};}
+}
+const mediaSettings=()=>settings?.media||{};
+async function mediaNote(){
+ const keys=await mediaKeys(),ready=Object.keys(media.PROVIDERS).filter(id=>keys[id]);if(!ready.length)return '';
+ const list=ready.map(id=>`${id} (${media.PROVIDERS[id].kinds.join(' and ')})`).join(', ');
+ return `\nImage and video tools: when the human asks for a picture or a video, append {"action":"generate_image","prompt":"a detailed description"} or {"action":"generate_video","prompt":"…"} in an opengrokbot-action fence. Add "provider" to choose one of: ${list}. The app makes it with the human's own API key and shows it in this chat; videos can take a few minutes. Make one per request, and only when asked.`;
+}
+let mediaJobs=0;
+async function makeMedia(bot,request){
+ const kind=request.action==='generate_video'?'video':'image',prompt=String(request.prompt||request.text||'').trim();
+ const note=text=>{state.entries.push({id:randomUUID(),botID:bot.id,kind:'activity',text,date:new Date().toISOString()});notify();};
+ const keys=await mediaKeys(),provider=media.choose(kind,typeof request.provider==='string'?request.provider.toLowerCase():mediaSettings()[kind+'Provider'],keys);
+ if(!provider){note(kind==='video'?'No video provider is set up. Add a Google or Replicate key in Settings → API Keys.':'No image provider is set up. Add a key in Settings → API Keys.');await atomicJSON('preview-workspace.json',state);return;}
+ if(mediaJobs>=2){note('Two images or videos are already being made. Ask again when they finish.');return;}
+ const info=media.PROVIDERS[provider],label=info.name.split(' (')[0];
+ mediaJobs++;note(kind==='video'?`Making a video with ${label}… this can take a few minutes`:`Making an image with ${label}…`);
+ try{
+  const out=await media.generate({kind,provider,prompt,key:keys[provider],model:mediaSettings().models?.[provider]?.[kind]});
+  const name=media.fileName(prompt,out.extension),folder=path.join(botDirectory(bot.id),'Media');await mkdir(folder,{recursive:true});
+  await writeFile(path.join(folder,name),out.bytes,{mode:0o600});
+  const alt=prompt.replace(/[\[\]\n]/g,' ').slice(0,120);
+  state.entries.push({id:randomUUID(),botID:bot.id,kind:'bot',text:`![${alt}](Media/${name})`,state:'complete',provider:`${label} · ${out.model}`,date:new Date().toISOString()});
+  if(window&&!window.isDestroyed()&&!window.isFocused()&&Notification.isSupported()){const done=new Notification({title:`${bot.name} made your ${kind}`,body:alt});done.on('click',()=>{showHost();window.webContents.send('bot:open',bot.id);});done.show();}
+ }catch(error){note(error instanceof media.MediaError?error.message:`The ${kind} could not be made. Try again.`);}
+ finally{mediaJobs--;try{await atomicJSON('preview-workspace.json',state);}catch{}notify();}
 }
 
 let scheduling=false;
@@ -858,6 +892,27 @@ function configureIPC() {
     return added;
   });
   handle('cli-keys:status', async () => { const keys = await loadJSON('cli-keys.encrypted.json', {}); return Object.fromEntries([...providerKeys.PROVIDERS].map(id => [id, !!keys[id]])); });
+  handle('media-keys:status', async () => { await ensureState(); const saved = await loadJSON('media-keys.encrypted.json', {}); return { providers: Object.entries(media.PROVIDERS).map(([id, info]) => ({ id, name: info.name, kinds: info.kinds, defaults: { image: info.image, video: info.video }, help: info.keyHelp, saved: !!saved[id] })), settings: mediaSettings() }; });
+  handle('media-keys:set', async (provider, value) => {
+    await ensureState(); if (!media.PROVIDERS[provider] || typeof value !== 'string' || value.length > 600) throw new PublicError('Choose a provider and paste a key.');
+    const saved = await loadJSON('media-keys.encrypted.json', {});
+    if (value.trim() === '') delete saved[provider];
+    else { const key = providerKeys.normalized(value); if (!key) throw new PublicError('That does not look like an API key. Paste only the key, with no spaces or line breaks.'); requireVault(); saved[provider] = safeStorage.encryptString(key).toString('base64'); }
+    await atomicJSON('media-keys.encrypted.json', saved); return true;
+  });
+  handle('media-settings:set', async value => {
+    await ensureState(); const next = { models: {} };
+    for (const [id, info] of Object.entries(media.PROVIDERS)) for (const kind of info.kinds) { const model = value?.models?.[id]?.[kind]; if (typeof model === 'string' && model.trim()) { if (!media.validModel(model.trim())) throw new PublicError('Write models like flux-pro-1.1 or owner/name.'); (next.models[id] ||= {})[kind] = model.trim(); } }
+    for (const kind of ['image', 'video']) { const id = value?.[kind + 'Provider']; if (media.PROVIDERS[id]?.kinds.includes(kind)) next[kind + 'Provider'] = id; }
+    settings.media = next; await saveSettings(); return next;
+  });
+  handle('bot:media', async (botID, file) => {
+    await ensureState(); const bot = state.bots.find(x => x.id === botID); if (!bot || typeof file !== 'string' || file.length > 500) return null;
+    const root = path.resolve(botDirectory(bot.id)), target = path.resolve(root, file.replace(/^file:\/\//, ''));
+    if (!target.startsWith(root + path.sep)) return null;
+    const type = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' }[path.extname(target).toLowerCase()]; if (!type) return null;
+    try { const info = await stat(target); if (!info.isFile() || info.size > 200_000_000) return null; return { type, data: await readFile(target) }; } catch { return null; }
+  });
   handle('cli-keys:set', async (provider, value) => {
     if (!providerKeys.PROVIDERS.has(provider) || typeof value !== 'string' || value.length > 600) throw new PublicError('Choose a provider and paste a key.');
     const keys = await loadJSON('cli-keys.encrypted.json', {});

@@ -50,7 +50,7 @@ function apply(state,bot,reply,response,configuration,delivery){
  // Heads-up turns read untrusted email and calendar text, so they may not change anything in the app.
  if(!delivery&&state.entries.findLast(x=>x.botID===bot.id&&x.kind==='user')?.delivery==='proactive'){if(parsed.actions.length)note('Heads-ups are read-only. Ask me directly if you want something changed.');return;}
  for(const action of parsed.actions){
-  if(['browse_web','open_vm','vm_exec','vm_use'].includes(action.action)){continue;}else if(action.action==='schedule_task'){
+  if(['browse_web','open_vm','vm_exec','vm_use','generate_image','generate_video'].includes(action.action)){continue;}else if(action.action==='schedule_task'){
    const task=schedules.make(action);bot.schedules||=[];
    if(delivery||state.entries.findLast(x=>x.botID===bot.id&&x.kind==='user')?.text.startsWith('Scheduled task:')||!task||bot.schedules.length>=100||bot.schedules.some(x=>x.enabled&&x.name===task.name)){note('Task not scheduled: use a unique name, future ISO date, valid timezone and recurrence, or message_received trigger.');continue;}
    task.lastEvent=state.entries.findLast(x=>x.botID===bot.id&&x.kind==='activity'&&x.senderBotID)?.id;

@@ -359,8 +359,16 @@ private struct MessageRow: View, Equatable {
     var body: some View {
         if entry.kind == .activity, entry.senderBotID != nil, entry.text.hasPrefix("Message from ") {
             botToBot
+        } else if entry.delivery == "proactive" {
+            // An automatic heads-up check: show its short label, never the prompt with the email text it read.
+            ActivityPill(text: entry.label ?? "Automatic check")
         } else if entry.kind == .activity || entry.delivery == "scheduled" {
             ActivityPill(text: entry.text, routine: entry.delivery == "scheduled")
+        } else if let tag = entry.headsUp, entry.kind == .bot {
+            VStack(alignment: .leading, spacing: 6) {
+                HeadsUpLabel(tag: tag, date: entry.date)
+                bubbleRow
+            }
         } else {
             bubbleRow
         }
@@ -594,5 +602,35 @@ final class PhoneVoiceHub: ObservableObject {
         conversation.stop()
         botID = nil
         if let remote { Task { _ = await remote.command(RemoteCommand(action: "voice_mode", botID: id, text: "off")) } }
+    }
+}
+
+
+/// The small label over a heads-up on iPhone (0.9.7): what it is about and when it came in.
+struct HeadsUpLabel: View {
+    let tag: HeadsUpTag
+    let date: Date
+    private var style: (symbol: String, label: String, tint: Color) {
+        switch tag.kind {
+        case "email": return ("envelope.fill", "Inbox", .blue)
+        case "meeting": return ("calendar", "Up next", .green)
+        case "conflict": return ("exclamationmark.triangle.fill", "Calendar", .orange)
+        case "brief": return ("sun.max.fill", "Morning brief", .orange)
+        case "moved": return ("arrow.triangle.2.circlepath", "Moved", .indigo)
+        case "delivery": return ("shippingbox.fill", "Delivery", .brown)
+        case "nudge": return ("arrowshape.turn.up.left.fill", "Waiting on you", .cyan)
+        case "reminder": return ("checklist", "Reminder", .pink)
+        default: return ("sparkles", "Heads-up", .secondary)
+        }
+    }
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: style.symbol).font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 18, height: 18).background(style.tint, in: Circle())
+            Text(style.label).font(.caption.weight(.semibold))
+            Text("· " + date.formatted(date: .omitted, time: .shortened)).font(.caption)
+        }
+        .foregroundStyle(.secondary).padding(.leading, 4)
+        .accessibilityElement(children: .combine)
     }
 }

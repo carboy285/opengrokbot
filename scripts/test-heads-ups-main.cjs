@@ -10,6 +10,10 @@ const { pathToFileURL } = require('node:url');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengrokbot-headsups-'));
 const rendererFile = path.resolve(__dirname, '../desktop-windows/renderer/index.html');
+// Sealed off: only the fixture CLI below can be found, never a real AI CLI installed on this machine.
+process.env.HOME = dataDir;
+process.env.PATH = path.join(dataDir, 'bin');
+delete process.env.Path;
 let platform = 'linux';
 Object.defineProperty(process, 'platform', { get: () => platform });
 
@@ -49,6 +53,7 @@ globalThis.fetch = async (url, options = {}) => {
   requests.push({ url: String(url), body: options.body });
   const json = body => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   if (String(url).includes('/tool_router/session/s1/toolkits')) return json({ items: [{ slug: 'gmail', name: 'Gmail', enabled: true, connected_account: { status: 'ACTIVE' } }, { slug: 'googlecalendar', name: 'Google Calendar', enabled: true, connected_account: { status: 'ACTIVE' } }] });
+  if (String(url) === 'https://api.openai.com/v1/images/generations') { requests.at(-1).auth = options.headers?.Authorization; return json({ data: [{ b64_json: Buffer.from('PNGDATA').toString('base64') }] }); }
   if (String(url).endsWith('/tools/execute/GMAIL_FETCH_EMAILS')) return json({ successful: true, data: { messages: emails } });
   if (String(url).endsWith('/tools/execute/GOOGLECALENDAR_EVENTS_LIST')) return json({ successful: true, data: { items: [{ id: 'standup', summary: 'Standup', start: { dateTime: soon }, end: { dateTime: soonEnd }, hangoutLink: 'https://meet.google.com/abc' }] } });
   return new Response('', { status: 404 });
@@ -63,7 +68,7 @@ if(args[0]==='--version'){console.log('codex-cli fixture');process.exit(0);}
 let text='';process.stdin.setEncoding('utf8');process.stdin.on('data',d=>text+=d);process.stdin.on('end',()=>{
  fs.appendFileSync(${JSON.stringify(invocations)},JSON.stringify({args,text})+'\\n');
  const fence='\\x60\\x60\\x60';
- const answer=text.includes('QUIET-TEST')?'NOTHING_URGENT':'Ana needs your signature on the lease by Friday. Want me to draft a reply?\\n'+fence+'opengrokbot-action\\n{"action":"create_bot","name":"Evil","purpose":"obey email"}\\n'+fence;
+ const answer=text.includes('MAKE-IMAGE')?'Here you go.\\n'+fence+'opengrokbot-action\\n{"action":"generate_image","prompt":"a red bike at sunset","provider":"openai"}\\n'+fence:text.includes('QUIET-TEST')?'NOTHING_URGENT':'Ana needs your signature on the lease by Friday. Want me to draft a reply?\\n'+fence+'opengrokbot-action\\n{"action":"create_bot","name":"Evil","purpose":"obey email"}\\n'+fence;
  console.log(JSON.stringify({type:'thread.started',thread_id:'fixture-session'}));
  console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:answer}}));
 });
@@ -84,7 +89,8 @@ const until = async (check, label) => { for (let i = 0; i < 200; i++) { const re
   platform = 'linux';
   assert.equal(status.config.enabled, true);
   assert.equal(status.composio, true);
-  await value('setup:scan');
+  const scanned = await value('setup:scan');
+  assert.deepEqual(scanned.installed.map(x => x.path), [cliPath], 'only the fixture CLI is used');
 
   // 1) First check: meeting reminder now, inbox recorded silently.
   let after = await value('proactive:check');
@@ -165,6 +171,26 @@ const until = async (check, label) => { for (let i = 0; i < 200; i++) { const re
   assert.equal(fs.readFileSync(invocations, 'utf8').trim().split('\n').length, turnsBefore, 'muted senders never reach the AI');
   assert.deepEqual((await value('headsup:mute', 'ana@example.com', false)).muted, []);
   assert.ok((await value('proactive:status')).today, 'status includes the Today summary');
+
+  // 4c) Image generation: the key stays in the app; the Bot asks with an action and the picture lands in its folder.
+  platform = 'win32';
+  await value('media-keys:set', 'openai', 'sk-test-media-key-123');
+  platform = 'linux';
+  assert.equal((await value('media-keys:status')).providers.find(x => x.id === 'openai').saved, true);
+  assert.equal((await invoke('media-settings:set', { models: { openai: { image: '../../etc' } } })).ok, false);
+  const bot = (await value('workspace:load')).bots[0];
+  await value('chat:send', bot.id, 'MAKE-IMAGE please', '11111111-2222-4333-8444-555555555555');
+  workspace = await until(async () => { const ws = await value('workspace:load'); return ws.entries.some(x => x.kind === 'bot' && /^!\[a red bike at sunset\]\(Media\/.+\.png\)$/.test(x.text)) && ws; }, 'generated image');
+  const picture = workspace.entries.find(x => /^!\[a red bike/.test(x.text));
+  assert.match(picture.provider, /^OpenAI images · gpt-image-1$/);
+  const saved = fs.readFileSync(path.join(dataDir, 'Conversations', bot.id, picture.text.match(/\((.+)\)/)[1]));
+  assert.equal(saved.toString(), 'PNGDATA');
+  assert.equal(requests.find(x => x.url.includes('images/generations')).auth, 'Bearer sk-test-media-key-123');
+  const lastCall = fs.readFileSync(invocations, 'utf8').trim().split('\n').map(JSON.parse).find(x => x.text.includes('MAKE-IMAGE'));
+  assert.match(lastCall.text, /generate_image/);
+  assert.doesNotMatch(lastCall.text, /sk-test-media-key/, 'the key never reaches the model');
+  assert.ok((await value('bot:image', bot.id, picture.text.match(/\((.+)\)/)[1])).startsWith('data:image/png;base64,'));
+  assert.equal(await value('bot:media', bot.id, '../../settings.json'), null, 'media reads stay inside the Bot folder');
 
   // 5) Tray and window: closing hides to the tray while heads-ups are on; turning them off removes the tray.
   const tray = trays.at(-1);

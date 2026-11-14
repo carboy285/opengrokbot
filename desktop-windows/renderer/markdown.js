@@ -23,6 +23,9 @@ function inline(spans, context) {
         const link = el('a', 'md-link', span.alt || span.src); link.href = '#'; link.title = span.src;
         link.addEventListener('click', event => { event.preventDefault(); context.openLink?.(span.src); });
         holder.append(link);
+      } else if (/\.(mp4|webm|mov)$/i.test(span.src) && context.loadVideo) {
+        holder.append(el('span', 'md-image-alt', span.alt || 'Video'));
+        context.loadVideo(span.src).then(url => { if (!url) return; const video = el('video'); video.controls = true; video.preload = 'metadata'; video.src = url; video.setAttribute('aria-label', span.alt || 'Video'); holder.replaceChildren(video); }).catch(() => {});
       } else if (context.loadImage) {
         holder.append(el('span', 'md-image-alt', span.alt || 'Image'));
         context.loadImage(span.src).then(dataURL => { if (!dataURL) return; const img = el('img'); img.alt = span.alt || ''; img.src = dataURL; holder.replaceChildren(img); }).catch(() => {});

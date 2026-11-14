@@ -387,7 +387,7 @@ function questionCard(bot,prompt,canAnswer){
  if(canAnswer)card.append(append(node('div','question-actions'),button('Something else…',()=>$('#draft').focus(),'link'),submit));
  return card;
 }
-const markdownContext=bot=>({openLink:url=>bridge.openLink?bridge.openLink(url).then(r=>{if(r&&!r.ok)toast(r.error);}).catch(()=>{}):window.open(url,'_blank','noopener'),loadImage:path=>bridge.botImage?result(bridge.botImage(bot.id,path)).catch(()=>null):Promise.resolve(null)});
+const markdownContext=bot=>({openLink:url=>bridge.openLink?bridge.openLink(url).then(r=>{if(r&&!r.ok)toast(r.error);}).catch(()=>{}):window.open(url,'_blank','noopener'),loadImage:path=>bridge.botImage?result(bridge.botImage(bot.id,path)).catch(()=>null):Promise.resolve(null),loadVideo:path=>bridge.botMedia?result(bridge.botMedia(bot.id,path)).then(value=>value?URL.createObjectURL(new Blob([value.data],{type:value.type})):null).catch(()=>null):Promise.resolve(null)});
 function renderEntryBody(bot,entry,body,{isLastUser,canAnswer,canSuggest}){
  const kind=entryKind(entry);
  // Automatic heads-up checks show their short label, never the prompt with email text.
