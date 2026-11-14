@@ -322,6 +322,9 @@ struct MacHeadsUpsSettings: View {
     @AppStorage(HeadsUpSettings.quietKey) private var quiet = true
     @AppStorage(HeadsUpSettings.quietStartKey) private var quietStart = 22 * 60
     @AppStorage(HeadsUpSettings.quietEndKey) private var quietEnd = 7 * 60
+    @AppStorage(HeadsUpSettings.remindersKey) private var reminders = true
+    @AppStorage(HeadsUpSettings.deliveriesKey) private var deliveries = true
+    @State private var muted = HeadsUpSettings.muted
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
@@ -366,6 +369,21 @@ struct MacHeadsUpsSettings: View {
                         toggle($brief, "Morning brief")
                     }
                 }
+                divider
+                row("Reminders due today", detail: "From Reminders on this Mac.") { toggle($reminders, "Reminders due today") }
+                divider
+                row("Deliveries", detail: "Packages out for delivery or delivered today.") { toggle($deliveries, "Deliveries") }
+            }
+            if !muted.isEmpty {
+                section("Muted senders") {
+                    ForEach(muted, id: \.self) { address in
+                        HStack {
+                            Text(address).font(.system(size: 15))
+                            Spacer()
+                            MacPillButton(title: "Unmute", prominent: false) { desktop.headsUps.mute(address, false); muted = HeadsUpSettings.muted }
+                        }.padding(.horizontal, 20).padding(.vertical, 10)
+                    }
+                }
             }
             section("When") {
                 row("Quiet hours", detail: "Heads-ups still land in the chat, without a sound.") {
@@ -381,6 +399,7 @@ struct MacHeadsUpsSettings: View {
                 .font(.system(size: 12)).lineSpacing(3).foregroundStyle(MacTheme.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .animation(.spring(response: 0.35, dampingFraction: 1), value: enabled)
+        .onAppear { muted = HeadsUpSettings.muted }
     }
 
     private var divider: some View { Rectangle().fill(MacTheme.line).frame(height: 1).padding(.leading, 20) }
@@ -437,6 +456,10 @@ struct MacHeadsUpTag: View {
         case "meeting": return "calendar"
         case "conflict": return "exclamationmark.triangle.fill"
         case "brief": return "sun.max.fill"
+        case "moved": return "arrow.triangle.2.circlepath"
+        case "delivery": return "shippingbox.fill"
+        case "nudge": return "arrowshape.turn.up.left.fill"
+        case "reminder": return "checklist"
         default: return "sparkles"
         }
     }
@@ -446,6 +469,10 @@ struct MacHeadsUpTag: View {
         case "meeting": return "Up next"
         case "conflict": return "Calendar"
         case "brief": return "Morning brief"
+        case "moved": return "Moved"
+        case "delivery": return "Delivery"
+        case "nudge": return "Waiting on you"
+        case "reminder": return "Reminder"
         default: return "Heads-up"
         }
     }
@@ -455,6 +482,10 @@ struct MacHeadsUpTag: View {
         case "meeting": return Color.green
         case "conflict": return MacTheme.attention
         case "brief": return Color.orange
+        case "moved": return Color.indigo
+        case "delivery": return Color.brown
+        case "nudge": return Color.cyan
+        case "reminder": return Color.pink
         default: return MacTheme.secondary
         }
     }
@@ -469,5 +500,103 @@ struct MacHeadsUpTag: View {
         .foregroundStyle(MacTheme.secondary).padding(.leading, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Heads-up, \(label), \(date.formatted(date: .omitted, time: .shortened))")
+    }
+}
+
+
+/// What you can do with a heads-up, right under it (0.9.7). Drafting fills in the message box; nothing is sent until you send it.
+struct MacHeadsUpActions: View {
+    let entry: Entry
+    let tag: HeadsUpTag
+    @EnvironmentObject private var app: AppModel
+    @EnvironmentObject private var desktop: MacAppModel
+
+    private var senders: [HeadsUpSender] { tag.senders ?? [] }
+    private var joinURL: URL? {
+        guard let link = tag.link, ["meeting", "moved"].contains(tag.kind), let url = URL(string: link), url.scheme == "https" else { return nil }
+        return url
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let url = joinURL { MacPillButton(title: "Join", prominent: true) { NSWorkspace.shared.open(url) } }
+            if senders.count == 1 {
+                pill("Draft a reply") { draft(senders[0]) }
+            } else if senders.count > 1 {
+                Menu("Draft a reply…") {
+                    ForEach(Array(senders.enumerated()), id: \.offset) { item in Button("Reply to \(name(item.element))") { draft(item.element) } }
+                }.menuStyle(.button).buttonStyle(.borderless).fixedSize()
+            }
+            if tag.kind == "conflict" { pill("Help me choose") { prefill("Help me decide what to do about this overlap: " + (entry.text.components(separatedBy: "\n").first ?? entry.text)) } }
+            if tag.kind == "brief" { pill("Plan my day") { prefill("Help me plan the rest of today around my calendar.") } }
+            Menu("Snooze") {
+                Button("For 1 hour") { desktop.headsUps.snooze(entry, minutes: 60, app: app) }
+                Button("For 3 hours") { desktop.headsUps.snooze(entry, minutes: 180, app: app) }
+            }.menuStyle(.button).buttonStyle(.borderless).fixedSize()
+            if senders.contains(where: { !$0.address.isEmpty }) {
+                Menu {
+                    ForEach(Array(senders.filter { !$0.address.isEmpty }.enumerated()), id: \.offset) { item in
+                        Button("Stop heads-ups from \(name(item.element))") { desktop.headsUps.mute(item.element.address) }
+                    }
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.button).buttonStyle(.borderless).fixedSize().help("More actions")
+            }
+            Button("Done") { app.collapseHeadsUp(entry.id, text: "Dismissed · \(tag.title ?? "Heads-up")") }
+                .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(MacTheme.secondary).help("Collapse this heads-up to one line")
+        }
+        .font(.system(size: 13))
+    }
+
+    private func name(_ sender: HeadsUpSender) -> String { sender.name.isEmpty ? sender.address : sender.name }
+    private func pill(_ title: String, action: @escaping () -> Void) -> some View { MacPillButton(title: title, prominent: false, action: action) }
+    private func prefill(_ text: String) { desktop.drafts[entry.botID] = text }
+    private func draft(_ sender: HeadsUpSender) {
+        prefill("Draft a reply to \(name(sender))" + (sender.subject.map { " about “\($0)”" } ?? "") + ". Show it to me before sending.")
+    }
+}
+
+/// Today (0.9.7): the next meeting with a countdown and Join, and what else is waiting, over the top of Grok Bot's chat.
+struct MacTodayCard: View {
+    @ObservedObject var headsUps: MacHeadsUps
+
+    var body: some View {
+        if let today = headsUps.today {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 10) {
+                        Text(today.next == nil ? "TODAY" : "NEXT").font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(MacTheme.secondary)
+                        if let next = today.next {
+                            Text(next.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                            Text(relative(next.start, now: context.date)).font(.system(size: 13)).monospacedDigit().foregroundStyle(MacTheme.secondary)
+                            Spacer(minLength: 8)
+                            if let link = next.link, let url = URL(string: link), url.scheme == "https" {
+                                MacPillButton(title: "Join", prominent: true) { NSWorkspace.shared.open(url) }
+                            }
+                        } else {
+                            Text("No more meetings today").font(.system(size: 15, weight: .semibold))
+                            Spacer()
+                        }
+                    }
+                    let facts = facts(today)
+                    if !facts.isEmpty { Text(facts.joined(separator: "   ·   ")).font(.system(size: 12)).foregroundStyle(MacTheme.secondary) }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(MacTheme.line))
+                .accessibilityElement(children: .contain).accessibilityLabel("Today")
+            }
+        }
+    }
+
+    private func relative(_ start: Date, now: Date) -> String {
+        let minutes = Int((start.timeIntervalSince(now) / 60).rounded())
+        return minutes <= 0 ? "now" : minutes < 60 ? "in \(minutes) min" : "at \(HeadsUpRules.time(start))"
+    }
+    private func facts(_ today: HeadsUpToday) -> [String] {
+        var list: [String] = []
+        if today.remaining > 1 { list.append("\(today.remaining) meetings left") }
+        if let waiting = today.waiting { list.append(waiting == 0 ? "Inbox clear" : "\(waiting) email\(waiting == 1 ? "" : "s") waiting on you") }
+        if today.overlaps > 0 { list.append("⚠︎ \(today.overlaps) overlap\(today.overlaps == 1 ? "" : "s")") }
+        return list
     }
 }

@@ -49,6 +49,16 @@ enum BotAvatarShape: String, Codable, CaseIterable, Sendable {
 struct HeadsUpTag: Codable, Equatable, Sendable {
     var kind: String
     var title: String?
+    /// A meeting's join link (https only).
+    var link: String? = nil
+    /// People this heads-up is about, for Draft a reply and Mute (0.9.7).
+    var senders: [HeadsUpSender]? = nil
+}
+
+struct HeadsUpSender: Codable, Equatable, Sendable {
+    var name: String
+    var address: String
+    var subject: String?
 }
 
 struct Entry: Identifiable, Codable, Equatable, Sendable {

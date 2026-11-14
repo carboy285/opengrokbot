@@ -236,7 +236,7 @@ final class MacAppModel: ObservableObject {
                 self.refreshAwake()
                 if ticks % 12 == 0 { await self.triggers.poll(app: app) }
                 // Heads-ups look at Mail and Calendar about every three minutes.
-                if ticks % 36 == 6 { await self.headsUps.poll(app: app) }
+                if ticks % 36 == 6 { await self.headsUps.poll(app: app, desktop: self) }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
@@ -666,6 +666,56 @@ extension MacAppModel {
         guard selectedCLI != nil else { return }
         UserDefaults.standard.set(true, forKey: "localCLISetupComplete")
         panel = nil
+    }
+
+    enum HeadsUpTurn { case started, busy, noAI }
+
+    /// A read-only AI turn for heads-ups (0.9.7). It reads untrusted mail, so it gets no connected-app tools, no saved
+    /// session and no app operations: the answer is shown as text and nothing in it is acted on.
+    func headsUpTurn(_ prompt: String, label: String, tag: HeadsUpTag, count: Int, bot: Bot, app: AppModel, quiet: Bool, fallback: String) -> HeadsUpTurn {
+        guard gateway == nil, let provider = providersToRun(for: bot).first else {
+            if app.postHeadsUp(fallback, tag: tag, to: bot.id) { HeadsUpNotifier.send(title: "New email", body: fallback, silent: quiet, urgent: false) }
+            return .noAI
+        }
+        if runningBots.contains(bot.id) { return .busy }
+        // Don't cut into a conversation the human is having right now.
+        if let recent = app.entries(for: bot).last(where: { $0.kind == .user && $0.delivery != "scheduled" && $0.delivery != "proactive" }), Date().timeIntervalSince(recent.date) < 90 { return .busy }
+        let triggerID = UUID()
+        guard app.addAutomaticCheck(prompt, label: label, to: bot, id: triggerID) else { return .busy }
+        let replyID = app.beginReply(for: bot, provider: provider.cli.provider.name)
+        app.setHeadsUp(tag, on: replyID)
+        runningBots.insert(bot.id)
+        let run = LocalCLIRun(); runs[replyID] = run; runOwners[replyID] = bot.id
+        let directory = workingDirectory(for: bot), cli = provider.cli, model = provider.choice.model
+        let fullPrompt = "You are \(bot.name), the human's assistant in OpenGrokBot.\n" + prompt
+        tasks[replyID] = Task {
+            var finalText = ""
+            do {
+                for try await event in run.events(cli: cli, prompt: fullPrompt, session: nil, directory: directory, mcpURL: nil, model: model) {
+                    try Task.checkCancellation()
+                    if case .text(let value) = event {
+                        finalText = value
+                        let shown = BotTeamwork.parse(value).text
+                        app.updateReply(replyID, text: HeadsUpRules.isQuiet(shown) ? "" : shown)
+                    }
+                }
+                let text = BotTeamwork.parse(finalText).text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty || HeadsUpRules.isQuiet(text) {
+                    app.deleteEntry(triggerID)
+                    app.collapseHeadsUp(replyID, text: "Checked \(count) new email\(count == 1 ? "" : "s") · nothing needs you right now")
+                } else {
+                    app.completeReply(replyID, text: text)
+                    HeadsUpNotifier.send(title: bot.name, body: text, silent: quiet, urgent: false)
+                }
+            } catch {
+                // The AI could not answer: fall back to the plain list, so the heads-up is never lost.
+                app.completeReply(replyID, text: fallback)
+                HeadsUpNotifier.send(title: "New email", body: fallback, silent: quiet, urgent: false)
+            }
+            tasks[replyID] = nil; runs[replyID] = nil; runOwners[replyID] = nil
+            if !runOwners.values.contains(bot.id) { runningBots.remove(bot.id) }
+        }
+        return .started
     }
 
     @discardableResult

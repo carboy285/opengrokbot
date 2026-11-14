@@ -17,6 +17,8 @@ struct MacConversationView: View {
     @ObservedObject private var approval = MacApproval.shared
     @State private var pasteMonitor: Any?
     @State private var scrollTask: Task<Void,Never>?
+    @AppStorage(HeadsUpSettings.enabledKey) private var headsUpsOn = false
+    private var showsToday: Bool { bot.isMain == true && headsUpsOn }
 
     private var avatarColor: String { bot.appearance?.color ?? bot.color }
     @AppStorage("accentStyle") private var accentStyle = "bot"
@@ -50,10 +52,13 @@ struct MacConversationView: View {
                         if messages.isEmpty { emptyConversation.padding(.top, 120) }
                         Color.clear.frame(height: 1).id("bottom")
                     }
-                    .padding(.horizontal, 24).padding(.top, 88).padding(.bottom, 20)
+                    .padding(.horizontal, 24).padding(.top, showsToday ? 160 : 88).padding(.bottom, 20)
                     .frame(maxWidth: 780).frame(maxWidth: .infinity)
                     .background(ChatScrollMonitor(onUserScroll: { nearBottom in followLatest = nearBottom },
                         onLayout: { if followLatest { scrollToLatest(proxy) } }))
+                }
+                .overlay(alignment: .top) {
+                    if showsToday { MacTodayCard(headsUps: desktop.headsUps).padding(.horizontal, 24).padding(.top, 66).frame(maxWidth: 780) }
                 }
                 .task(id: bot.id) { followLatest = true; scrollToLatest(proxy); jump(proxy) }
                 .onChange(of: desktop.jumpTo) { _, _ in jump(proxy) }
@@ -547,6 +552,11 @@ struct MacMessageView: View {
             MacActivityPill(text: entry.label ?? "Automatic check").padding(.leading, 2)
         } else if entry.kind == .activity || entry.delivery == "scheduled" {
             MacActivityPill(text: entry.text, routine: entry.delivery == "scheduled").padding(.leading, 2)
+        } else if let tag = entry.headsUp, entry.kind == .bot, entry.state == .complete {
+            VStack(alignment: .leading, spacing: 8) {
+                bubbleRow
+                MacHeadsUpActions(entry: entry, tag: tag).padding(.leading, 4)
+            }
         } else {
             bubbleRow
         }

@@ -277,9 +277,31 @@ final class AppModel: ObservableObject {
 
     /// A message Grok Bot sends on its own (heads-ups, 0.9.6): finished, with a small tag saying what it is about.
     @discardableResult
-    func postHeadsUp(_ text: String, kind: String, title: String, to botID: UUID) -> Bool {
+    func postHeadsUp(_ text: String, tag: HeadsUpTag, to botID: UUID) -> Bool {
         guard workspace.bots.contains(where: { $0.id == botID }) else { return false }
-        return commit { var entry = Entry(botID: botID, kind: .bot, text: text); entry.state = .complete; entry.provider = "Heads-up"; entry.headsUp = HeadsUpTag(kind: kind, title: title); $0.entries.append(entry) }
+        return commit { var entry = Entry(botID: botID, kind: .bot, text: text); entry.state = .complete; entry.provider = "Heads-up"; entry.headsUp = tag; $0.entries.append(entry) }
+    }
+
+    /// The automatic check behind an AI heads-up. The chat shows only its short label; the full text is the prompt.
+    @discardableResult
+    func addAutomaticCheck(_ text: String, label: String, to bot: Bot, id: UUID) -> Bool {
+        guard previewEnabled, workspace.bots.contains(where: { $0.id == bot.id }) else { return false }
+        var entry = Entry(botID: bot.id, kind: .user, text: text, id: id); entry.delivery = "proactive"; entry.label = label
+        return commit { $0.entries.append(entry) }
+    }
+
+    func setHeadsUp(_ tag: HeadsUpTag, on id: UUID) {
+        _ = commit { value in if let index = value.entries.firstIndex(where: { $0.id == id }) { value.entries[index].headsUp = tag } }
+    }
+
+    /// Turns a heads-up into one quiet line in place, so the chat keeps a record without the noise.
+    @discardableResult
+    func collapseHeadsUp(_ id: UUID, text: String) -> Bool {
+        guard let index = workspace.entries.firstIndex(where: { $0.id == id }) else { return false }
+        pendingReplyText[id] = nil // a streaming update still in flight must not write the old text back
+        let old = workspace.entries[index]
+        var line = Entry(botID: old.botID, kind: .activity, text: text, id: old.id, date: old.date); line.headsUp = old.headsUp
+        return commit { value in if let at = value.entries.firstIndex(where: { $0.id == id }) { value.entries[at] = line } }
     }
 
     func activity(_ text: String, for botID: UUID, detail: String? = nil) {
