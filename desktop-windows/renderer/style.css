@@ -490,3 +490,53 @@ body.native-titlebar .chat-heading{-webkit-app-region:no-drag;z-index:4}
 @keyframes heads-up-fade { from { opacity:0; } }
 @media (prefers-reduced-transparency:reduce) { .heads-up-banner { background:var(--raised); backdrop-filter:none; } }
 @media (prefers-contrast:more) { .heads-up-banner { background:var(--raised); border:1px solid var(--text); } .switch { border:1px solid var(--text); } }
+
+/* ---------- Heads-ups 0.9.7: actions, Today card, flickable banner ---------- */
+:root { --hu-moved:#5e5ce6; --hu-delivery:#a2845e; --hu-nudge:#64d2ff; }
+[data-kind=moved] { --hu-color:var(--hu-moved); }
+[data-kind=delivery] { --hu-color:var(--hu-delivery); }
+[data-kind=nudge] { --hu-color:var(--hu-nudge); }
+.message-row.heads-up .message-body:has([data-kind=moved]) { --hu-color:var(--hu-moved); }
+.message-row.heads-up .message-body:has([data-kind=delivery]) { --hu-color:var(--hu-delivery); }
+.message-row.heads-up .message-body:has([data-kind=nudge]) { --hu-color:var(--hu-nudge); }
+
+.heads-up-actions { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px 2px; }
+.heads-up-actions .pill { padding:6px 14px; font-size:13px; font-weight:500; transition:transform 100ms ease-out, background 120ms; }
+.heads-up-actions .pill:active:not(:disabled) { transform:scale(.96); }
+.heads-up-actions .quiet-pill { background:none; color:var(--muted); }
+.heads-up-actions .quiet-pill:hover { background:#88888818; color:var(--text); }
+.heads-up-actions .icon-pill { padding:6px 11px; letter-spacing:.05em; }
+
+/* Menus grow out of the button that opened them. */
+.heads-up-menu { position:absolute; z-index:6; min-width:190px; padding:5px; border-radius:14px; background:var(--panel); border:1px solid var(--line); box-shadow:0 14px 40px #0006; transform-origin:top left; animation:heads-up-menu-in 180ms var(--ease-settle) both; }
+@keyframes heads-up-menu-in { from { opacity:0; transform:scale(.94); } }
+.heads-up-menu-item { display:block; width:100%; text-align:left; padding:9px 12px; border-radius:9px; font-size:14px; }
+.heads-up-menu-item:hover, .heads-up-menu-item:focus-visible { background:var(--raised); outline:none; }
+
+/* Today: pinned at the top of Grok Bot's chat, content scrolls under it. */
+.today-card { position:sticky; top:0; z-index:3; display:grid; gap:6px; margin:0 auto 22px; max-width:1000px; padding:12px 16px; border-radius:18px; background:color-mix(in srgb,var(--panel) 80%,transparent); }
+.today-next { display:flex; align-items:center; gap:10px; min-width:0; }
+.today-label { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.today-next strong { font-size:16px; font-weight:600; letter-spacing:-.01em; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.today-when { color:var(--muted); font-size:14px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.today-join { margin-left:auto; padding:5px 14px !important; font-size:13px !important; }
+.today-facts { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13px; color:var(--muted); }
+.today-facts span + span::before { content:'·'; margin-right:14px; color:var(--faint,var(--muted)); }
+.today-warn { color:var(--hu-conflict); }
+
+/* Banner drag: no CSS easing while the pointer or the spring drives it. */
+.heads-up-banner { touch-action:none; cursor:grab; user-select:none; }
+.heads-up-banner.dragging { cursor:grabbing; transition:none; }
+.heads-up-banner.instant { transition:none; }
+.heads-up-open { cursor:inherit; }
+
+#toast .toast-action { margin-left:14px; font-weight:600; color:var(--hu-email); }
+
+@media (prefers-reduced-motion:reduce) {
+  .heads-up-menu { animation:heads-up-fade 150ms ease both; }
+  .heads-up-actions .pill:active:not(:disabled) { transform:none; }
+}
+@media (prefers-reduced-transparency:reduce) { .today-card { background:var(--panel); backdrop-filter:none; } }
+@media (prefers-contrast:more) { .today-card, .heads-up-menu { border:1px solid var(--text); } }
+/* Warning text needs a darker orange to stay readable on light surfaces. */
+:root[data-theme=light] { --hu-conflict:#b25e00; --hu-delivery:#7d6143; }

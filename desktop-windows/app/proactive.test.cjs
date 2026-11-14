@@ -181,3 +181,61 @@ test('nothing runs while heads-ups are off or accounts are not connected', async
   assert.equal(unlinked.calls.length, 0);
   assert.equal(status.gmail, 'not-connected');
 });
+
+// ---------- 0.9.7 ----------
+test('sender addresses, deliveries and automated senders are recognised', () => {
+  assert.equal(p.senderAddress('Ana Ruiz <Ana@Example.com>'), 'ana@example.com');
+  assert.equal(p.senderAddress('bank@example.com'), 'bank@example.com');
+  assert.equal(p.isDelivery({ subject: 'Your package is out for delivery', snippet: '' }), true);
+  assert.equal(p.isDelivery({ subject: 'Your order has shipped', snippet: '' }), false, 'shipping updates are not worth an interruption');
+  assert.equal(p.isDelivery({ subject: 'Order 123', snippet: 'Good news: it was delivered at 2 PM' }), true);
+});
+
+test('a moved meeting is reported once; first sightings only record', () => {
+  const now = at('2026-11-13T14:00:00Z');
+  const first = p.movedEvents([event('a', '2026-11-13T19:00:00Z', '2026-11-13T19:30:00Z')], {}, now);
+  assert.deepEqual(first.moved, []);
+  const second = p.movedEvents([event('a', '2026-11-13T20:30:00Z', '2026-11-13T21:00:00Z')], { eventStarts: first.starts }, now);
+  assert.equal(second.moved.length, 1);
+  assert.equal(p.movedText(second.moved[0], zone), 'a moved from 1:00 PM to 2:30 PM.');
+  const nextDay = p.movedEvents([event('a', '2026-11-14T20:30:00Z', '2026-11-14T21:00:00Z')], { eventStarts: second.starts }, now);
+  assert.match(p.movedText(nextDay.moved[0], zone), /from Fri 2:30 PM to Sat 2:30 PM/);
+  assert.equal(p.movedEvents([event('a', '2026-11-13T20:30:00Z', '2026-11-13T21:00:00Z')], { eventStarts: second.starts }, now).moved.length, 0);
+});
+
+test('unanswered mail skips threads you replied in, automated senders, muted senders and earlier nudges', () => {
+  const mail = (id, thread, from) => ({ id, threadId: thread, from, subject: id, snippet: '', labels: [], date: '2026-11-10T15:00:00Z' });
+  const inbox = [mail('lease', 't1', 'Ana <ana@example.com>'), mail('answered', 't2', 'Sam <sam@example.com>'), mail('robot', 't3', 'no-reply@shop.example'), mail('muted', 't4', 'Lee <lee@example.com>'), mail('old', 't5', 'Kim <kim@example.com>')];
+  const items = p.unanswered(inbox, ['t2'], { muted: ['lee@example.com'], nudged: ['t5'] });
+  assert.deepEqual(items.map(x => x.id), ['lease']);
+  assert.equal(p.nudgeText(items, zone), 'Still waiting on you:\n• Ana: lease (Tue)');
+});
+
+test('the Today summary picks the next meeting and counts what is left', () => {
+  const now = at('2026-11-13T15:10:00Z'); // 9:10 AM Chicago
+  const events = [event('done', '2026-11-13T14:00:00Z', '2026-11-13T14:30:00Z'), event('now', '2026-11-13T15:00:00Z', '2026-11-13T15:30:00Z'), event('later', '2026-11-13T18:00:00Z', '2026-11-13T19:00:00Z'), event('clash', '2026-11-13T18:30:00Z', '2026-11-13T19:30:00Z'), event('tomorrow', '2026-11-14T15:00:00Z', '2026-11-14T16:00:00Z')];
+  const today = p.todaySummary(events, 3, now, zone);
+  assert.equal(today.next.title, 'now');
+  assert.equal(today.remaining, 2);
+  assert.equal(today.overlaps, 1);
+  assert.equal(today.waiting, 3);
+  assert.equal(p.todaySummary([], null, now, zone).next, null);
+});
+
+test('snoozed heads-ups return at their time; muted senders and deliveries are handled before the AI', async () => {
+  const h = harness({ emails: [] });
+  await h.watcher.tick({ force: true });
+  h.emails.push({ messageId: 'd1', sender: 'Shop <orders@shop.example>', subject: 'Your package is out for delivery' },
+    { messageId: 'm1', sender: 'Lee <lee@example.com>', subject: 'Muted person' },
+    { messageId: 'n1', sender: 'Ana Ruiz <ana@example.com>', subject: 'Lease' });
+  const saved = h.state; saved.muted = ['lee@example.com']; saved.snoozed = [{ at: '2026-11-13T19:00:00Z', kind: 'meeting', title: 'Standup', text: 'Standup soon', meta: { link: 'https://meet.google.com/x' } }];
+  await h.watcher.deps.save(saved);
+  await h.watcher.tick({ force: true });
+  assert.deepEqual(h.said.map(x => x.kind).sort(), ['delivery', 'meeting']);
+  assert.equal(h.said.find(x => x.kind === 'meeting').meta.link, 'https://meet.google.com/x');
+  assert.equal(h.asked.length, 1);
+  assert.doesNotMatch(h.asked[0].prompt, /Muted person|out for delivery/);
+  assert.deepEqual(h.asked[0].meta.senders, [{ name: 'Ana Ruiz', address: 'ana@example.com', subject: 'Lease' }]);
+  assert.deepEqual(h.state.snoozed, []);
+  assert.equal(h.watcher.status.today.waiting, 1);
+});

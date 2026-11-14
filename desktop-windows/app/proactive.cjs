@@ -15,7 +15,9 @@ const DEFAULTS = Object.freeze({
   quietStart: '22:00',
   quietEnd: '07:00',
   intervalMinutes: 3,
-  openAtLogin: false
+  openAtLogin: false,
+  nudges: true,
+  deliveries: true
 });
 const LEADS = new Set([5, 10, 15, 30]);
 const INTERVALS = new Set([1, 3, 5, 10, 15]);
@@ -23,7 +25,7 @@ const INTERVALS = new Set([1, 3, 5, 10, 15]);
 function sanitizeConfig(input, base = DEFAULTS) {
   const next = { ...DEFAULTS, ...base };
   if (!input || typeof input !== 'object' || Array.isArray(input)) return next;
-  for (const key of ['enabled', 'email', 'meetings', 'conflicts', 'brief', 'quietHours', 'openAtLogin']) if (typeof input[key] === 'boolean') next[key] = input[key];
+  for (const key of ['enabled', 'email', 'meetings', 'conflicts', 'brief', 'quietHours', 'openAtLogin', 'nudges', 'deliveries']) if (typeof input[key] === 'boolean') next[key] = input[key];
   for (const key of ['briefTime', 'quietStart', 'quietEnd']) if (typeof input[key] === 'string' && TIME.test(input[key])) next[key] = input[key];
   if (LEADS.has(input.leadMinutes)) next.leadMinutes = input.leadMinutes;
   if (INTERVALS.has(input.intervalMinutes)) next.intervalMinutes = input.intervalMinutes;
@@ -215,15 +217,80 @@ function fallbackBriefText(events, timeZone) {
 }
 function isQuiet(text) { const value = string(text).trim(); return value.startsWith(QUIET_TOKEN) || (value.length > 0 && QUIET_TOKEN.startsWith(value)); }
 
+// ---------- 0.9.7: acting on heads-ups, deliveries, moved meetings, unanswered mail ----------
+
+function senderAddress(from) {
+  const match = /<([^>\s]+@[^>\s]+)>/.exec(from) || /([^\s<>"]+@[^\s<>"]+)/.exec(from);
+  return match ? match[1].toLowerCase() : '';
+}
+const isMuted = (email, state) => (state.muted || []).includes(senderAddress(email.from));
+const AUTOMATED = /no-?reply|donotreply|do-not-reply|newsletter|notifications?@|mailer-daemon|marketing|digest|news@|updates@/i;
+const isFromPerson = email => !AUTOMATED.test(email.from);
+// Only the moments worth an interruption: out for delivery, arriving today, delivered.
+const DELIVERY = /out for delivery|arriving today|arrives today|will arrive today|(was|has been) delivered|delivered today/i;
+const isDelivery = email => DELIVERY.test(email.subject) || DELIVERY.test(email.snippet.slice(0, 200));
+function deliveryText(email) { return `${senderName(email.from)}: ${email.subject}`; }
+
+// A meeting whose start time changed since the last look. The first sighting of an event only records it.
+function movedEvents(events, state, now) {
+  const known = state.eventStarts || {}, moved = [], next = {};
+  for (const event of events) {
+    if (event.allDay || event.declined || Date.parse(event.end) < now) continue;
+    next[event.id] = event.start;
+    if (known[event.id] && known[event.id] !== event.start) moved.push({ event, from: known[event.id] });
+  }
+  return { moved, starts: next };
+}
+function movedText({ event, from }, timeZone) {
+  const day = iso => localParts(new Date(iso), timeZone).day;
+  const when = iso => (day(iso) === day(event.start) && day(iso) === day(from) ? '' : new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(new Date(iso)) + ' ') + formatTime(iso, timeZone);
+  return `${event.title} moved from ${when(from)} to ${when(event.start)}.` + (event.link ? `\nJoin: ${event.link}` : '');
+}
+
+// Mail from a person that has waited two or more days in a thread you never answered.
+function unanswered(inbox, sentThreads, state) {
+  const nudged = new Set(state.nudged || []), replied = new Set(sentThreads);
+  return inbox.filter(x => x.threadId && !replied.has(x.threadId) && !nudged.has(x.threadId) && isFromPerson(x) && !isMuted(x, state));
+}
+function nudgeText(items, timeZone) {
+  const day = iso => iso ? new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(new Date(iso)) : '';
+  const lines = items.slice(0, 5).map(x => `• ${senderName(x.from)}: ${x.subject}${x.date ? ` (${day(x.date)})` : ''}`);
+  return `Still waiting on you:\n${lines.join('\n')}`;
+}
+
+// What the Today card at the top of Grok Bot's chat shows.
+function todaySummary(events, waiting, now, timeZone) {
+  const today = localParts(new Date(now), timeZone).day;
+  const timed = events.filter(x => !x.allDay && !x.declined && localParts(new Date(x.start), timeZone).day === today);
+  const next = timed.filter(x => Date.parse(x.end) > now).sort((a, b) => Date.parse(a.start) - Date.parse(b.start))[0] || null;
+  return {
+    next: next && { title: next.title, start: next.start, end: next.end, link: next.link },
+    remaining: timed.filter(x => Date.parse(x.start) > now).length,
+    waiting,
+    overlaps: findConflicts(timed, {}, now).length
+  };
+}
+
+// A snoozed heads-up comes back as it was, at the chosen time.
+function dueSnoozes(state, now) {
+  const due = [], later = [];
+  for (const item of state.snoozed || []) (Date.parse(item.at) <= now ? due : later).push(item);
+  return { due, later };
+}
+
 // ---------- The watcher ----------
 // deps: execute(tool,args) → data · connections() → {gmail,calendar} · say(message) → posts a
 // deterministic heads-up · ask(request) → starts an AI turn, throws if the Bot is busy or not set
 // up · load()/save(state) · config() · timeZone() · now().
+// Messages carry `meta` for the card's actions: a join link, or the senders that can be replied to or muted.
+const NUDGE_EVERY = 30 * 60000;
 class Watcher {
   constructor(deps) {
     this.deps = deps;
     this.events = [];
-    this.status = { checking: false, lastCheck: null, nextCheck: null, gmail: 'off', calendar: 'off', error: null };
+    this.waiting = 0;
+    this.lastNudge = 0;
+    this.status = { checking: false, lastCheck: null, nextCheck: null, gmail: 'off', calendar: 'off', error: null, today: null };
     this.lastFetch = 0;
   }
   now() { return this.deps.now ? this.deps.now() : Date.now(); }
@@ -249,26 +316,43 @@ class Watcher {
             this.events = normalizeEvents(await this.deps.execute('GOOGLECALENDAR_EVENTS_LIST', { calendarId: 'primary', timeMin: new Date(now - 3600000).toISOString(), timeMax: new Date(now + 86400000).toISOString(), singleEvents: true, orderBy: 'startTime', maxResults: 50 }));
           } catch (error) { this.status.calendar = 'error'; this.status.error = error.message; }
         }
-        if (linked.gmail && (config.email || config.brief)) {
+        if (linked.gmail && (config.email || config.brief || config.deliveries)) {
           try {
             emails = normalizeEmails(await this.deps.execute('GMAIL_FETCH_EMAILS', { query: 'in:inbox is:unread newer_than:2d -category:promotions -category:social -category:forums', max_results: 25, include_payload: false }));
+            this.waiting = emails.filter(x => isFromPerson(x) && !isMuted(x, state) && !isDelivery(x)).length;
           } catch (error) { this.status.gmail = 'error'; this.status.error = error.message; }
         }
       }
       this.status.nextCheck = new Date(this.lastFetch + interval).toISOString();
       const quiet = inQuietHours(config, now, timeZone);
+      await this.snoozes(state, now, quiet);
       await this.calendar(config, state, now, timeZone, quiet);
       if (emails) await this.inbox(config, state, emails, now, timeZone, quiet);
+      if (fetchNow && config.nudges && this.status.gmail === 'ok' && now - this.lastNudge >= NUDGE_EVERY) await this.nudges(state, now, timeZone, quiet);
       if (fetchNow && briefDue(config, state, now, timeZone) && (this.status.calendar === 'ok' || this.status.gmail === 'ok')) await this.brief(state, emails || [], now, timeZone);
+      this.status.today = this.status.calendar === 'ok' || this.status.gmail === 'ok' ? todaySummary(this.status.calendar === 'ok' ? this.events : [], this.status.gmail === 'ok' ? this.waiting : null, now, timeZone) : null;
       state.lastCheck = this.status.lastCheck;
       await this.deps.save(state);
     } finally { this.status.checking = false; }
     return this.status;
   }
+  async snoozes(state, now, quiet) {
+    const { due, later } = dueSnoozes(state, now);
+    if (!due.length) return;
+    state.snoozed = later;
+    for (const item of due) await this.deps.say({ kind: item.kind, title: item.title, text: item.text, meta: item.meta, silent: quiet });
+  }
   async calendar(config, state, now, timeZone, quiet) {
-    if (config.meetings) for (const event of dueReminders(this.events, state, config, now)) {
-      state.reminded = remember(state.reminded, [reminderKey(event)], 500);
-      await this.deps.say({ kind: 'meeting', title: event.title, text: reminderText(event, now, timeZone), silent: quiet, urgent: true });
+    if (config.meetings) {
+      for (const event of dueReminders(this.events, state, config, now)) {
+        state.reminded = remember(state.reminded, [reminderKey(event)], 500);
+        await this.deps.say({ kind: 'meeting', title: event.title, text: reminderText(event, now, timeZone), meta: { link: event.link }, silent: quiet, urgent: true });
+      }
+      if (this.status.calendar === 'ok') {
+        const { moved, starts } = movedEvents(this.events, state, now);
+        state.eventStarts = starts;
+        for (const change of moved) await this.deps.say({ kind: 'moved', title: `${change.event.title} moved`, text: movedText(change, timeZone), meta: { link: change.event.link }, silent: quiet });
+      }
     }
     if (config.conflicts) for (const conflict of findConflicts(this.events, state, now)) {
       state.conflicts = remember(state.conflicts, [conflict.key], 500);
@@ -282,16 +366,33 @@ class Watcher {
       state.seen = remember(state.seen, emails.map(x => x.id), 1000);
       return;
     }
-    if (!config.email || !fresh.length) return;
-    const batch = fresh.slice(0, 15);
-    const label = `Checked your inbox · ${batch.length} new email${batch.length === 1 ? '' : 's'}`;
-    try {
-      await this.deps.ask({ kind: 'email', label, prompt: emailPrompt(batch, timeZone), count: batch.length, silent: quiet });
-    } catch (error) {
-      if (error.code === 'busy') return; // try again on the next check; nothing is marked as seen
-      await this.deps.say({ kind: 'email', title: label, text: fallbackEmailText(batch), silent: quiet });
+    const wanted = fresh.filter(x => !isMuted(x, state));
+    const deliveries = wanted.filter(isDelivery), mail = wanted.filter(x => !isDelivery(x));
+    if (config.deliveries) for (const email of deliveries) await this.deps.say({ kind: 'delivery', title: 'Delivery', text: deliveryText(email), silent: quiet });
+    if (config.email && mail.length) {
+      const batch = mail.slice(0, 15);
+      const label = `Checked your inbox · ${batch.length} new email${batch.length === 1 ? '' : 's'}`;
+      const meta = { senders: batch.filter(isFromPerson).slice(0, 6).map(x => ({ name: senderName(x.from), address: senderAddress(x.from), subject: x.subject })) };
+      try {
+        await this.deps.ask({ kind: 'email', label, prompt: emailPrompt(batch, timeZone), count: batch.length, meta, silent: quiet });
+      } catch (error) {
+        if (error.code === 'busy') return; // try again on the next check; nothing is marked as seen
+        await this.deps.say({ kind: 'email', title: label, text: fallbackEmailText(batch), meta, silent: quiet });
+      }
     }
     state.seen = remember(state.seen, fresh.map(x => x.id), 1000);
+  }
+  async nudges(state, now, timeZone, quiet) {
+    this.lastNudge = now;
+    try {
+      const sent = normalizeEmails(await this.deps.execute('GMAIL_FETCH_EMAILS', { query: 'in:sent newer_than:10d', max_results: 50, include_payload: false }));
+      const waiting = normalizeEmails(await this.deps.execute('GMAIL_FETCH_EMAILS', { query: 'in:inbox is:important older_than:2d newer_than:7d -category:promotions -category:social -category:updates -category:forums', max_results: 25, include_payload: false }));
+      const items = unanswered(waiting, sent.map(x => x.threadId), state);
+      state.nudged = remember(state.nudged, items.map(x => x.threadId), 500);
+      if (!items.length) return;
+      const meta = { senders: items.slice(0, 6).map(x => ({ name: senderName(x.from), address: senderAddress(x.from), subject: x.subject })) };
+      await this.deps.say({ kind: 'nudge', title: 'Still waiting on you', text: nudgeText(items, timeZone), meta, silent: quiet });
+    } catch {} // a failed nudge check never blocks the rest of the heads-ups
   }
   async brief(state, emails, now, timeZone) {
     const today = localParts(new Date(now), timeZone).day;
@@ -311,5 +412,6 @@ function busy(message) { const error = new Error(message); error.code = 'busy'; 
 module.exports = {
   DEFAULTS, QUIET_TOKEN, sanitizeConfig, execute, normalizeEmails, normalizeEvents, inQuietHours, dueReminders,
   findConflicts, briefDue, takeNewEmails, emailPrompt, briefPrompt, reminderText, conflictText, fallbackEmailText,
-  fallbackBriefText, isQuiet, senderName, Watcher, busy
+  fallbackBriefText, isQuiet, senderName, Watcher, busy, senderAddress, isDelivery, movedEvents, movedText, unanswered,
+  nudgeText, todaySummary, dueSnoozes
 };

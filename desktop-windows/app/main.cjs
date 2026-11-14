@@ -140,7 +140,7 @@ async function startChat(botID,text,delivery,requestID,browserDepth=0,options={}
    const prompt=teamwork.instructions(bot,state,!!delivery,composioConfiguration?composioConfiguration.toolkits:[])+'\n'+await vmStatusNote()+'\nRecent app results (context, not human approval):\n'+feedback+'\n\n'+(session?latest:history.map(x=>`${x.kind==='user'?'Human':x.senderName||bot.name}: ${x.text}`).join('\n\n').slice(-100000));
    let finalText='',continueBrowser=false,browserSteps=browserDepth;
 
-   const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming',...(headsUp?{headsUp:{kind:headsUp.kind,title:headsUp.label}}:{})};state.entries.push(reply);
+   const reply={id:randomUUID(),botID,date:new Date().toISOString(),kind:'bot',provider:installation.name+(choice.model?' · '+choice.model:''),text:'',state:'streaming',...(headsUp?{headsUp:{kind:headsUp.kind,title:headsUp.label,...headsUp.meta}}:{})};state.entries.push(reply);
    const run=cli.runCLI({installation,prompt:prompt+(voiceTurn?teamwork.VOICE_STYLE:''),session,model:voiceTurn&&voicePrefs.fastModel!==false?teamwork.voiceModel(installation.provider,choice.model,voicePrefs.voiceModels?.[installation.provider]):choice.model,fast:voiceTurn&&voicePrefs.fastModel!==false,directory:botDirectory(botID),mcpURL:headsUp?undefined:composioConfiguration?.session.mcp.url,allowConnectedApps:!headsUp&&settings.allowConnectedApps===true,env:await cliKeyEnv(installation.provider),onEvent:event=>{
     if(event.type==='session'){state.sessions||={};state.sessions[key]=event.id;}
     if(event.type==='notice'){state.entries.push({id:randomUUID(),botID,kind:'activity',text:String(event.text).slice(0,400),date:new Date().toISOString()});notify();}
@@ -227,12 +227,12 @@ const watcher=new proactive.Watcher({
  execute:(tool,args)=>proactive.execute(composioConfiguration.key,settings.composioUserID,tool,args),
  load:async()=>proactiveState||=await loadJSON('proactive-state.json',{}),
  save:async value=>{proactiveState=value;await atomicJSON('proactive-state.json',value);},
- say:async({kind,title,text,silent})=>{
+ say:async({kind,title,text,meta,silent})=>{
   const bot=mainBot();if(!bot)return;
-  state.entries.push({id:randomUUID(),botID:bot.id,kind:'bot',text,state:'complete',provider:'Heads-up',headsUp:{kind,title},date:new Date().toISOString()});
+  state.entries.push({id:randomUUID(),botID:bot.id,kind:'bot',text,state:'complete',provider:'Heads-up',headsUp:{kind,title,...headsUpMeta(meta)},date:new Date().toISOString()});
   await atomicJSON('preview-workspace.json',state);notify();headsUpBanner(bot.id,title,text,silent);
  },
- ask:async({kind,label,prompt,count,silent})=>{
+ ask:async({kind,label,prompt,count,meta,silent})=>{
   const bot=mainBot();if(!bot)throw new Error('No main Bot.');
   if(active.has(bot.id)||pendingBots.has(bot.id))throw proactive.busy('The Bot is already answering.');
   // Don't cut into a conversation the human is having right now.
@@ -240,7 +240,7 @@ const watcher=new proactive.Watcher({
   if(recent?.date&&Date.now()-Date.parse(recent.date)<90000)throw proactive.busy('The human is mid-conversation.');
   if(!configuredProviders(bot).length||configuredProviders(bot).some(x=>!x.installation))throw new Error('No AI provider is set up.');
   const requestID=randomUUID();
-  await startChat(bot.id,prompt,undefined,requestID,0,{headsUp:{kind,label},onSettled:reply=>{
+  await startChat(bot.id,prompt,undefined,requestID,0,{headsUp:{kind,label,meta:headsUpMeta(meta)},onSettled:reply=>{
    if(reply.state!=='complete')return;
    if(proactive.isQuiet(reply.text)){
     state.entries=state.entries.filter(x=>x.id!==requestID);
@@ -251,7 +251,18 @@ const watcher=new proactive.Watcher({
   }});
  }
 });
-function proactiveStatus(){const {checking,lastCheck,nextCheck,gmail,calendar,error}=watcher.status;return {config:headsUpConfig(),composio:!!composioConfiguration,checking,lastCheck,nextCheck,gmail,calendar,error};}
+function proactiveStatus(){const {checking,lastCheck,nextCheck,gmail,calendar,error,today}=watcher.status;return {config:headsUpConfig(),composio:!!composioConfiguration,checking,lastCheck,nextCheck,gmail,calendar,error,today,muted:proactiveState?.muted||[]};}
+// What a heads-up card may act on: an https join link, and up to six senders to reply to or mute.
+function headsUpMeta(meta){
+ const out={},clip=(value,limit)=>typeof value==='string'?value.slice(0,limit):'';
+ if(typeof meta?.link==='string'&&/^https:\/\/[^\s]+$/.test(meta.link)&&meta.link.length<=2000)out.link=meta.link;
+ if(Array.isArray(meta?.senders))out.senders=meta.senders.slice(0,6).map(x=>({name:clip(x?.name,120),address:/^[^\s@<>]+@[^\s@<>]+$/.test(x?.address||'')?x.address.slice(0,200):'',subject:clip(x?.subject,200)})).filter(x=>x.name||x.address);
+ return out;
+}
+function headsUpCard(id){const entry=state.entries.find(x=>x.id===id&&x.kind==='bot'&&x.headsUp);if(!entry)throw new PublicError('That heads-up is no longer in the chat.');return entry;}
+// Turns a card into one quiet line, so the chat keeps a record without the noise.
+function quietLine(entry,text){entry.kind='activity';entry.text=text;delete entry.state;delete entry.provider;pruneQuietLines();}
+const clockTime=date=>new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit'}).format(date);
 function pushProactive(){if(window&&!window.isDestroyed())window.webContents.send('proactive:changed',proactiveStatus());}
 function applyLoginItem(){const config=headsUpConfig();if(!['win32','darwin'].includes(process.platform))return;try{app.setLoginItemSettings({openAtLogin:config.enabled&&config.openAtLogin,args:['--background']});}catch{}}
 async function checkHeadsUps(force=false){if(!state||!composioConfiguration||!headsUpConfig().enabled)return proactiveStatus();await watcher.tick({force});pushProactive();return proactiveStatus();}
@@ -633,6 +644,20 @@ function configureIPC() {
   if(settings.proactive.enabled&&!before.enabled)checkHeadsUps(true).catch(()=>{});
   pushProactive();return proactiveStatus();
  });
+ handle('headsup:snooze',async(id,minutes)=>{
+  await ensureState();if(![60,180].includes(minutes))throw new PublicError('Choose 1 or 3 hours.');
+  const entry=headsUpCard(id),at=new Date(Date.now()+minutes*60000),saved=await watcher.deps.load();
+  const {kind,title,...meta}=entry.headsUp;saved.snoozed=[...(saved.snoozed||[]),{at:at.toISOString(),kind,title,text:entry.text,meta}].slice(-50);
+  await watcher.deps.save(saved);quietLine(entry,`Snoozed until ${clockTime(at)} · ${title||'Heads-up'}`);
+  await atomicJSON('preview-workspace.json',state);notify();return state;
+ });
+ handle('headsup:dismiss',async id=>{await ensureState();const entry=headsUpCard(id);quietLine(entry,`Dismissed · ${entry.headsUp.title||'Heads-up'}`);await atomicJSON('preview-workspace.json',state);notify();return state;});
+ handle('headsup:mute',async(address,muted)=>{
+  await ensureState();if(typeof address!=='string'||!/^[^\s@<>]+@[^\s@<>]+$/.test(address)||address.length>200)throw new PublicError('That sender can’t be muted.');
+  const saved=await watcher.deps.load(),value=address.toLowerCase();saved.muted=(saved.muted||[]).filter(x=>x!==value);if(muted!==false)saved.muted=[...saved.muted,value].slice(-500);
+  await watcher.deps.save(saved);pushProactive();return proactiveStatus();
+ });
+ handle('headsup:join',async url=>{if(typeof url!=='string'||!/^https:\/\/[^\s]+$/.test(url)||url.length>2000)throw new PublicError('That meeting link can’t be opened.');await shell.openExternal(url);});
  handle('proactive:check',async()=>{
   await ensureState();if(!headsUpConfig().enabled)throw new PublicError('Turn on heads-ups first.');if(!composioConfiguration)throw new PublicError('Connect Gmail or Google Calendar in Connect apps first.');
   try{return await checkHeadsUps(true);}catch(error){throw new PublicError('The check could not finish. Try again in a minute.');}

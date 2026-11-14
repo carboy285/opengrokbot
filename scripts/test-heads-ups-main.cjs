@@ -14,6 +14,7 @@ let platform = 'linux';
 Object.defineProperty(process, 'platform', { get: () => platform });
 
 // ---- Fake Electron ----
+const opened = [];
 const handlers = new Map(), sent = [], notifications = [], trays = [], loginItems = [], windows = [];
 let ready;
 const whenReady = new Promise(resolve => { ready = resolve; });
@@ -31,7 +32,7 @@ const fakeElectron = {
   BrowserWindow, Tray, Notification, Menu: { buildFromTemplate: template => template },
   ipcMain: { handle: (name, callback) => handlers.set(name, callback), on() {}, removeHandler() {} },
   safeStorage: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from('enc:' + value), decryptString: value => value.toString().slice(4), encryptStringAsync: async value => Buffer.from('enc:' + value), decryptStringAsync: async value => ({ result: value.toString().slice(4) }) },
-  dialog: {}, shell: { openExternal: async () => {} }, WebContentsView: class {}, nativeImage: {},
+  dialog: {}, shell: { openExternal: async url => { opened.push(url); } }, WebContentsView: class {}, nativeImage: {},
   protocol: { registerSchemesAsPrivileged() {}, handle() {} }, globalShortcut: { register() { return true; }, unregisterAll() {} },
   powerSaveBlocker: { start: () => 1, stop() {}, isStarted: () => false }, clipboard: { writeText() {} }, systemPreferences: {}, screen: {}, session: {}
 };
@@ -133,6 +134,37 @@ const until = async (check, label) => { for (let i = 0; i < 200; i++) { const re
   await value('proactive:check');
   await new Promise(r => setTimeout(r, 300));
   assert.equal(fs.readFileSync(invocations, 'utf8').trim().split('\n').length, before);
+
+  // 4b) Cards carry what their actions need, and the actions work.
+  workspace = await value('workspace:load');
+  const meetingCard = workspace.entries.find(x => x.headsUp?.kind === 'meeting');
+  assert.equal(meetingCard.headsUp.link, 'https://meet.google.com/abc');
+  const emailCard = workspace.entries.find(x => x.kind === 'bot' && x.headsUp?.kind === 'email');
+  assert.deepEqual(emailCard.headsUp.senders, [{ name: 'Ana Ruiz', address: 'ana@example.com', subject: 'Lease' }]);
+  assert.equal((await invoke('headsup:snooze', meetingCard.id, 7)).ok, false, 'only 1 or 3 hours');
+  await value('headsup:snooze', meetingCard.id, 60);
+  workspace = await value('workspace:load');
+  assert.match(workspace.entries.find(x => x.id === meetingCard.id).text, /^Snoozed until .+ · Standup$/);
+  const savedState = JSON.parse(fs.readFileSync(path.join(dataDir, 'proactive-state.json'), 'utf8'));
+  assert.equal(savedState.snoozed.length, 1);
+  assert.equal(savedState.snoozed[0].meta.link, 'https://meet.google.com/abc');
+  await value('headsup:dismiss', emailCard.id);
+  workspace = await value('workspace:load');
+  assert.equal(workspace.entries.find(x => x.id === emailCard.id).kind, 'activity');
+  assert.equal((await invoke('headsup:dismiss', emailCard.id)).ok, false, 'a collapsed card cannot be acted on again');
+  assert.equal((await invoke('headsup:join', 'javascript:alert(1)')).ok, false);
+  await value('headsup:join', 'https://meet.google.com/abc');
+  assert.deepEqual(opened, ['https://meet.google.com/abc']);
+  assert.equal((await invoke('headsup:mute', 'not an address', true)).ok, false);
+  const muted = await value('headsup:mute', 'Ana@Example.com', true);
+  assert.deepEqual(muted.muted, ['ana@example.com']);
+  const turnsBefore = fs.readFileSync(invocations, 'utf8').trim().split('\n').length;
+  emails.push({ messageId: 'new-3', sender: 'Ana Ruiz <ana@example.com>', subject: 'One more thing' });
+  await value('proactive:check');
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(fs.readFileSync(invocations, 'utf8').trim().split('\n').length, turnsBefore, 'muted senders never reach the AI');
+  assert.deepEqual((await value('headsup:mute', 'ana@example.com', false)).muted, []);
+  assert.ok((await value('proactive:status')).today, 'status includes the Today summary');
 
   // 5) Tray and window: closing hides to the tray while heads-ups are on; turning them off removes the tray.
   const tray = trays.at(-1);

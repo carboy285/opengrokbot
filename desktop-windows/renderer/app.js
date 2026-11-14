@@ -63,7 +63,7 @@ async function organize(bot,changes){try{if(bridge.organizeBot)workspace=await r
 const dialog = $('#panel');
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 5000); }
 // ---------- Heads-ups ----------
-const headsUpKinds={email:['✉','Inbox'],meeting:['◷','Up next'],conflict:['⚠','Calendar'],brief:['☀','Morning brief']};
+const headsUpKinds={email:['✉','Inbox'],meeting:['◷','Up next'],conflict:['⚠','Calendar'],brief:['☀','Morning brief'],moved:['↻','Moved'],delivery:['▣','Delivery'],nudge:['↩','Waiting on you']};
 const headsUpWorking={email:'Reading your new email',brief:'Putting your brief together'};
 let knownHeadsUps=null,proactiveStatus=null,headsUpRefresh=null;
 const banner={element:null,botID:null,timer:null};
@@ -86,26 +86,125 @@ function noticeHeadsUps(){
   showBanner(entry);
  }
 }
+// The banner can be flicked away. It tracks the pointer 1:1, resists a downward pull, projects the
+// flick's momentum on release and hands the release velocity to a critically damped spring.
+const reducedMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+const rubberband=(distance,dimension,constant=0.55)=>(distance*dimension*constant)/(dimension+constant*Math.abs(distance));
+const projectFlick=(velocity,rate=0.998)=>velocity/1000*rate/(1-rate);
+function springTo(element,from,target,velocity,done){
+ const omega=2*Math.PI/0.35;let x=from,v=velocity,last=performance.now();
+ cancelAnimationFrame(element.springFrame);
+ const step=now=>{const dt=Math.min(0.032,(now-last)/1000);last=now;const a=-omega*omega*(x-target)-2*omega*v;v+=a*dt;x+=v*dt;
+  element.style.transform=`translate(-50%,${x}px)`;element.dragY=x;
+  if(Math.abs(x-target)<0.5&&Math.abs(v)<20){element.style.transform=`translate(-50%,${target}px)`;element.dragY=target;done?.();return;}
+  element.springFrame=requestAnimationFrame(step);};
+ element.springFrame=requestAnimationFrame(step);
+}
+function wireBannerGesture(element){
+ let start=null,history=[];
+ element.addEventListener('pointerdown',event=>{
+  if(event.button!==0||event.target.closest('.heads-up-close'))return;
+  cancelAnimationFrame(element.springFrame);clearTimeout(banner.timer);
+  start={y:event.clientY-(element.dragY||0),moved:false,id:event.pointerId};history=[{y:event.clientY,t:event.timeStamp}];
+  element.setPointerCapture(event.pointerId);element.classList.add('dragging');
+ });
+ element.addEventListener('pointermove',event=>{
+  if(!start||event.pointerId!==start.id)return;
+  const dy=event.clientY-start.y;if(Math.abs(dy)>6)start.moved=true;
+  history.push({y:event.clientY,t:event.timeStamp});if(history.length>6)history.shift();
+  const y=dy<0?dy:rubberband(dy,element.offsetHeight);
+  element.style.transform=`translate(-50%,${y}px)`;element.dragY=y;
+ });
+ const release=event=>{
+  if(!start||event.pointerId!==start.id)return;
+  const moved=start.moved;start=null;element.classList.remove('dragging');
+  const first=history[0],last=history.at(-1),dt=Math.max(1,last.t-first.t),velocity=(last.y-first.y)/dt*1000;
+  if(!moved){element.style.transform='';element.dragY=0;if(event.type==='pointerup'&&!event.target.closest('.heads-up-close')){const id=banner.botID;hideBanner();if(id)selectBot(id);}return;}
+  const y=element.dragY||0;
+  if(y+projectFlick(velocity)< -40)springTo(element,y,-(element.offsetHeight+90),Math.min(velocity,-400),()=>hideBanner(true));
+  else springTo(element,y,0,velocity,()=>{element.style.transform='';banner.timer=setTimeout(hideBanner,5000);});
+ };
+ element.addEventListener('pointerup',release);element.addEventListener('pointercancel',release);
+}
 function showBanner(entry){
  const bot=workspace.bots.find(x=>x.id===entry.botID);if(!bot)return;
  if(!banner.element){
   banner.element=node('div','heads-up-banner glass');banner.element.setAttribute('role','status');
-  const open=button('',()=>{const id=banner.botID;hideBanner();selectBot(id);},'heads-up-open');
-  const close=button('×',hideBanner,'heads-up-close');close.setAttribute('aria-label','Dismiss heads-up');
+  const open=node('div','heads-up-open');open.tabIndex=0;open.setAttribute('role','button');
+  open.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();const id=banner.botID;hideBanner();if(id)selectBot(id);}});
+  const close=button('×',()=>hideBanner(),'heads-up-close');close.setAttribute('aria-label','Dismiss heads-up');
   banner.element.append(open,close);
   banner.element.addEventListener('pointerenter',()=>clearTimeout(banner.timer));
-  banner.element.addEventListener('pointerleave',()=>{banner.timer=setTimeout(hideBanner,4000);});
+  banner.element.addEventListener('pointerleave',()=>{if(!banner.element.classList.contains('dragging'))banner.timer=setTimeout(hideBanner,4000);});
+  if(!reducedMotion())wireBannerGesture(banner.element);
   $('.conversation').append(banner.element);
  }
+ // Several heads-ups at once become one banner: "3 heads-ups", showing the latest.
+ const visible=banner.element.classList.contains('visible')&&banner.botID===bot.id;banner.count=visible?(banner.count||1)+1:1;
  const [glyph,label]=headsUpKinds[entry.headsUp.kind]||['✦','Heads-up'];
  const text=entry.text.split('\n').map(x=>x.trim()).find(Boolean)||'';
+ const heading=banner.count>1?`${bot.name} · ${banner.count} heads-ups`:`${bot.name} · ${label}`;
  banner.botID=bot.id;
- banner.element.firstChild.replaceChildren(avatar(bot),append(node('span','heads-up-copy'),node('strong','',`${bot.name} · ${label}`),node('span','',text)),Object.assign(node('span','heads-up-glyph',glyph),{ariaHidden:'true'}));banner.element.firstChild.lastChild.dataset.kind=entry.headsUp.kind;
+ const mark=node('span','heads-up-glyph',glyph);mark.dataset.kind=entry.headsUp.kind;mark.setAttribute('aria-hidden','true');
+ banner.element.firstChild.replaceChildren(avatar(bot),append(node('span','heads-up-copy'),node('strong','',heading),node('span','',text)),mark);
  banner.element.firstChild.setAttribute('aria-label',`Open ${bot.name}: ${text}`);
+ cancelAnimationFrame(banner.element.springFrame);banner.element.style.transform='';banner.element.dragY=0;
  banner.element.classList.add('visible');
  clearTimeout(banner.timer);banner.timer=setTimeout(hideBanner,8000);
 }
-function hideBanner(){clearTimeout(banner.timer);banner.element?.classList.remove('visible');banner.botID=null;}
+function hideBanner(flicked=false){
+ clearTimeout(banner.timer);const element=banner.element;if(!element)return;
+ // A flicked banner has already left; drop it without sliding back in first.
+ if(flicked){element.classList.add('instant');element.classList.remove('visible');element.style.transform='';element.dragY=0;requestAnimationFrame(()=>element.classList.remove('instant'));}
+ else element.classList.remove('visible');
+ banner.botID=null;banner.count=0;
+}
+// ---- Acting on a heads-up ----
+// Draft and plan actions fill in the message box so you can read and edit before anything is sent.
+function prefill(bot,text){drafts.set(bot.id,text);persistDrafts();if(selected!==bot.id)selectBot(bot.id);const draft=$('#draft');draft.value=text;draft.dispatchEvent(new Event('input'));draft.focus();draft.setSelectionRange(text.length,text.length);}
+function toastAction(text,label,action){const box=$('#toast');box.replaceChildren(node('span','',text),button(label,()=>{box.classList.remove('visible');action();},'toast-action'));box.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.classList.remove('visible'),6000);}
+// A small menu that grows out of the button that opened it.
+function popover(anchor,items){
+ document.querySelector('.heads-up-menu')?.remove();
+ const menu=node('div','heads-up-menu');menu.setAttribute('role','menu');
+ for(const [label,action] of items){const item=button(label,()=>{close();action();},'heads-up-menu-item');item.setAttribute('role','menuitem');menu.append(item);}
+ const box=anchor.getBoundingClientRect(),host=$('.conversation').getBoundingClientRect();
+ menu.style.left=`${box.left-host.left}px`;menu.style.top=`${box.bottom-host.top+6}px`;
+ $('.conversation').append(menu);menu.querySelector('button')?.focus();
+ const away=event=>{if(!menu.contains(event.target)&&event.target!==anchor)close();},key=event=>{if(event.key==='Escape'){close();anchor.focus();}};
+ function close(){menu.remove();document.removeEventListener('pointerdown',away,true);document.removeEventListener('keydown',key,true);}
+ document.addEventListener('pointerdown',away,true);document.addEventListener('keydown',key,true);
+}
+async function headsUpCall(operation,done){try{const value=await result(operation);if(value?.entries){workspace=value;render();}done?.(value);}catch(error){toast(error.message);}}
+function headsUpActions(bot,entry){
+ const tag=entry.headsUp,row=node('div','heads-up-actions'),senders=(tag.senders||[]).filter(x=>x.name||x.address);
+ const reply=sender=>prefill(bot,`Draft a reply to ${sender.name||sender.address}${sender.subject?` about “${sender.subject}”`:''}. Show it to me before sending.`);
+ if(tag.link&&['meeting','moved'].includes(tag.kind))row.append(button('Join',()=>headsUpCall(bridge.headsUpJoin(tag.link)),'pill primary'));
+ if(senders.length===1)row.append(button('Draft a reply',()=>reply(senders[0]),'pill'));
+ else if(senders.length>1){const pick=button('Draft a reply…',()=>popover(pick,senders.map(x=>[`Reply to ${x.name||x.address}`,()=>reply(x)])),'pill');pick.setAttribute('aria-haspopup','menu');row.append(pick);}
+ if(tag.kind==='conflict')row.append(button('Help me choose',()=>prefill(bot,`Help me decide what to do about this overlap: ${entry.text.split('\n')[0]}`),'pill'));
+ if(tag.kind==='brief')row.append(button('Plan my day',()=>prefill(bot,'Help me plan the rest of today around my calendar.'),'pill'));
+ const later=button('Snooze',()=>popover(later,[['For 1 hour',()=>headsUpCall(bridge.headsUpSnooze(entry.id,60))],['For 3 hours',()=>headsUpCall(bridge.headsUpSnooze(entry.id,180))]]),'pill');later.setAttribute('aria-haspopup','menu');row.append(later);
+ const mutable=senders.filter(x=>x.address);
+ if(mutable.length){const more=button('⋯',()=>popover(more,mutable.map(x=>[`Stop heads-ups from ${x.name||x.address}`,()=>headsUpCall(bridge.headsUpMute(x.address,true),value=>{proactiveStatus=value;toastAction(`You won’t hear about mail from ${x.name||x.address}.`,'Undo',()=>headsUpCall(bridge.headsUpMute(x.address,false),next=>{proactiveStatus=next;}));})])),'pill icon-pill');more.setAttribute('aria-label','More actions');more.setAttribute('aria-haspopup','menu');row.append(more);}
+ const done=button('Done',()=>headsUpCall(bridge.headsUpDismiss(entry.id)),'pill quiet-pill');done.title='Collapse this heads-up to one line';row.append(done);
+ return row;
+}
+// ---- Today: a glance at the rest of the day, pinned to the top of the main Bot's chat ----
+function relativeStart(iso){const minutes=Math.round((Date.parse(iso)-Date.now())/60000);return minutes<=0?'now':minutes<60?`in ${minutes} min`:`at ${clock(iso)}`;}
+function todayCard(bot){
+ const today=proactiveStatus?.config?.enabled&&proactiveStatus.today;if(!bot?.isMain||!today)return null;
+ const card=node('section','today-card glass');card.setAttribute('aria-label','Today');
+ const lead=node('div','today-next');
+ if(today.next){append(lead,node('span','today-label','Next'),node('strong','',today.next.title),node('time','today-when',relativeStart(today.next.start)));if(today.next.link)lead.append(button('Join',()=>headsUpCall(bridge.headsUpJoin(today.next.link)),'pill primary today-join'));}
+ else append(lead,node('span','today-label','Today'),node('strong','','No more meetings today'));
+ const facts=node('div','today-facts');
+ if(today.remaining>1)facts.append(node('span','',`${today.remaining} meetings left`));
+ if(today.waiting!=null)facts.append(node('span','',today.waiting?`${today.waiting} email${today.waiting===1?'':'s'} waiting on you`:'Inbox clear'));
+ if(today.overlaps)facts.append(Object.assign(node('span','today-warn',`${today.overlaps} overlap${today.overlaps===1?'':'s'}`),{title:'Two events overlap'}));
+ append(card,lead,facts.children.length&&facts);return card;
+}
+setInterval(()=>{const when=document.querySelector('.today-when');if(when&&proactiveStatus?.today?.next)when.textContent=relativeStart(proactiveStatus.today.next.start);},30000);
 function showHeadsUpBadge(value){
  let badge=$('#headsup-state');
  if(!value?.config?.enabled){badge?.remove();return;}
@@ -117,7 +216,7 @@ function showHeadsUpBadge(value){
 async function renderHeadsUps(page){
  const body=node('div','heads-up-settings');page.append(body);
  if(!bridge.proactiveStatus){append(body,node('h2','','Let Grok Bot reach out first'),node('p','muted','Open the installed desktop app to turn on heads-ups. They run in the background on this computer.'));return;}
- const save=async changes=>{try{proactiveStatus=await result(bridge.proactiveConfigure({...proactiveStatus.config,...changes}));showHeadsUpBadge(proactiveStatus);draw();}catch(error){toast(error.message);draw();}};
+ const save=async changes=>{try{proactiveStatus=await result(bridge.proactiveConfigure({...proactiveStatus.config,...changes}));showHeadsUpBadge(proactiveStatus);if(currentBot()?.isMain)renderMessages(currentBot());draw();}catch(error){toast(error.message);draw();}};
  const toggle=(label,key,detail,extra)=>{
   const row=node('div','setting-row toggle-row');const check=node('input','switch');check.type='checkbox';check.setAttribute('role','switch');check.checked=!!proactiveStatus.config[key];check.disabled=key!=='enabled'&&!proactiveStatus.config.enabled;check.setAttribute('aria-label',label);
   check.addEventListener('change',()=>save({[key]:check.checked}));
@@ -141,7 +240,10 @@ async function renderHeadsUps(page){
    toggle('Important new email','email','Mail from real people and anything time-sensitive. Newsletters and promotions stay quiet.'),
    toggle('Upcoming meetings','meetings','A reminder with the join link.',lead),
    toggle('Double-bookings','conflicts','When two events on your calendar overlap.'),
-   toggle('Morning brief','brief','Your day at a glance: meetings, gaps and email waiting on you.',time('briefTime','Morning brief time'))));
+   toggle('Morning brief','brief','Your day at a glance: meetings, gaps and email waiting on you.',time('briefTime','Morning brief time')),
+   toggle('Still waiting on you','nudges','Mail from people you haven’t answered in two days.'),
+   toggle('Deliveries','deliveries','Packages out for delivery or delivered today.')));
+  if(proactiveStatus.muted?.length){const list=node('div','settings-card muted-list');for(const address of proactiveStatus.muted)list.append(append(node('div','setting-row'),node('span','',address),button('Unmute',()=>headsUpCall(bridge.headsUpMute(address,false),value=>{proactiveStatus=value;draw();}),'pill')));append(body,node('p','settings-label','Muted senders'),list);}
   append(body,node('p','settings-label','When'),append(node('div','settings-card'),
    toggle('Quiet hours','quietHours','Heads-ups still land in the chat, without a sound or banner.',append(node('span','time-range'),time('quietStart','Quiet hours start'),node('span','muted','to'),time('quietEnd','Quiet hours end'))),
    toggle('Open at sign-in','openAtLogin','Starts in the tray when you sign in to Windows. Closing the window keeps heads-ups running; quit from the tray icon.')));
@@ -163,7 +265,7 @@ async function persist(next) {
   try { await result(bridge.save(next)); workspace = next; return true; }
   catch (error) { toast(error.message); return false; }
 }
-function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;if(banner.botID===id)hideBanner();const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});if(bot?.unread){bot.unread=false;bridge.organizeBot?.(id,{unread:null}).catch?.(()=>{});}render(); }
+function selectBot(id) { if (currentBot()) drafts.set(selected, $('#draft').value); selected = id;if(banner.botID===id)hideBanner();document.querySelector('.heads-up-menu')?.remove();const bot=currentBot();if(bot)bot.lastUsedAt=new Date().toISOString();bridge.touchBot?.(id).then(response=>{if(!response.ok)toast(response.error);}).catch(()=>{});if(bot?.unread){bot.unread=false;bridge.organizeBot?.(id,{unread:null}).catch?.(()=>{});}render(); }
 function render() {
   const chatMatches=new Set(search?workspace.entries.filter(x=>x.text.toLowerCase().includes(search.toLowerCase())).map(x=>x.botID):[]);
   const matches=bot=>(!bot.hidden||!!search)&&(`${bot.name} ${bot.purpose}`.toLowerCase().includes(search.toLowerCase())||chatMatches.has(bot.id))&&(folderFilter==='*'||(bot.folder||'')===folderFilter);
@@ -238,11 +340,12 @@ function renderMessages(bot){
   if(!row||row.kind!==kind){row?.remove();row=node('div',kind==='activity'?'activity':`message-row ${kind==='botnote'?'bot botnote':entry.kind}${entry.senderBotID&&entry.kind==='bot'?' from-bot':''}`);row.kind=kind;row.dataset.entry=entry.id;row.append(node('div','message-body'));rows.set(entry.id,row);if(entry.headsUp&&entry.kind==='bot'){row.classList.add('heads-up');if(!initial)row.classList.add('arriving');}}
   const canAnswer=entry.id===lastTalkID&&entry.kind==='bot'&&entry.state!=='streaming'&&!running.has(bot.id);
   const key=[entry.text,entry.state||'',entry.id===lastUserID,canAnswer,entry.id===lastEntryID,entry.senderName||'',entry.provider||''].join('\u0001');
-  const body=row.firstElementChild;if(row.renderKey!==key){row.renderKey=key;row.toolsKey='';body.replaceChildren();renderEntryBody(bot,entry,body,{isLastUser:entry.id===lastUserID,canAnswer,canSuggest:canAnswer&&entry.id===lastEntryID});row.dataset.state=entry.state||'';}
+  const body=row.firstElementChild;if(row.renderKey!==key){row.renderKey=key;row.toolsKey='';body.replaceChildren();renderEntryBody(bot,entry,body,{isLastUser:entry.id===lastUserID,canAnswer,canSuggest:canAnswer&&entry.id===lastEntryID});if(entry.headsUp&&entry.kind==='bot'&&entry.state==='complete')(body.querySelector(':scope>.stack')||body).append(headsUpActions(bot,entry));row.dataset.state=entry.state||'';}
   if(kind==='message'&&!(entry.state==='streaming'&&!entry.text)){const key=`${entry.reaction||''}|${entry.pinned?1:0}|${entry.state||''}|${running.has(bot.id)}|${entry.id===lastEntryID}`;const stack=body.querySelector(':scope>.stack')||body;if(row.toolsKey!==key||!stack.querySelector(':scope>.message-tools')){stack.querySelector(':scope>.message-tools')?.remove();row.toolsKey=key;const tools=messageTools(bot,entry,entry.id===lastEntryID);const delivered=stack.querySelector(':scope>.delivery-state');if(delivered)tools.append(delivered);stack.append(tools);}}
   if(messages.children[index]!==row)messages.insertBefore(row,messages.children[index]||null);index++;
  }
  for(const [id,row] of rows)if(!live.has(id)){row.remove();rows.delete(id);}
+ const today=todayCard(bot);if(today){today.dataset.extra='true';messages.prepend(today);}
  const pending=pendingSends.get(bot.id);
  if(pending&&!live.has(pending.id)){const row=append(node('div','message-row user pending'),append(node('div','message-body'),node('div','bubble',pending.text),node('small','delivery-state',pending.failed?'Failed to send':'Sending…')));row.dataset.extra='true';if(pending.failed)row.firstChild.append(button('Retry sending',()=>submitMessage(bot,pending.text,pending.id)));messages.append(row);}
  if(!entries(bot).length&&!pending){const cards=node('div','starters');for(const idea of starters(bot.name,bot.purpose))cards.append(append(button('',()=>submitMessage(bot,idea,undefined,[]),'starter'),node('span','',idea)));const empty=append(node('div','empty empty-chat'),avatar(bot),node('h2','',bot.name),node('p','',bot.purpose||'What’s on your mind?'),cards);empty.dataset.extra='true';messages.append(empty);}
@@ -618,8 +721,8 @@ for(const control of document.querySelectorAll('[data-window]')) control.addEven
 window.addEventListener('blur',()=>{focusGeneration++;for(const secret of document.querySelectorAll('.revealed-secret')){secret.textContent='';secret.hidden=true;}for(const field of document.querySelectorAll('input[type=password]'))field.value='';});
 document.addEventListener('keydown',event=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key==='n'){event.preventDefault();showNewBot();}else if(event.key===','){event.preventDefault();showSettings();}else if(event.key==='f'){event.preventDefault();$('#search-button').click();}else if(event.key==='Enter'&&!dialog.open){event.preventDefault();$('#composer').requestSubmit();}});
 bridge.onChange?.(value=>{workspace=value.workspace;running=new Set(value.running);noticeHeadsUps();render();});
-bridge.onProactiveChange?.(value=>{proactiveStatus=value;showHeadsUpBadge(value);headsUpRefresh?.();});
-bridge.proactiveStatus?.().then(response=>{if(response.ok){proactiveStatus=response.value;showHeadsUpBadge(response.value);}}).catch(()=>{});
+bridge.onProactiveChange?.(value=>{proactiveStatus=value;showHeadsUpBadge(value);headsUpRefresh?.();if(currentBot()?.isMain)renderMessages(currentBot());});
+bridge.proactiveStatus?.().then(response=>{if(response.ok){proactiveStatus=response.value;showHeadsUpBadge(response.value);if(currentBot()?.isMain)renderMessages(currentBot());}}).catch(()=>{});
 bridge.onOpenBot?.(id=>{if(workspace.bots.some(bot=>bot.id===id))selectBot(id);});
 function showCloudStatus(value){
  const old=cloudStatus?.phase;cloudStatus=value;let badge=$('#phone-state');if(!badge){badge=button('',()=>showSettings('Computer'),'phone-state');badge.id='phone-state';$('#status-button').before(badge);}badge.textContent=value.phase==='approval-required'?'Approve your iPhone':value.enabled?value.phase==='offline'?'Phone connection offline · retrying':value.phase==='connecting'?'Connecting your iPhone…':'Phone access ready':'Connect your iPhone';badge.title=value.feedback;badge.dataset.state=value.phase;if(value.phase==='approval-required'&&old!==value.phase)toast(value.feedback);
